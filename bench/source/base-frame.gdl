@@ -122,6 +122,100 @@
 				  (half (the-child height))))))))))
 
 
+
+(define-object back-frame (base-object)
+
+  :input-slots
+  ((width (+ 3 56))
+   (length 19)
+   (height (+ 1/2 3))
+
+   (display-controls (list :color :orange) :defaulting)
+   )
+
+  :objects
+  ((ends :type '2x4 ;;flag replace with polygon-projections for cut
+	 :sequence (:size 2)
+	 :side (ecase (the-child index) (0 :left) (1 :right))
+	 :pseudo-inputs (side)
+	 :center (ecase (the-child side)
+		   (:left (translate (the (face-center :left))
+				     :right (half (the-child height))))
+		   (:right (translate (the (face-center :right))
+				      :left (half (the-child height)))))
+	 :orientation (alignment :top (the (face-normal-vector :right))
+				 :rear (the (face-normal-vector :rear))))
+
+
+   (rails :type '2x4 
+	  :sequence (:size 4)
+	  :side (ecase (the-child index) (0 :datum) (1 :datum*) (2 :front) (3 :rear))
+	  :datum (the (rails 0))
+	  :datum* (the (rails 1))
+	  :pseudo-inputs (side datum datum*)
+	  :hidden? (case (the-child side)
+		     ((:front :rear) nil)
+		     (otherwise t))
+	  :center (ecase (the-child side)
+		    (:rear (translate (the (face-center :rear))
+				      :front (half (the-child height))))
+		    (:datum (translate (the (face-center :front))
+				       :rear (half (the-child height))))
+		    (:datum* (translate (the-child datum center)
+				       :rear
+				       (let ((datum (least #'get-y (the-child datum bounding-box))))
+					 (3d-distance
+					  datum
+					  (inter-line-plane datum
+							    (the (face-normal-vector :front))
+							    (the (face-center :front))
+							    (the (face-normal-vector :front)))))))
+		    (:front (translate (the-child datum* center)
+				       :top
+				       (let ((datum (the-child datum*
+							       (closest-vertex
+								(the (:vertex :top :left :front))))))
+					 (3d-distance
+					  datum
+					  (inter-line-plane datum
+							    (the (face-normal-vector :top))
+							    (the (face-center :top))
+							    (the (face-normal-vector :top))))))))
+									
+					
+
+		    
+
+		    
+	  :length (- (the width) (the (ends 0) height) (the (ends 1) height))
+	  :orientation (alignment :top (rotate-vector-d (the (face-normal-vector :rear))
+							(ecase (the-child side)
+							  (:datum 15)
+							  (:datum* 15)
+							  (:front 15)
+							  (:rear 0))
+							(the (face-normal-vector :right)))
+				  :rear (the (face-normal-vector :left))))
+
+   ))
+		   
+	 
+(define-object-amendment box ()
+  :functions
+  ((closest-vertex (point)
+		   (least #'(lambda(vertex)
+			      (3d-distance vertex point))
+			  (list (the (:vertex :top :right :rear))
+				(the (:vertex :top :left :rear))
+				(the (:vertex :top :right :front))
+				(the (:vertex :top :left :front))
+				(the (:vertex :bottom :right :rear))
+				(the (:vertex :bottom :left :rear))
+				(the (:vertex :bottom :right :front))
+				(the (:vertex :bottom :left :front)))))))
+				
+
+
 (define-object 4x4-test (box)
   :computed-slots
   ((length 23)
