@@ -1,5 +1,28 @@
 (in-package :bench)
 
+(define-object assembly (base-object)
+
+  :computed-slots ((display-controls (list :color :orange)))
+  
+  :objects
+  ((base-frame :type 'base-frame)
+
+   (back-frame :type 'back-frame
+
+	       :orientation (alignment :top
+				       (rotate-vector-d 
+					(the (face-normal-vector :top))
+					(- 90 15)
+					(the (face-normal-vector :right))))
+
+
+;;	       :center (translate (the center)
+	       ;;:up (+ (half (the-child length)) 4))
+				  
+
+	       )))
+
+
 (define-object base-frame (base-object)
 
   :input-slots
@@ -131,10 +154,15 @@
    (height (+ 1/2 3))
 
    (display-controls (list :color :orange) :defaulting)
+   (crossmember-spread 15)
    )
 
   :objects
-  ((ends :type '2x4 ;;flag replace with polygon-projections for cut
+  (
+
+   (ends :type 'angle-cut-2x4 ;;flag replace with polygon-projections for cut
+	 :front-angle-degrees 15
+	 :rear-angle-degrees 0
 	 :sequence (:size 2)
 	 :side (ecase (the-child index) (0 :left) (1 :right))
 	 :pseudo-inputs (side)
@@ -143,19 +171,48 @@
 				     :right (half (the-child height))))
 		   (:right (translate (the (face-center :right))
 				      :left (half (the-child height)))))
-	 :orientation (alignment :top (the (face-normal-vector :right))
+	 :orientation (alignment :top (the (face-normal-vector :left))
 				 :rear (the (face-normal-vector :rear))))
+
+   (crossmembers :type 'angle-cut-2x4
+		 :sequence (:size 3)
+		 :side (ecase (the-child index) (0 :datum) (1 :left) (2 :right))
+		 :hidden? (case (the-child side) ((:left :right) nil) (:datum t))
+		 :datum (the (crossmembers 0))
+		 :pseudo-inputs (datum side)
+		 :length (3d-distance (the (rails 3) (edge-center :left :top))
+				      (the (rails 4) (edge-center :left :bottom)))
+		 :pseudo-inputs (side)
+		 :front-angle-degrees 15
+		 :rear-angle-degrees 0
+		 :sequence (:size 2)
+		 :orientation (the (ends 0) orientation)
+		 :center (ecase (the-child side)
+			   (:datum (the center))
+			   ((:left :right)
+			    (translate (the center)
+				       (the-child side)
+				       (half (the crossmember-spread))
+				       :rear
+				       (let ((datum (the-child datum (face-center :rear))))
+					 (3d-distance datum
+						      (inter-line-plane 
+						       datum
+						       (the-child datum (face-normal-vector :rear))
+						       (the (rails 4) (face-center :bottom))
+						       (the (rails 4) (face-normal-vector :bottom)))))))))
 
 
    (rails :type '2x4 
-	  :sequence (:size 4)
-	  :side (ecase (the-child index) (0 :datum) (1 :datum*) (2 :front) (3 :rear))
+	  :sequence (:size 5)
+	  :side (ecase (the-child index) (0 :datum) (1 :datum*) (2 :datum**) (3 :front) (4 :rear))
 	  :datum (the (rails 0))
 	  :datum* (the (rails 1))
-	  :pseudo-inputs (side datum datum*)
-	  :hidden? (case (the-child side)
-		     ((:front :rear) nil)
-		     (otherwise t))
+	  :datum** (the (rails 2))
+	  :pseudo-inputs (side datum datum* datum**)
+	  :hidden?  (case (the-child side)
+			   ((:front :rear) nil)
+			   (otherwise t))
 	  :center (ecase (the-child side)
 		    (:rear (translate (the (face-center :rear))
 				      :front (half (the-child height))))
@@ -170,19 +227,28 @@
 							    (the (face-normal-vector :front))
 							    (the (face-center :front))
 							    (the (face-normal-vector :front)))))))
-		    (:front (translate (the-child datum* center)
-				       :top
-				       (let ((datum (the-child datum*
-							       (closest-vertex
-								(the (:vertex :top :left :front))))))
-					 (3d-distance
-					  datum
-					  (inter-line-plane datum
-							    (the (face-normal-vector :top))
-							    (the (face-center :top))
-							    (the (face-normal-vector :top))))))))
-									
-					
+		    (:datum** (translate (the-child datum* center)
+					 :top
+					 (let ((datum (the-child datum*
+								 (closest-vertex
+								  (the (:vertex :top :left :front))))))
+					   (3d-distance
+					    datum
+					    (inter-line-plane datum
+							      (the (face-normal-vector :top))
+							      (the (face-center :top))
+							      (the (face-normal-vector :top)))))))
+
+		    (:front (translate-along-vector
+			     (the-child datum** center)
+			     (the-child datum** (face-normal-vector :right))
+			     (let ((datum (the-child datum** (edge-center :left :top))))
+			       (3d-distance datum
+					    (inter-line-plane
+					     datum
+					     (the-child (face-normal-vector :right))
+					     (the (face-center :top))
+					     (the (face-normal-vector :top))))))))
 
 		    
 
@@ -192,12 +258,11 @@
 							(ecase (the-child side)
 							  (:datum 15)
 							  (:datum* 15)
+							  (:datum** 15)
 							  (:front 15)
 							  (:rear 0))
 							(the (face-normal-vector :right)))
-				  :rear (the (face-normal-vector :left))))
-
-   ))
+				  :rear (the (face-normal-vector :left))))))
 		   
 	 
 (define-object-amendment box ()
@@ -232,6 +297,313 @@
 (define-object 2x4 (box)
   :computed-slots
   ((width (+ 1/2 3))
-   (height (+ 1/2 1))))							     
-	      
+   (height (+ 1/2 1))))
 
+
+(define-object angle-cut-2x4 (global-polygon-projection 2x4)
+
+  :objects ((original :type 'box :hidden? t))
+  
+  :input-slots ((front-angle-degrees 0)
+		(rear-angle-degrees 0))
+
+  :computed-slots
+  ((offset :down)
+   (projection-depth (the height))
+   (vertex-list (list (the (vertex :bottom :front :right))
+
+		      (let ((p-line (the (vertex :bottom :front :right)))
+			    (u-line (rotate-vector-d (the (face-normal-vector :left))
+						     (the front-angle-degrees)
+						     (the (face-normal-vector :bottom))))
+			    (p-plane (the (vertex :bottom :front :left)))
+			    (u-plane (the (face-normal-vector :left))))
+			(let ((intersect (inter-line-plane p-line u-line p-plane u-plane)))
+			  (translate-along-vector p-line
+						  (subtract-vectors intersect p-line)
+						  (3d-distance intersect p-line))))
+
+		      
+		      (the (vertex :bottom :rear :left))
+		      (the (vertex :bottom :rear :right))))))
+
+		
+		      
+		      
+		      
+
+(define-object test-angle-cut-2x4 (angle-cut-2x4)
+
+  :computed-slots
+  ((display-controls (list :color :green))
+   (offset :down)
+   (length 19)
+   (front-angle-degrees 15)))
+
+
+
+(define-object global-polygon-projection (ifs-output-mixin base-object)
+  
+  :documentation (:description "A polygon ``extruded'' for a given distance along a single vector.
+For planar polygons, the projection vector must not be orthogonal to the normal of the plane of
+the polygon. The vertices and projection-vector are given in the global coordinate system, so
+the local center and orientation do not affect the positioning or orientation of this part."
+                  
+                  
+                                  :examples "<pre>
+
+  (in-package :gdl-user)
+
+  (define-object global-polygon-projection-sample (global-polygon-projection)
+    :computed-slots
+    ((display-controls (list :color :gold-old :transparency 0.3))
+     (projection-depth 5)
+     (vertex-list (list (make-point 0 0 0)
+                        (make-point 10 10 0)
+                        (make-point 30 10 0)
+                        (make-point 40 0 0)
+                        (make-point 30 -10 0)
+                        (make-point 10 -10 0)
+                        (make-point 0 0 0)))))
+
+  (generate-sample-drawing :objects (make-object 'global-polygon-projection-sample)
+                           :projection-direction (getf *standard-views* :trimetric))  
+
+  </pre>")
+
+  
+  :input-slots
+  ("Number. The resultant distance from the two end faces of the extrusion."
+   projection-depth 
+   
+   "List of 3D points. The vertex list making up the polyline, same as the input for global-polyline."
+   vertex-list
+   
+   ("Keyword symbol. The direction of extrusion with respect to the vertices in vertex-list and the projection-vector:
+<ul>
+<li><tt>:up</tt> Indicates to start from current location of vertices and move in the direction of 
+the projection-vector.</li>
+<li><tt>:down</tt> Indicates to start from current location of vertices and move in the direction opposite
+the projection-vector.</li>
+<li><tt>:center</tt> Indicates to start from current location of vertices and move in the direction of 
+the projection-vector <i>and</i> opposite the projection-vector, going half the projection-depth in
+each direction.</li>
+</ul>"
+    offset :up)
+   
+   ("3D Vector. Indicates the straight path along which the extrusion should occur."
+    projection-vector (cross-vectors (subtract-vectors (second (the :vertex-list))
+                                                       (first (the :vertex-list)))
+                                     (subtract-vectors (third (the :vertex-list))
+                                                       (first (the :vertex-list))))))
+  :computed-slots
+  ((polygon-type 'global-polyline)
+   
+   (%renderer-info% (list :vrml? t :view-default :trimetric))
+
+   (crease-angle 0)
+   
+   (%lines-to-draw% (append 
+                     (the :polygon-original :%lines-to-draw%)
+                     (the :polygon-1 :%lines-to-draw%)
+                     (when (typep (the :polygon-2) (the :polygon-type))
+                       (the :polygon-2 :%lines-to-draw%))
+                     (the :projection-lines)))
+   
+   (projection-lines (mapcar #'list 
+                             (butlast
+                              (the-object
+                               (if (typep (the :polygon-2) (the :polygon-type))
+                                   (the :polygon-2) 
+                                 (the :polygon-original)) :vertex-list))
+                             (butlast (the :polygon-1 :vertex-list))))
+   
+   
+   (bounding-box (bounding-box-from-points (append (the polygon-original vertex-list)
+                                                   (the polygon-1 vertex-list))))
+   
+   
+   (polygon-2-effective (if (typep (the polygon-2) (the polygon-type))
+                            (the polygon-2) (the polygon-original)))
+
+   (%vertex-array% (make-array (twice (length (the polygon-original vertex-list)))
+			       :initial-contents
+			       (append (the polygon-1 vertex-list)
+				       (the polygon-2-effective vertex-list))))
+
+   (%line-vertex-indices%
+    (let* ((num-of-vertices (length (the polygon-original vertex-list)))
+	   (poly-1-indices (list-of-numbers 0 (1- num-of-vertices)))
+	   (poly-2-indices (list-of-numbers num-of-vertices
+					    (1- (twice num-of-vertices)))))
+				 
+      (append (mapcar #'list
+		      poly-1-indices (append (rest poly-1-indices) (list (first poly-1-indices))))
+	      (mapcar #'list
+		      poly-2-indices
+		      (append (rest poly-2-indices) (list (first poly-2-indices))))
+	      (mapcar #'list
+		      poly-1-indices poly-2-indices))))
+   
+   
+   (polygons-for-ifs
+    (mapcar #'reverse
+	    (let ((p1-list (the polygon-1 vertex-list))
+		  (p2-list (the polygon-2-effective vertex-list)))
+	      (cons (butlast p1-list)
+		    (append
+		     (mapcar #'(lambda(p1-v1 p1-v2 p2-v1 p2-v2)
+				 (list  p1-v1 p1-v2 p2-v2 p2-v1))
+			     p1-list (rest p1-list) p2-list (rest p2-list))
+		     (list (butlast p2-list))))))))
+  
+  :hidden-objects
+  ((polygon-original :type (the :polygon-type)
+                     :pass-down (:radius-list :default-radius)
+                     :vertex-list (if (coincident-point? (first (the :vertex-list))
+                                                         (lastcar (the :vertex-list)))
+                                      (the :vertex-list)(append (the :vertex-list)
+                                                                (list (first (the :vertex-list))))))
+   (polygon-1 :type (the :polygon-type)
+              :pass-down (:radius-list :default-radius)
+              :vertex-list (mapcar #'(lambda(vertex)
+                                       (translate-along-vector 
+                                        vertex (ecase (the :offset)
+                                                 ((:up :center) (the :projection-vector))
+                                                 (:down (reverse-vector (the :projection-vector))))
+                                        (ecase (the :offset)
+                                          ((:up :down) (the :projection-depth))
+                                          (:center (half (the :projection-depth))))))
+                                   (the :polygon-original :vertex-list)))
+   
+   (polygon-2 :type (ecase (the :offset) ((:up :down) 'null-part) (:center (the :polygon-type)))
+              :pass-down (:radius-list :default-radius)
+              :vertex-list (mapcar #'(lambda(vertex)
+                                       (translate-along-vector
+                                        vertex (reverse-vector (the :projection-vector))
+                                        (half (the :projection-depth))))
+                                   (the :polygon-original :vertex-list)))))
+
+
+(define-lens (x3d ifs-output-mixin)()
+  :output-functions
+  ((shape
+    ()
+    (cl-who:with-html-output (*stream* nil :indent t)
+      (:|Shape|
+       (:|Appearance| (write-the material-properties))
+       ((:|IndexedFaceSet| :|solid| "FALSE"
+	  :|creaseAngle| (format nil "~a" (the crease-angle))
+	  :|coordIndex| (format nil "~{~{~a~^ ~}~^ -1 ~}" (the ifs-indices)))
+        ((:|Coordinate| :|point| (format nil "~{~{~a~^ ~}~^ ~}"
+                                     (map 'list #'(lambda(point) 
+                                                    (let ((point (the (global-to-local* point))))
+                                                      (list (get-x point) (get-y point) (get-z point))) )
+                                          (the ifs-array)))))))))))
+
+
+
+(define-object ifs-output-mixin ()
+  
+  :input-slots
+  (polygons-for-ifs
+
+   (crease-angle (half pi)))
+  
+  :computed-slots
+  ((ifs-vertex-ht (when (the polygons-for-ifs)
+		    (let ((ht (make-hash-table :test #'equalp))
+			  (count -1))
+		      (dolist (polygon (the polygons-for-ifs) ht)
+			(dolist (vertex polygon)
+			  (let ((current (gethash vertex ht)))
+			    (unless current 
+			      (setf (gethash vertex ht) (incf count)))))))))
+   
+   (ifs-array (when (the polygons-for-ifs)
+		(let ((array (make-array (list (hash-table-count (the ifs-vertex-ht))))))
+		  (maphash #'(lambda(vertex index)
+			       (setf (aref array index) vertex))
+			   (the ifs-vertex-ht)) array)))
+   
+   (ifs-indices (when (the polygons-for-ifs)
+		  (mapcar #'(lambda(polygon)
+			      (mapcar #'(lambda(vertex)
+					  (gethash vertex (the ifs-vertex-ht)))
+				      polygon))
+			  (the polygons-for-ifs))))))
+
+
+(define-object global-filleted-polygon-projection (global-polygon-projection)
+
+  :documentation (:description "Similar to a global-polygon-projection, but the polygon is filleted
+as with global-filleted-polygon."
+                  :examples "<pre>
+ (in-package :gdl-user)
+
+ (define-object global-filleted-polygon-projection-sample 
+     (global-filleted-polygon-projection)
+     :computed-slots
+     ((display-controls (list :color :blue-steel 
+                              :transparency 0.3 
+                              :shininess 0.7 
+                              :spectral-color :white))
+      (default-radius 5)
+      (projection-depth 5)
+      (vertex-list (list (make-point 0 0 0)
+                         (make-point 10 10 0)
+                         (make-point 30 10 0)
+                         (make-point 40 0 0)
+                         (make-point 30 -10 0)
+                         (make-point 10 -10 0)
+                         (make-point 0 0 0)))))
+
+ (generate-sample-drawing :objects 
+                          (make-object 'global-filleted-polygon-projection-sample)
+                          :projection-direction :trimetric)
+
+
+
+
+
+</pre>")
+  
+  :input-slots
+  (("List of Numbers. Specifies the radius for each vertex (``corner'') of the filleted-polyline."
+    radius-list nil)
+   
+   ("Number. Specifies a radius to use for all vertices. Radius-list will take precedence over this."
+    default-radius nil))
+  
+  :computed-slots
+  ((polygon-type 'global-filleted-polyline)
+
+   (crease-angle (half pi))
+   
+   (%curves-to-draw% (append (the :polygon-original :%curves-to-draw%)
+                             (the :polygon-1 :%curves-to-draw%)
+                             (when (typep (the :polygon-2) (the :polygon-type))
+                               (the :polygon-2 :%curves-to-draw%))))
+   
+   (%arcs% (append (the :polygon-original :%arcs%)
+                   (the :polygon-1 :%arcs%)
+                   (when (typep (the :polygon-2) (the :polygon-type))
+                     (the :polygon-2 :%arcs%))))
+   
+   (projection-lines (mapcar #'(lambda(line)
+                                 (list (the-object line :start)
+                                       (the-object line :end))) (list-elements (the :projection-line-objects)))))
+  
+  :hidden-objects
+  (;; FLAG -- get rid of this quantified set.
+   ;;
+   (projection-line-objects
+    :type 'line
+    :sequence (:size (twice (length (the :polygon-original :straights))))
+    :start (let ((straight (nth (floor (half (the-child :index)))
+                                (the (evaluate (if (typep (the :polygon-2)
+                                                          (the :polygon-type))
+                                                   :polygon-2 :polygon-original)) :straights))))
+             (funcall (if (oddp (the-child :index)) #'first #'second) straight))
+    :end (let ((straight (nth (floor (half (the-child :index))) (the :polygon-1 :straights))))
+           (funcall (if (oddp (the-child :index)) #'first #'second) straight)))))
