@@ -1,0 +1,119 @@
+(in-package :bench)
+
+(define-object back-frame (base-object)
+
+  :input-slots
+  ((width (+ 3 56))
+   (length 19)
+   (height (+ 1/2 3))
+
+   (display-controls (list :color :orange) :defaulting)
+   (crossmember-spread 15)
+   )
+
+  :objects
+  (
+
+   (ends :type 'angle-cut-2x4 ;;flag replace with polygon-projections for cut
+	 :front-angle-degrees 15
+	 :rear-angle-degrees 0
+	 :sequence (:size 2)
+	 :side (ecase (the-child index) (0 :left) (1 :right))
+	 :pseudo-inputs (side)
+	 :center (ecase (the-child side)
+		   (:left (translate (the (face-center :left))
+				     :right (half (the-child height))))
+		   (:right (translate (the (face-center :right))
+				      :left (half (the-child height)))))
+	 :orientation (alignment :top (the (face-normal-vector :left))
+				 :rear (the (face-normal-vector :rear))))
+
+   (crossmembers :type 'angle-cut-2x4
+		 :sequence (:size 3)
+		 :side (ecase (the-child index) (0 :datum) (1 :left) (2 :right))
+		 :hidden? (case (the-child side) ((:left :right) nil) (:datum t))
+		 :datum (the (crossmembers 0))
+		 :pseudo-inputs (datum side)
+		 :length (3d-distance (the (rails 3) (edge-center :left :top))
+				      (the (rails 4) (edge-center :left :bottom)))
+		 :pseudo-inputs (side)
+		 :front-angle-degrees 15
+		 :rear-angle-degrees 0
+		 :sequence (:size 2)
+		 :orientation (the (ends 0) orientation)
+		 :center (ecase (the-child side)
+			   (:datum (the center))
+			   ((:left :right)
+			    (translate (the center)
+				       (the-child side)
+				       (half (the crossmember-spread))
+				       :rear
+				       (let ((datum (the-child datum (face-center :rear))))
+					 (3d-distance datum
+						      (inter-line-plane 
+						       datum
+						       (the-child datum (face-normal-vector :rear))
+						       (the (rails 4) (face-center :bottom))
+						       (the (rails 4) (face-normal-vector :bottom)))))))))
+
+
+   (rails :type '2x4 
+	  :sequence (:size 5)
+	  :side (ecase (the-child index) (0 :datum) (1 :datum*) (2 :datum**) (3 :front) (4 :rear))
+	  :datum (the (rails 0))
+	  :datum* (the (rails 1))
+	  :datum** (the (rails 2))
+	  :pseudo-inputs (side datum datum* datum**)
+	  :hidden?  (case (the-child side)
+			   ((:front :rear) nil)
+			   (otherwise t))
+	  :center (ecase (the-child side)
+		    (:rear (translate (the (face-center :rear))
+				      :front (half (the-child height))))
+		    (:datum (translate (the (face-center :front))
+				       :rear (half (the-child height))))
+		    (:datum* (translate (the-child datum center)
+				       :rear
+				       (let ((datum (least #'get-y (the-child datum bounding-box))))
+					 (3d-distance
+					  datum
+					  (inter-line-plane datum
+							    (the (face-normal-vector :front))
+							    (the (face-center :front))
+							    (the (face-normal-vector :front)))))))
+		    (:datum** (translate (the-child datum* center)
+					 :top
+					 (let ((datum (the-child datum*
+								 (closest-vertex
+								  (the (:vertex :top :left :front))))))
+					   (3d-distance
+					    datum
+					    (inter-line-plane datum
+							      (the (face-normal-vector :top))
+							      (the (face-center :top))
+							      (the (face-normal-vector :top)))))))
+
+		    (:front (translate-along-vector
+			     (the-child datum** center)
+			     (the-child datum** (face-normal-vector :right))
+			     (let ((datum (the-child datum** (edge-center :left :top))))
+			       (3d-distance datum
+					    (inter-line-plane
+					     datum
+					     (the-child (face-normal-vector :right))
+					     (the (face-center :top))
+					     (the (face-normal-vector :top))))))))
+
+		    
+
+		    
+	  :length (- (the width) (the (ends 0) height) (the (ends 1) height))
+	  :orientation (alignment :top (rotate-vector-d (the (face-normal-vector :rear))
+							(ecase (the-child side)
+							  (:datum 15)
+							  (:datum* 15)
+							  (:datum** 15)
+							  (:front 15)
+							  (:rear 0))
+							(the (face-normal-vector :right)))
+				  :rear (the (face-normal-vector :left))))))

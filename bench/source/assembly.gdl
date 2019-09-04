@@ -1,0 +1,76 @@
+(in-package :bench)
+
+(define-object assembly (base-object)
+
+  :input-slots ((width (+ 59 7)) (length (+ 27 1/2)) (height 25)
+		(armrest-overhang 3/2))
+  
+  :computed-slots ((display-controls (list :color :orange)))
+  
+  :objects
+  ((base-frame :type 'base-frame)
+
+   (base-covering :type 'planking
+		  :center (translate (the center) :rear (half (the armrest-overhang)))
+		  :base-frame-joist-top-center (the base-frame (crossmembers 0) (face-center :right))
+		  :legs-width (the base-frame legs-width)
+		  :length (- (the length) (the armrest-overhang))))
+
+
+   ;; FLAG -- add back after planking base-frame.
+   ;;
+   ;; FLAG -- pass in recline-angle as toplevel input. 
+   ;;
+   ;;
+   #+nil
+   (back-frame :type 'back-frame
+	       :orientation (alignment :top
+				       (rotate-vector-d 
+					(the (face-normal-vector :top))
+					(- 90 15)
+					(the (face-normal-vector :right))))))
+
+
+(define-object planking (base-object)
+
+  :input-slots (base-frame-joist-top-center legs-width)
+  
+  :computed-slots ((spacing (let ((available-length (- (the length)
+						       (* (the planks first width)
+							  (1- (the planks number-of-elements)))))
+				  (number-of-spaces (- (the planks number-of-elements) 2)))
+			      (/ available-length number-of-spaces))))
+  
+  :objects ((planks :type '2x4
+		    :sequence (:size (1+ (floor (/ (+ (the length) 1/4)
+						   (+ 1/4 (+ 1/2 3))))))
+		    :datum (the planks first)
+		    :datum? (the-child first?)
+		    :rear (the planks last)
+		    :front (the (planks 1))
+		    :pseudo-inputs (datum datum? rear front)
+		    :hidden? (the-child datum?)
+		    ;;
+		    ;; FLAG  -- hardcoded instead of doing any real interference check. 
+		    ;;
+		    :length (if (member (the-child) (list (the-child front) (the-child rear)))
+				(- (the width) (the legs-width))
+				(the width)) 
+		    :orientation (alignment :top (the (face-normal-vector :top))
+					    :rear (the (face-normal-vector :right)))
+		    :center (cond ((the-child datum?) (the center))
+				  ((eql (the-child) (the-child front))
+				   (translate (the center) 
+					      :up (let ((datum-1 (the-child datum (face-center :bottom)))
+							(datum-2 (the base-frame-joist-top-center))
+							(normal (the (face-normal-vector :top))))
+						    (3d-distance datum-1 (inter-line-plane datum-1 normal datum-2 normal)))
+					   
+					      :front (let ((datum-1 (the-child datum (face-center :right)))
+							  (datum-2 (the (face-center :front)))
+							  (normal (the (face-normal-vector :front))))
+						      (3d-distance datum-1 (inter-line-plane datum-1 normal datum-2 normal)))))
+				  (t (translate (the-child previous center)
+						:rear
+						(+ (the-child width) (the spacing))))))))
+
