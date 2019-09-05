@@ -1,0 +1,66 @@
+(in-package :bench)
+
+
+(define-object planking (base-object)
+
+  :input-slots ((p-plane (the (face-center :top)))
+		(u-plane (the (face-normal-vector :top)))
+
+		;;
+		;; FLAG - replace p-plank and u-plank with full perimeter.
+		;;
+		(p-plank (the (face-center :front)))
+		(u-plank (the (face-normal-vector :right)))
+
+		(u-front (cross-vectors (the u-plank) (the u-plane)))
+		
+		(plank-type '2x4)
+		(spacing-nominal 1/4)
+		;; FLAG -- input perimeter polygon.
+
+		;;
+		;; FLAG -- pass in the below until we do full perimeter polygon. 
+		;;
+		(shorter-plank-indices nil)
+		(shorter-plank-length (the width))
+		(longer-plank-length (the width)))
+
+
+  :computed-slots ((spacing (let ((available-length (- (the length)
+						       (* (the planks first width)
+							  (1- (the planks number-of-elements)))))
+				  (number-of-spaces (- (the planks number-of-elements) 2)))
+			      (/ available-length number-of-spaces)))
+
+		   (number-of-planks 
+		    (1+ (floor (/ (+ (the length) (the spacing-nominal))
+				  (+ (the spacing-nominal)
+				     (the-object (make-object (the plank-type)) width)))))))
+
+
+  :objects ((planks :type (the plank-type)
+		    :sequence (:size (the number-of-planks))
+
+		    :datum (the planks first)
+		    :datum? (the-child first?)
+		    :rear (the planks last)
+		    :front (the (planks 1))
+
+		    :length (if (member (the-child index) (the shorter-plank-indices))
+				(the shorter-plank-length) (the longer-plank-length))
+		    :hidden? (the-child datum?)
+		    :orientation (alignment :top (the u-plane) :rear (the u-plank))
+		    ;;
+		    ;; FLAG -- compute center based on perimeter and length.
+		    ;;
+		    :center (cond ((the-child datum?) (the center))
+				  ((eql (the-child) (the-child front))
+				   (flush-center
+				    (flush-center (the center) (the-child datum (face-center :bottom)) (the p-plane) (the u-plane))
+				    (the-child datum (face-center :right)) (the p-plank) (the u-front)))
+				  (t (translate (the-child previous center)
+						:rear
+						(+ (the-child width) (the spacing))))))))
+
+
+

@@ -1,4 +1,4 @@
-(gwl:define-package :lumber (:export #:angle-cut-2x4 #:2x4 #:4x4))
+(gwl:define-package :lumber (:export #:angle-cut-2x4 #:1x4 #:2x4 #:4x4))
 
 (in-package :lumber)
 
@@ -12,6 +12,12 @@
   :computed-slots
   ((width (+ 1/2 3))
    (height (+ 1/2 1))))
+
+
+(define-object 1x4 (box)
+  :computed-slots
+  ((width (+ 1/2 3))
+   (height 1/2)))
 
 ;;
 ;; FLAG move to tests area.
@@ -29,14 +35,12 @@
 
   :objects ((original :type 'box :hidden? t))
   
-  :input-slots ((front-angle-degrees 0)
-		(rear-angle-degrees 0))
+  :input-slots ((front-angle-degrees 0) (rear-angle-degrees 0))
 
   :computed-slots
   ((offset :down)
    (projection-depth (the height))
    (vertex-list (list (the (vertex :bottom :front :right))
-
 		      (let ((p-line (the (vertex :bottom :front :right)))
 			    (u-line (rotate-vector-d (the (face-normal-vector :left))
 						     (the front-angle-degrees)
@@ -44,10 +48,6 @@
 			    (p-plane (the (vertex :bottom :front :left)))
 			    (u-plane (the (face-normal-vector :left))))
 			(let ((intersect (inter-line-plane p-line u-line p-plane u-plane)))
-			  (translate-along-vector p-line
-						  (subtract-vectors intersect p-line)
+			  (translate-along-vector p-line (subtract-vectors intersect p-line)
 						  (3d-distance intersect p-line))))
-
-		      
-		      (the (vertex :bottom :rear :left))
-		      (the (vertex :bottom :rear :right))))))
+		      (the (vertex :bottom :rear :left)) (the (vertex :bottom :rear :right))))))

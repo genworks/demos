@@ -1,8 +1,26 @@
 (in-package :gdl-user)
 
 ;;
+;; Below still need to be worked into 1596-devo
+;;
+
+(in-package :geom-base)
+
+(defun flush-center (ref-center datum p-plane u-plane &optional (u-datum u-plane))
+  (translate-along-vector ref-center u-datum
+			  (distance-to-plane datum p-plane u-plane u-datum)))
+
+(defun distance-to-plane (datum p-plane u-plane &optional (u-datum u-plane))
+  (3d-distance datum (inter-line-plane datum u-datum p-plane u-plane)))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (export '(flush-center distance-to-plane) :geom-base))
+
+;;
 ;; All below can be cleared as of 1596
 ;;
+
+(in-package :gdl-user)
 
 (define-object-amendment box ()
   :functions
