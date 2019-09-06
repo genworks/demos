@@ -3,7 +3,7 @@
 (define-object assembly (base-object)
 
   :input-slots ((width 66) (length (+ 27 1/2)) (height 25) (armrest-overhang 3/2)
-		(back-height 19) (back-crossmember-spread 15) (recline-angle-degrees 15))
+		(back-height 19) (back-crossmember-spread 15) (recline-angle-degrees 5))
 
   :computed-slots ((display-controls (list :color :orange)))
 

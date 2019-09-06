@@ -23,7 +23,20 @@
 		;;
 		(shorter-plank-indices nil)
 		(shorter-plank-length (the width))
-		(longer-plank-length (the width)))
+		(longer-plank-length (the width))
+
+		;;
+		;; FLAG -- only symmetrical perimeters working for now.
+		;;         allow assymetrical.
+		;;
+		;; FLAG -- only planks running left-to-right supported
+		;;         for now.  allow planks to run in arbitrary
+		;;         direction, and handle angle cuts. 
+		;;
+		;;
+		(perimeter nil)
+		
+		)
 
 
   :computed-slots ((spacing (let ((available-length (- (the length)
@@ -46,21 +59,64 @@
 		    :rear (the planks last)
 		    :front (the (planks 1))
 
-		    :length (if (member (the-child index) (the shorter-plank-indices))
-				(the shorter-plank-length) (the longer-plank-length))
+		    :pseudo-inputs (datum datum? rear front center*)
+		    
+		    :length (if (the perimeter)
+				(apply #'3d-distance
+				       (the (perimeter-bounds (the-child center))))
+				(if (member (the-child index) (the shorter-plank-indices))
+				    (the shorter-plank-length) (the longer-plank-length)))
+
+		    
 		    :hidden? (the-child datum?)
 		    :orientation (alignment :top (the u-plane) :rear (the u-plank))
 		    ;;
 		    ;; FLAG -- compute center based on perimeter and length.
 		    ;;
-		    :center (cond ((the-child datum?) (the center))
-				  ((eql (the-child) (the-child front))
-				   (flush-center
-				    (flush-center (the center) (the-child datum (face-center :bottom)) (the p-plane) (the u-plane))
-				    (the-child datum (face-center :right)) (the p-plank) (the u-front)))
-				  (t (translate (the-child previous center)
-						:rear
-						(+ (the-child width) (the spacing))))))))
+		    :center* (cond ((the-child datum?) (the center))
+				   ((eql (the-child) (the-child front))
+				    (let* ((z-center (flush-center (the center) (the-child datum (face-center :bottom))
+								   (the p-plane) (the u-plane)))
+					   (p-plank (if (the perimeter)
+							(let ((y-min (least #'get-y (the perimeter))))
+							  (inter-line-plane z-center
+									    (the (face-normal-vector :front))
+									    y-min (the (face-normal-vector :front))))
+							(the p-plank))))
+				      (flush-center z-center (the-child datum (face-center :right)) p-plank (the u-front))))
+				  
+				   (t (translate (the-child previous center)
+						 :rear
+						 (+ (the-child width) (the spacing)))))
+		    :center (the-child center*))) ;; FLAG -- add adjustment for assymetcial perimeter.
+
+  :functions
+  ((perimeter-bounds (point)
+		     (setq point (make-point (get-x point) (get-y point) 0))
+		     (let* ((intersects (remove
+					 nil
+					 (mapcar #'(lambda(a b)
+						     (setq a (make-point (get-x a) (get-y a) 0))
+						     (setq b (make-point (get-x b) (get-y b) 0))
+						     (inter-line-segment point (the (face-normal-vector :right))
+									 a b))
+						 (the perimeter) (rest (the perimeter)))))
+			    (x-min (least #'get-x intersects))
+			    (x-max (most #'get-x intersects)))
+		       (print-variables x-min x-max)
+		       (list x-min x-max)))))
+
+(defun inter-line-segment (p-line u-line a b)
+  (let ((u-segment (subtract-vectors b a)))
+  (let ((possible (inter-line-line p-line u-line a u-segment)))
+    (when (and possible
+	       (same-direction-vectors? u-segment (subtract-vectors possible a))
+	       (< (3d-distance possible a) (3d-distance a b)))
+      possible))))
+
+  
+
+
 
 
 
