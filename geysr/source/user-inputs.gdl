@@ -1,0 +1,42 @@
+;;
+;; Copyright (c) 2003, 2010 Genworks International, Bloomfield Hills,
+;; MI, USA. The software, data and information contained herein are
+;; proprietary to, and comprise valuable trade secrets of, Genworks
+;; International and Genworks BV.  They are given in confidence
+;; pursuant to a written nondisclosure/noncompete license agreement,
+;; and may be stored and used only in accordance with the terms of
+;; such license.
+;;
+;;
+
+(in-package :geysr)
+
+
+(define-object user-inputs (inspector)
+
+  :objects
+  ((settables-form :type 'settables-form
+		   :show-settables? t
+                   :pass-down (node geysr design-mode?))))
+
+
+(define-lens (html-format user-inputs)()
+  :output-functions
+  ((inspector-body
+    ()
+    (with-cl-who ()
+      (:center
+       ((:span :style "font-style: italic; font-weight: bold;")
+        (:p "Inputs for: " 
+	    (fmt "\"~a\"" (the node strings-for-display))
+	    :br 
+	    "root-path: "
+            (esc (format nil "~s" 
+                         (cons 'the (reverse (butlast (the node-root-path))))))
+            (unless (butlast (the node-root-path))
+              (htm " [the root object]")))))
+      
+      ((:table :class "inspector-table" :border 1)
+       (htm (:tr ((:td :colspan 2)
+                  (str (the settables-form inner-html))))))))))
+

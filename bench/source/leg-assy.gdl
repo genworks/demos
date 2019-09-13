@@ -16,7 +16,7 @@
   (;;(bbox :type 'box)
 
    (armrest :type '2x4
-	    :length (+ 1/2 27)
+	    :length (the width)
 	    :orientation (alignment :top (the (face-normal-vector :top))
 				    :right (the (face-normal-vector :rear)))
 	    :center (translate (the (face-center :top))
