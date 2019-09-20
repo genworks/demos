@@ -167,6 +167,22 @@ body {
 }
 
 
+
+.inspector-table tr.no-border {
+ border-bottom: 0px;
+}
+
+
+.inspector-table tr:nth-child(even):not(.no-style) {
+ background-color: #ececec;
+}
+
+.inspector-table tr.bg-row {
+ background-color: #ececec;
+}
+
+
+
 .inspector-table td
 {
  border: 1px solid rgb(168, 168, 168);
@@ -187,11 +203,6 @@ color: rgb(78, 78, 78);
 text-align: center;
 }
 
-.inspector-table tr:nth-child(odd)
-{
- /* background-color: rgb(233, 242, 255); */ 
-}
-
 
 .inspector-table input {
   width: 100%;
@@ -206,6 +217,44 @@ text-align: center;
  }
 
 
+
+p button {
+  color: white;
+  background-color: rgb(71, 133, 248);
+  padding: 5px 15px;
+  border-radius: 2px;
+  transition: all 0.25s;
+}
+    
+ p button:hover {
+  background-color: rgb(32, 104, 236);
+}
+
+.slider {
+  border-bottom: 0px !important;
+  background-color: rgb(197, 197, 197) !important;
+  height: 2px;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 100%;
+  background: rgb(54, 111, 197);
+  cursor: pointer;
+}
+
+.slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  margin-top: calc(25 / 2);
+  border-radius: 100%;
+  background: rgb(54, 111, 197);
+  cursor: pointer;
+}
+ 
 
 .i-t-m
 {

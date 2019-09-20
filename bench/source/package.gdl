@@ -1,1 +1,1 @@
-(gwl:define-package :bench (:export #:assembly) (:use :lumber))
+(gwl:define-package :bench (:export #:assembly #:node) (:use :lumber))

@@ -1,13 +1,12 @@
 (in-package :bench)
 
-(define-object assembly (base-object)
+(define-object product (base-object)
 
   :input-slots ((width 66 :settable) (length (+ 27 1/2) :settable)
 		(height 25 :settable) (armrest-overhang 3/2 :settable)
 		(back-height 19 :settable) (back-crossmember-spread 15 :settable)
 		(recline-angle-degrees 15 :settable) (base-plank-type '2x4 :settable)
 		(back-plank-type '2x4 :settable) (back-offset 0 :settable))
-
 
   :computed-slots ((display-controls (list :color :orange)))
 
@@ -48,3 +47,8 @@
 
 
 
+(define-object product-process-mixin (process-mixin)
+
+
+  
+  )

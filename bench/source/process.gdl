@@ -1,0 +1,109 @@
+(in-package :bench)
+
+;;
+;; FLAG -- promote to its own generic package similar to SPPA
+;;
+
+(define-object process-object (outline-specialization-mixin)
+  :input-slots
+  (after
+
+   (available-identifiers (list :assembly :drilling :cutting)))
+
+  :computed-slots
+  ((outline-objects (the after leaves))
+   
+   (chosen-identifier (first (the available-identifiers)))
+
+   (applied-identifier (if (zerop (the sub-processes number-of-elements)) :purchasing (the chosen-identifier)))
+
+   (input-objects (the operation left-over-input-objects))
+
+   (strings-for-display (format nil "~:(~a~) of ~a" (the applied-identifier) (the after strings-for-display))))
+
+  
+  :objects
+  ((sub-processes :type 'process-object
+		  :sequence (:size (length (the input-objects)))
+		  :after (nth (the-child index) (the input-objects))))
+  
+  :hidden-objects
+  ((operation :type 'process-operation
+		      :chosen-identifier (the chosen-identifier)
+		      :after (the after))))
+
+(define-object process-operation ()
+  :input-slots
+  (chosen-identifier
+   after)
+
+  :computed-slots
+  ((left-over-input-objects (list-elements (the before)))
+
+   (before-types (before-types (the after) (the chosen-identifier)))
+   
+   (before-input-plists (before-input-plists (the after) (the chosen-identifier))))
+
+  :objects
+  ((before :sequence (:size (length (the before-input-plists)))
+	   :type (:sequence (the before-types))
+	   :parameters (nth (the-child index) (the before-input-plists)))))
+
+
+(defparameter *ignored-inputs*
+  (list  :%orientation% :obliqueness :local-box
+	 :bounding-box :use-local-box? :quantify-box 
+	 :transitory-slots :visible-children :hidden?))
+
+(defun inputs-from (object &key (ignored-inputs *ignored-inputs*))
+  (let ((messages
+	 (append (the-object object (message-list :category :optional-input-slots))
+		 (the-object object (message-list :category :required-input-slots))
+		 (the-object object (message-list :category :defaulted-input-slots)))))
+    (mapcan #'(lambda(message)
+		(list message (the-object object (evaluate message))))
+	    (remove-if #'(lambda(mess)
+			   (member mess ignored-inputs))
+		       messages))))
+
+
+(defmethod before-types ((self t) (chosen-identifier t)) nil)
+(defmethod before-input-plists ((self t) (chosen-identifier t)) nil)
+
+
+(defmethod before-types ((self product)(chosen-identifier (eql :assembly)))
+  (list (the base type) (the (back 1) type)))
+
+(defmethod before-input-plists ((self product) (chosen-identifier (eql :assembly)))
+  (list (inputs-from (the base))
+	     (let ((center (the (back 1) center)))
+	       (append
+		(list :center (translate-along-vector center
+						      (the (face-normal-vector :top)) 10))
+		(remove-plist-key (inputs-from (the (back 1))) :center)))))
+
+(defmethod before-types ((self planked-base)(chosen-identifier (eql :assembly)))
+  (list (the frame type) (the planking type)))
+
+
+(defmethod before-input-plists ((self planked-base)(chosen-identifier (eql :assembly)))
+  (list (inputs-from (the frame)) (inputs-from (the planking))))
+
+
+(defmethod before-types ((self planked-back)(chosen-identifier (eql :assembly)))
+  (list (the frame type) (the planking type)))
+
+
+(defmethod before-input-plists ((self planked-back)(chosen-identifier (eql :assembly)))
+  (list (inputs-from (the frame))
+	(let ((center (the planking center)))
+	  (append (list :center (translate-along-vector center
+							(the (face-normal-vector :top)) 10))
+		  (remove-plist-key (inputs-from (the planking)) :center)))))
+
+
+
+
+
+
+
