@@ -5,6 +5,8 @@
   :input-slots (width length height display-controls
 		      recline-angle-degrees
 		      plank-type crossmember-spread)
+
+  :computed-slots ((strings-for-display "back"))
   
   :objects
   ((frame :type 'back-frame

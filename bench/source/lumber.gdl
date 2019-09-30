@@ -1,4 +1,5 @@
-(gwl:define-package :lumber (:export #:angle-cut-2x4 #:1x4 #:2x4 #:4x4))
+(gwl:define-package :lumber (:export #:angle-cut-2x4 #:1x4 #:2x4 #:4x4
+				     #:2x4-8ft))
 
 (in-package :lumber)
 
@@ -10,8 +11,13 @@
 				      
 (define-object 2x4 (box)
   :computed-slots
-  ((width (+ 1/2 3))
+  ((cut? t)
+   (width (+ 1/2 3))
    (height (+ 1/2 1))))
+
+(define-object 2x4-8ft (2x4)
+  :computed-slots ((cut? nil)
+		   (length (* 8 12))))
 
 
 (define-object 1x4 (box)

@@ -5,7 +5,7 @@
   :input-slots
   (armrest-overhang)
 
-  :computed-slots ((display-controls (list :color :brown))
+  :computed-slots (;;(display-controls (list :color :brown))
 		   (legs-width (sum-elements (the leg-assys) (the-element length)))
 		   (front-rail-datum (the (rails 0) (face-center :bottom))))
   
