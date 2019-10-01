@@ -5,6 +5,11 @@ stages:
   - fetch
   - deploy
 
+update:
+  stage: update
+  script:
+    - bash -x ./ci-script.sh linux git-pull
+
   
 build:
   stage: build
