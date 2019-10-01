@@ -20,7 +20,7 @@
 ;; All below can be cleared as of 1596
 ;;
 
-(in-package :gdl-user)
+(in-package :gdl)
 
 (#+allegro
  excl:without-package-locks
@@ -120,7 +120,15 @@
 			     'gdl-rule::%unbound%
 			     (list 'gdl-rule::%unbound% nil nil (first (slot-value object slot))))))))
 	   (when (and (find-class 'gdl-remote nil) (typep object 'gdl-remote))
-	     (the-object object (unbind-remote-slot slot)))))))
+	     (the-object object (unbind-remote-slot slot))))))))
+
+
+
+(in-package :geom-base)
+
+(#+allegro
+ excl:without-package-locks
+ #-allegro progn
 
 
  (define-object-amendment box ()
@@ -135,16 +143,9 @@
 				 (the (:vertex :bottom :right :rear))
 				 (the (:vertex :bottom :left :rear))
 				 (the (:vertex :bottom :right :front))
-				 (the (:vertex :bottom :left :front))))))))
+				 (the (:vertex :bottom :left :front)))))))
 
-
-(in-package :geom-base)
-
-(#+allegro
- excl:without-package-locks
- #-allegro progn
-
-
+ 
  (define-object global-polygon-projection (ifs-output-mixin base-object)
   
    :documentation (:description "A polygon ``extruded'' for a given distance along a single vector.
