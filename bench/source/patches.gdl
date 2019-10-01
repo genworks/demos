@@ -135,10 +135,15 @@
 				 (the (:vertex :bottom :right :rear))
 				 (the (:vertex :bottom :left :rear))
 				 (the (:vertex :bottom :right :front))
-				 (the (:vertex :bottom :left :front)))))))
-				
+				 (the (:vertex :bottom :left :front))))))))
 
- (in-package :geom-base)
+
+(in-package :geom-base)
+
+(#+allegro
+ excl:without-package-locks
+ #-allegro progn
+
 
  (define-object global-polygon-projection (ifs-output-mixin base-object)
   
@@ -404,10 +409,15 @@ as with global-filleted-polygon."
                                                     :polygon-2 :polygon-original)) :straights))))
               (funcall (if (oddp (the-child :index)) #'first #'second) straight))
      :end (let ((straight (nth (floor (half (the-child :index))) (the :polygon-1 :straights))))
-            (funcall (if (oddp (the-child :index)) #'first #'second) straight)))))
+            (funcall (if (oddp (the-child :index)) #'first #'second) straight))))))
 
 
- (in-package :gwl)
+(in-package :gwl)
+
+(#+allegro
+ excl:without-package-locks
+ #-allegro progn
+
 
  (define-object base-ajax-graphics-sheet (base-ajax-sheet base-html-graphics-sheet)
   
