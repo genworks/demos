@@ -1,0 +1,15 @@
+
+stages:
+  - update
+  - build
+  - fetch
+  - deploy
+
+  
+build:
+  stage: build
+  when: manual
+  script:
+    - bash -x ./ci-script.sh linux load-script make-genworks-site
+
+
