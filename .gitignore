@@ -1,3 +1,10 @@
 *.fasl
 *~
 .dx64fsl
+node_modules/
+package-lock.json
+package.json
+postcss.config.js
+tailwind-built.css
+tailwind.config.js
+tailwind.css
