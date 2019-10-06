@@ -1,6 +1,7 @@
 (in-package :bench)
 
 (defmethod before-types ((self t) (chosen-identifier t)) nil)
+
 (defmethod before-input-plists ((self t) (chosen-identifier t)) nil)
 
 
@@ -12,7 +13,7 @@
 (defmethod before-input-plists ((self product) (chosen-identifier (eql :painting)))
   (when (the painted?)
     (list
-     (append (list :painted? nil :display-controls (list :color :white))
+     (append (list :painted? nil :display-controls (list :color :tan))
 	     (remove-plist-keys (inputs-from self) (list :painted? :display-controls))))))
 
 
@@ -41,6 +42,21 @@
   (list (inputs-from (the frame)) (inputs-from (the planking))))
 
 
+;;
+;; base-frame Assembly
+;;
+(defmethod before-types ((self base-frame)(chosen-identifier (eql :assembly)))
+  (append (list-elements (the rails) (the-element type))
+	  (list-elements (the crossmembers) (the-element type))
+	  (list-elements (the leg-assys) (the-element type))))
+	  
+
+
+(defmethod before-input-plists ((self base-frame)(chosen-identifier (eql :assembly)))
+  (append (mapcar #'inputs-from (list-elements (the rails)))
+	  (mapcar #'inputs-from (list-elements (the crossmembers)))
+	  (mapcar #'inputs-from (list-elements (the leg-assys)))))
+	  
 
 ;;
 ;; Planked-back Assembly
@@ -72,6 +88,17 @@
 	  (mapcar #'inputs-from (list-elements (the crossmembers)))
 	  (mapcar #'inputs-from (list-elements (the rails)))))
 	  
+
+;;
+;; Planking assembly
+;;
+
+(defmethod before-types ((self planking)(chosen-identifier (eql :assembly)))
+  (list-elements (the planks) (the-element type)))
+	  
+
+(defmethod before-input-plists ((self planking)(chosen-identifier (eql :assembly)))
+  (mapcar #'inputs-from (list-elements (the planks))))
 
 
 ;;

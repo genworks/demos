@@ -2,8 +2,10 @@
 
 (define-object node (base-object)
 
-  :input-slots ((model-parameters *model-A*))
+  :input-slots ((model-parameters *model-A*) (painted? t :defaulting))
 
+  :trickle-down-slots (painted?)
+  
   :objects
   ((product :type 'product
 	    :parameters (the model-parameters))

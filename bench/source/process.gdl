@@ -30,6 +30,8 @@
 		    (the applied-operation left-over-input-objects)))
 
    (strings-for-display (format nil "~:(~a~) of ~a" (the applied-identifier)
+				(the after type)
+				#+nil
 				(if (eql (the applied-identifier) :purchasing)
 				    (the after type)
 				    (the after strings-for-display)))))

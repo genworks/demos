@@ -7,8 +7,11 @@
 		(back-height 19 :settable) (back-crossmember-spread 15 :settable)
 		(recline-angle-degrees 15 :settable) (base-plank-type '2x4 :settable)
 		(back-plank-type '2x4 :settable) (back-offset 0 :settable)
-		(painted? t) (display-controls (list :color :orange)))
+		(painted? t :defaulting)
+		(display-controls (list :color :orange)))
 
+  :trickle-down-slots (painted?)
+  
   :computed-slots ()
 
   :objects ((base :type 'planked-base
@@ -25,7 +28,7 @@
 		  :width (- (the width) (the base frame legs-width))
 		  :length (the back-height)
 		  :height (the-object (make-object (the-child plank-type)) width)
-		  :display-controls (list :color :green)
+		  :display-controls (list :color (if (the painted?) :green :tan))
 		  :pass-down (recline-angle-degrees)
 		  :plank-type (the back-plank-type)
 		  :center
