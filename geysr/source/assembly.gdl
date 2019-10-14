@@ -98,6 +98,8 @@ ToDO:
 		   :god-parents (list self)
 		   :strings-for-display (format nil "~s" (the root-object-type)))))
 
+   (ui-object nil :settable)
+
    (additional-header-content
     (with-cl-who-string ()
       (unless (the design-mode?)
@@ -132,7 +134,22 @@ ToDO:
        ((:div :id "tree" :class "cell tree") (str (the tree main-div)))
        ((:div :id "inspector" :class "cell inspector")
 	(str (the inspector-or-inputs-section main-div)))
-       ((:div :id "viewport" :class "cell viewport") (str (the viewport main-div)))
+
+       ((:div :id "viewport" :class "cell viewport")
+	(str (the viewport-section main-div))
+	
+	#+nil
+	(str (case (the click-mode)
+	       (:user-interface (the ui main-div)) (otherwise (the viewport main-div)))))
+       
+
+       #+nil
+       ((:div :id "viewport" :class "cell viewport")
+	(str (the ui main-div)) (str (the viewport main-div))
+	
+	#+nil
+	(str (case (the click-mode)
+	       (:user-interface (the ui main-div)) (otherwise (the viewport main-div)))))
        ((:div :id "viewport-script") (str (the viewport-script main-div)))
        ((:div :id "menu-script") (str (the menu-script main-div))))
       (unless (the design-mode?)
@@ -151,15 +168,17 @@ ToDO:
 		  (str (if (the user-mode?) (the user-inputs main-div)
 			   (the inspector main-div)))))
    (menu :type 'menu
-	 :pass-down (design-mode? local-assets? click-mode expand-mode)
-	 :user-mode? (the user-mode?-default)
+   	 :pass-down (design-mode? local-assets? click-mode expand-mode)
+	 :user-mode?    (the user-mode?-default)
 	 :set-click-mode-func #'(lambda(mode) (the (set-slot! :click-mode mode)))
 	 :set-expand-mode-func #'(lambda(mode) (the (set-slot! :expand-mode mode)))
 	 :reset-zoom-func #'(lambda() (the viewport reset-zoom!))
 	 :set-image-format-func #'(lambda(format)
 				    (the viewport image-format-selector (set-slot! :value format)))
 	 :set-view-func #'(lambda(view) (the viewport view-selector (set-slot! :value view)))
-	 :clear-func #'(lambda() (the viewport clear!))
+	 :clear-func #'(lambda()
+			 (the (restore-slot-default! :ui-object))
+			 (the viewport clear!))
 	 :update-root-func #'(lambda() (the update-root!))
 	 :set-self-func #'(lambda() (set-self self))
 	 :up-root-func #'(lambda() (let ((parent (the root-object parent)))
@@ -185,7 +204,19 @@ ToDO:
 	      :pass-down (root-object onclick-function click-mode design-mode?)
 	      :geysr self
               :display-controls-hash (the tree display-controls-hash))
+
+   (viewport-section :type 'sheet-section
+		     :div-class "gwl-iframe-section"
+		     :inner-html (if (eql (the click-mode) :user-interface)
+				     (the ui inner-html)
+				     (the viewport inner-html)))
    
+   (ui :type 'iframe
+       :url (when (the ui-object)
+	      (progn (gwl::register-instance (the ui-object))
+		     (the ui-object url))))
+		
+       
    
    (viewport :type 'viewport
 	     :div-class "viewport-wrapper"
@@ -193,8 +224,7 @@ ToDO:
 	     :empty-display-list-message
 	     (with-cl-who-string ()
 
-	       (:p (:h2 (fmt "Welcome to Geysr." (the
-	       root-object-type))))
+	       (:p (:h2 (fmt "Welcome to Geysr.")))
 
 	       (:p (fmt
 		    "Geysr is for inspecting Genworks GDL models
@@ -312,6 +342,8 @@ ToDO:
 	 (:add-leaves* (the viewport (add-leaves*! object)))
 	 (:delete-leaves (the viewport (delete-leaves! object)))
 	 (:add-node (the viewport (add-node! object)))
+	 (:user-interface (the (set-slot!
+				:ui-object (the root-object (follow-root-path root-path)))))
       
 	 (:set-self 
 	  (set-self object)

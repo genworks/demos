@@ -1,11 +1,11 @@
 ;;
 ;; Copyright (c) 2003, 2010 Genworks International, Bloomfield Hills,
-;; MI, USA and Genworks BV, Delft, The Netherlands. The software, data
-;; and information contained herein are proprietary to, and comprise
-;; valuable trade secrets of, Genworks International and Genworks BV.
-;; They are given in confidence pursuant to a written
-;; nondisclosure/noncompete license agreement, and may be stored and
-;; used only in accordance with the terms of such license.
+;; MI, USA. The software, data and information contained herein are
+;; proprietary to, and comprise valuable trade secrets of, Genworks
+;; International and Genworks BV.  They are given in confidence
+;; pursuant to a written nondisclosure/noncompete license agreement,
+;; and may be stored and used only in accordance with the terms of
+;; such license.
 ;;
 ;;
 
@@ -265,7 +265,7 @@ function addVisible(event, level)
   :input-slots ((label "Other Viewport Ops")
 		(title "Other Viewport operations such as adding non-leaf nodes"))
   :objects ((add-leaves*-menu) (draw-leaves-menu) (delete-leaves-menu)
-	    (add-node-menu)(draw-node-menu)))
+	    (add-node-menu)(draw-node-menu) (ui-menu)))
 
 (define-object inspect-menu (set-click-mode-menu)
   :input-slots ((label "Inspect")
@@ -308,6 +308,12 @@ function addVisible(event, level)
   :input-slots ((label "Draw Leaves")
 		(title "Clear graphics and add Leaves to Graphics Viewport as a unit."))
   :computed-slots ((click-mode-key :draw-leaves)))
+
+(define-object ui-menu (set-click-mode-menu)
+  :input-slots ((label "User Interface")
+		(title "Render the User Interface inside the Viewport area as an HTML iframe"))
+  :computed-slots ((click-mode-key :user-interface)))
+
 
 (define-object tree-menu (menu-node)
   :input-slots ((label "Tree")

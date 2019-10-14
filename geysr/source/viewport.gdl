@@ -38,7 +38,9 @@
 		   (push (if (listp root-path)
 			     (the root-object (follow-root-path root-path))
 			     root-path) result))
-	       (the view-object-roots-root-paths-hash)) (nreverse result)))
+	       (the view-object-roots-root-paths-hash))
+      (when (some #'(lambda(obj)(typep obj 'base-object)) result) 
+	(nreverse result))))
 	     
 	     
    (display-list-objects 
@@ -47,13 +49,15 @@
       (maphash #'(lambda(root-path value)
 		   (declare (ignore value))
 		   (push (the root-object (follow-root-path root-path)) result))
-	       (the view-objects-root-paths-hash)) (nreverse result)))
+	       (the view-objects-root-paths-hash))
+      (when (some #'(lambda(obj) (typep obj 'base-object)) result) (nreverse result))))
 	     
    (image-format-default :svg))
 
   :computed-slots
   (
-
+   (empty? (not (or (the display-list-object-roots)
+		    (the display-list-objects))))
    #+nil
    (zoom-factor-renderer (case (the root-object-type)
 			   ('gdl-user::house 0.016)

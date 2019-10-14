@@ -63,6 +63,10 @@ body {
  z-index: 5;
 }
 
+.gwl-iframe-section {
+    height: 100%;
+}
+
 .viewport {
  grid-area: viewport;
  background: #e8e8e8;
