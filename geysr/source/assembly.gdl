@@ -135,6 +135,11 @@ ToDO:
        ((:div :id "inspector" :class "cell inspector")
 	(str (the inspector-or-inputs-section main-div)))
 
+
+       ((:div :id "viewport" :class "cell viewport")
+	(str (the viewport main-div)))
+       
+       #+nil
        ((:div :id "viewport" :class "cell viewport")
 	(str (the viewport-section main-div))
 	
