@@ -103,7 +103,6 @@
 						 (the perimeter) (rest (the perimeter)))))
 			    (x-min (least #'get-x intersects))
 			    (x-max (most #'get-x intersects)))
-		       (print-variables x-min x-max)
 		       (list x-min x-max)))))
 
 (defun inter-line-segment (p-line u-line a b)
