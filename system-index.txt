@@ -1,6 +1,0 @@
-gorg/gorg.asd
-bench/bench.asd
-geysr/geysr.asd
-timer/timer.asd
-prasad/prasad.asd
-tw-try/tw-try.asd
