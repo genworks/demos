@@ -34,7 +34,7 @@
       (or (gethash key static-content-ht)
 	  (let ((value 
 		 (let ((template 
-			(merge-pathnames (format nil "~a.html" name) templates-folder)))
+			(merge-pathnames (format nil "~a.html" name) *templates-folder*)))
 		   (if (probe-file template)
 		       (with-open-file (stream template)
 			 (let ((data (make-string (file-length stream))))
