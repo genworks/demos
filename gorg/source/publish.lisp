@@ -53,7 +53,8 @@
 			       :content-type "application/zip"
 			       :headers (list (cons "Content-Disposition" "attachment")))))
     
-  (let ((static (or 
+  (let ((static (or
+		 (probe-file (merge-pathnames "gorg-static/" glisp:*gdl-program-home*))
 		 (when (glisp:source-pathname)
 		   (probe-file 
 		    (make-pathname 
@@ -63,9 +64,10 @@
 						(translate-logical-pathname 
 						 (glisp:source-pathname))))))
 		 (probe-file (merge-pathnames "static/" *system-home*))
-		 (probe-file (merge-pathnames "gorg-static/" glisp:*gdl-program-home*)))))
+		 )))
     (if static 
 	(progn (setq static (namestring static))
+	       (setq *templates-folder* (merge-pathnames "templates/" static))
 	       (dolist (host *gorg-hosts*)
 		 (publish-directory :prefix "/gorgstat/" :destination static :host host)))
 	(warn "static directory does not exist in gorg publish.")))
