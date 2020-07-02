@@ -43,6 +43,16 @@
 (defun initialize ()
 
 
+  (let ((dev (list :windows "/home/builder/genworks/manager/staging/gendl/81600/distribution/gendl-build81600-windows64.zip"
+		   :macos "/home/builder/genworks/manager/staging/gendl/1600D/distribution/gendl-build1600-macos64.zip"
+		   :linux "/home/builder/genworks/manager/staging/gendl/1600L/distribution/gendl-build1600-linux64.zip")))
+
+    (dolist (os (plist-keys dev))
+      (net.aserve:publish-file :path (format nil "/gendl-dev-~a.zip" (string-downcase os))
+			       :file (getf dev os)
+			       :content-type "application/zip"
+			       :headers (list (cons "Content-Disposition" "attachment")))))
+    
   (let ((static (or 
 		 (when (glisp:source-pathname)
 		   (probe-file 
