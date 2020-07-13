@@ -1,5 +1,7 @@
 (in-package :gwl)
 
+
+#+nil
 (excl:without-package-locks
   (defun publish-gwl-app (path string-or-symbol &key make-object-args (server *wserver*) host)
     "Void. Publishes an application, optionally with some initial arguments to be passed in as input-slots.
