@@ -2,8 +2,8 @@
 
 (defun initialize! ()
   (with-all-servers (server)
-    (publish-gwl-app "/gle" 'landing :server server)))
-
+    (dolist (host (list "greenlightescrow.com" "www.greenlightescrow.com"))
+      (publish-gwl-app  "/" 'landing :server server :host host))))
 
 (initialize!)
 
