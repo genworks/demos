@@ -7,4 +7,6 @@
  #-asdf-unicode :defsystem-depends-on #-asdf-unicode (:asdf-encodings)
  #+asdf-unicode :defsystem-depends-on #+asdf-unicode ()
  #+asdf-encodings :encoding #+asdf-encodings :utf-8
- :components ((:file "source/package") (:gendl "source/landing")))
+ :components
+ ((:file "source/package") (:file "source/initialize")
+  (:gendl "source/landing")))
