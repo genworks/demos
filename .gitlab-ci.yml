@@ -13,7 +13,7 @@ update:
   
 build:
   stage: build
-  when: manual
+#  when: manual
   script:
     - bash -x ./ci-script.sh linux load-script make-genworks-site
 
