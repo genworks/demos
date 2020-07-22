@@ -1,8 +1,9 @@
+;;;; -*- coding: utf-8 -*-
 ;;
-;; Copyright 2002-2011 Genworks International 
+;; Copyright 2020 Genworks International
 ;;
 ;; This source file is part of the General-purpose Declarative
-;; Language project (GDL).
+;; Language project (GDL/Gendl).
 ;;
 ;; This source file contains free software: you can redistribute it
 ;; and/or modify it under the terms of the GNU Affero General Public
