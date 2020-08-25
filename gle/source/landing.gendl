@@ -1,7 +1,0 @@
-(in-package :gle)
-
-(define-object landing (base-ajax-sheet)
-
-  :computed-slots
-  ((main-sheet-body "Welcome to Green Light Escrow. We will be live soon with actual content")))
-
