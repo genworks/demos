@@ -82,13 +82,10 @@
   ;;(publish-gwl-app "/" "glsite:landing")
   ;;
 
-  (publish-shared :host "gendl.org" :path "/" :object-type 'landing)
+  (publish-shared 'landing :host "gendl.org" :path "/")
 
-  (publish-shared :path "/gorg" :object-type 'landing)
-  
-  #+nil
-  (dolist (host *gorg-hosts*)
-    (publish-shared :host host :path "/" :object-type 'landing)))
+  (publish-shared 'landing :path "/gorg"))
+
 
 
   
