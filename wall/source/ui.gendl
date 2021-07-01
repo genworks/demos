@@ -1,0 +1,73 @@
+(in-package :wall-ui)
+
+(define-object assembly (base-ajax-graphics-sheet)
+
+  :computed-slots
+  ((main-sheet-body  (with-cl-who-string ()
+                       (str (the development-links))
+                       (:div (str (the viewport-section main-div)))
+                       (:div (str (the inputs-section main-div)))))
+   
+   (vector-graphics-onclick? nil)
+   (display-list-object-roots (list (the box)))
+   (length 800) (width 800)
+   (background-color :grey)
+   (view-direction-default :trimetric)
+   )
+  
+
+  :objects
+  (
+   (box :type 'box
+        :display-controls (list :color :blue)
+        :length (the length-input value)
+        :width (the width-input value)
+        :height (the height-input value))
+
+   #+nil
+   (wall :type 'wall:brick-wall
+         :length (the length-input value)
+         :width (the width-input value)
+         :height (the height-input value))
+   
+   (inputs-section :type 'sheet-section
+                   :inner-html (with-cl-who-string ()
+                                 (:p (str (the length-input html-string)))
+                                 (:p (str (the height-input html-string)))
+                                 (:p (str (the width-input html-string)))
+                                 (:p (str (the submit-button form-control-string)))
+                                 (:p (str (the view-selector html-string)))
+                                 
+                                 ))
+
+   (length-input :type 'number-form-control
+                 :default 10
+                 ;;:ajax-submit-on-change? t
+                 :prompt "Length")
+
+   (width-input :type 'number-form-control
+                :default 10
+                ;;:ajax-submit-on-change? t
+                :prompt "Width")
+
+   (height-input :type 'number-form-control
+                 :default 10
+                 ;;:ajax-submit-on-change? t
+                 :prompt "Height")
+
+   (submit-button :type 'button-form-control
+                  :prompt " OK "
+                  :onclick (the (gdl-ajax-call :form-controls (list (the length-input)
+                                                                    (the height-input)
+                                                                    (the width-input)))))
+                                 
+   
+   (viewport-section :type 'sheet-section
+		     :inner-html (with-cl-who-string ()
+				   ((:div :align "center" :id "viewport"
+                                          :style "background-color: grey;")
+                                    (str (the svg-string)))))))
+
+
+
+(gwl:publish-gwl-app  "/wall" 'assembly)
