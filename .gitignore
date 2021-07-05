@@ -1,6 +1,7 @@
 *.fasl
 *~
 .dx64fsl
+.lx64fsl
 node_modules/
 node_modules
 package-lock.json
