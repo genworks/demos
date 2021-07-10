@@ -3,7 +3,15 @@
 (define-object assembly (base-ajax-graphics-sheet)
 
   :computed-slots
-  ((main-sheet-body  (with-cl-who-string ()
+  (
+   (additional-header-content
+    (with-cl-who-string ()
+      ((:meta :charset "UTF-8"))
+      ((:meta :name "viewport" :content "width=device-width, initial-scale=1.0"))
+      (:title "Document")
+      ((:link :href "/tw-static/tailwind.css" :rel "stylesheet"))))
+
+   (main-sheet-body  (with-cl-who-string ()
                        (str (the development-links))
                        (:div (str (the viewport-section main-div)))
                        (:div (str (the inputs-section main-div)))))
@@ -83,6 +91,7 @@
 
    (submit-button :type 'button-form-control
                   :prompt " OK "
+                  :class "btn-blue"
                   :onclick (the (gdl-ajax-call :form-controls (list (the length-input)
                                                                     (the height-input)
                                                                     (the width-input)))))
@@ -96,4 +105,3 @@
 
 
 
-(gwl:publish-gwl-app  "/wall" 'assembly)
