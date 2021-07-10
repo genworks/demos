@@ -1,6 +1,3 @@
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (gdl:define-package #:wall (:export #:brick-wall)))
-
 (in-package #:wall)
 
 
@@ -60,24 +57,5 @@
                                     :up (* (the-child index) (+ (the-child height)
                                                                 (the mortar-height))))
                  :display-controls (list :color :red))))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

@@ -72,12 +72,12 @@
                  :prompt "Length")
 
    (width-input :type 'number-form-control
-                :default 219
+                :default 100
                 ;;:ajax-submit-on-change? t
                 :prompt "Width")
 
    (height-input :type 'number-form-control
-                 :default 29
+                 :default 15
                  ;;:ajax-submit-on-change? t
                  :prompt "Height")
 
