@@ -1,0 +1,83 @@
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (gdl:define-package #:wall (:export #:brick-wall)))
+
+(in-package #:wall)
+
+
+(define-object brick (box)
+  :input-slots
+  ((width 10) (height 4) (length 3)))
+
+
+
+(define-object brick-layer (box)
+  :input-slots
+  ((num-bricks (floor(/ (the width) (the brick-width))))
+   (offset? nil)
+   (mortar-size (/ (the leftover) (1- (the num-bricks))))
+   (brick-height 3)
+   (brick-width 10)
+   (height (the brick-height)))
+
+  :computed-slots
+  ((leftover (- (the width) (* (the brick-width) (the num-bricks)))))
+
+  
+  :objects
+  (
+   (bricks :type 'brick
+           :sequence (:size (if (the offset?) (1+ (the num-bricks)) (the num-bricks)))
+           :width (if (and (the offset?) (or (the-child first?) (the-child last?)))
+                      (half (the brick-width)) (the brick-width))
+           :height (the brick-height)
+           :center (let ((start-point (if (the-child first?) (the center)
+                                          (the-child previous center))))
+                     (translate  start-point
+                                 :right (if (the-child first?) (half (the-child width))
+                                            (+ (if (the offset?) (the mortar-size)
+                                                   (+ (/ (the mortar-size)
+                                                         (1- (the num-bricks)))
+                                                      (the mortar-size)))
+                                               (half (+ (the-child width)
+                                                        (the-child previous width))))))))))
+
+(define-object brick-wall (box)
+  :input-slots
+  ((num-layers (floor (/ (the height) (the brick-height))))
+   (mortar-height 1)
+   (brick-height 4)
+   (brick-width 10))
+  
+  
+  :objects
+  (
+   (brick-layers :type 'brick-layer
+                 :sequence (:size (the num-layers))
+                 :brick-width (the brick-width)
+                 :brick-height (the brick-height)
+                 :offset? (oddp (the-child index))
+                 :center (translate (the center)
+                                    :up (* (the-child index) (+ (the-child height)
+                                                                (the mortar-height))))
+                 :display-controls (list :color :red))))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
