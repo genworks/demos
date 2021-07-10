@@ -9,7 +9,7 @@
                        (:div (str (the inputs-section main-div)))))
    
    (vector-graphics-onclick? nil)
-   (display-list-object-roots (list (the box)))
+   (display-list-object-roots (list (the wall) (the side-wall) (the right-wall) (the back-wall)))
    (length 800) (width 800)
    (background-color :grey)
    (view-direction-default :trimetric)
@@ -18,17 +18,43 @@
 
   :objects
   (
+   #+nil
    (box :type 'box
         :display-controls (list :color :blue)
         :length (the length-input value)
         :width (the width-input value)
         :height (the height-input value))
 
-   #+nil
+
    (wall :type 'wall:brick-wall
          :length (the length-input value)
          :width (the width-input value)
          :height (the height-input value))
+
+
+  
+   (side-wall :type 'wall:brick-wall
+              :length (the wall length)
+              :width (the wall width)
+              :height (the wall height)
+              :orientation (alignment :top (the (face-normal-vector :top))
+                                      :rear (the (face-normal-vector :left))))
+  
+   (right-wall :type 'wall:brick-wall
+               :length (the side-wall length)
+               :width (the side-wall width)
+               :height (the side-wall height)
+               :orientation (alignment :top (the (face-normal-vector :top))
+                                       :rear (the (face-normal-vector :left)))
+               :center (translate (the center)
+                                  :right (the wall width)))
+
+  (back-wall :type 'wall:brick-wall
+             :length (the wall length)
+             :width (the wall width)
+             :height (the wall height)
+             :center (translate (the center)
+                                :back (the wall width)))
    
    (inputs-section :type 'sheet-section
                    :inner-html (with-cl-who-string ()
@@ -41,17 +67,17 @@
                                  ))
 
    (length-input :type 'number-form-control
-                 :default 10
+                 :default 3
                  ;;:ajax-submit-on-change? t
                  :prompt "Length")
 
    (width-input :type 'number-form-control
-                :default 10
+                :default 219
                 ;;:ajax-submit-on-change? t
                 :prompt "Width")
 
    (height-input :type 'number-form-control
-                 :default 10
+                 :default 29
                  ;;:ajax-submit-on-change? t
                  :prompt "Height")
 
