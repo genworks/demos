@@ -1,0 +1,36 @@
+
+.grid {
+ display: grid;
+ grid-gap: 1px;
+ height: 100%;
+ background-color: #aaa;
+ font-family: "helvetica Neue", Helvetica, Arial, sans-serif;
+ grid-template-columns: 1fr;
+ grid-template-rows: auto 1fr;
+ grid-template-areas: "inputs"
+                          "viewport";
+
+
+}
+
+
+
+@media (min-width: 700px) {
+    .grid {
+        grid-template-columns: auto 1fr;
+        grid-template-rows: 1fr;
+        grid-template-areas: "inputs viewport";
+        
+    }
+}
+
+
+
+
+.viewport {
+    grid-area: viewport;}
+
+.inputs {
+    grid-area: inputs;}
+
+
