@@ -9,7 +9,7 @@
       ((:meta :charset "UTF-8"))
       ((:meta :name "viewport" :content "width=device-width, initial-scale=1.0"))
       (:title "Document")
-      ((:link :href "/tw-static/tailwind.css" :rel "stylesheet"))))
+      ((:link :href "/wall-static/tailwind.css" :rel "stylesheet"))))
 
    (main-sheet-body  (with-cl-who-string ()
                        (str (the development-links))
@@ -71,6 +71,7 @@
                                  (:p (str (the width-input html-string)))
                                  (:p (str (the submit-button form-control-string)))
                                  (:p (str (the view-selector html-string)))
+                                 ;;(:p ((:span :class "relative inline-block text-left")(str (the view-selector html-string))))
                                  
                                  ))
 

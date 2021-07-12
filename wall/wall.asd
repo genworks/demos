@@ -6,4 +6,4 @@
  :serial t :version "20210710" :depends-on nil :defsystem-depends-on
  nil :components
  ((:file "source/package") (:gendl "source/brick-wall")
-  (:gendl "source/ui")))
+  (:file "source/initialize") (:gendl "source/ui")))
