@@ -2,6 +2,8 @@
 
 (define-object assembly (base-ajax-graphics-sheet)
 
+  :input-slots ((title "Roofless House Design"))
+  
   :computed-slots
   (
    (additional-header-content
@@ -17,9 +19,13 @@
 
    (main-sheet-body  (with-cl-who-string ()
                        (str (the development-links))
-                       ((:div :class "grid")
+                       ((:div :class "gridfoo")
+                        ((:div :class "cell title")
+                         ((:h2 :class "text-2xl font-bold leading-7 text-gray-900 sm:text-3xl sm:truncate")
+                          (str (the title))))
+                        ((:div :class "cell inputs")(str (the inputs-section main-div)))
                         ((:div :class "cell viewport")(str (the viewport-section main-div)))
-                        ((:div :class "cell inputs")(str (the inputs-section main-div))))))
+                        )))
    
    (vector-graphics-onclick? nil)
    (display-list-object-roots (list (the wall) (the side-wall) (the right-wall) (the back-wall)))
@@ -71,22 +77,47 @@
    
    (inputs-section :type 'sheet-section
                    :inner-html (with-cl-who-string ()
-                                 (:p (str (the length-input html-string)))
-                                 (:p (str (the height-input html-string)))
-                                 (:p (str (the width-input html-string)))
-                                 (:p (str (the submit-button form-control-string)))
-                                 (:p (str (the view-selector html-string)))
-                                 ;;(:p ((:span :class "relative inline-block text-left")(str (the view-selector html-string))))
+                                 ((:div :class "rounded-lg bg-white shadow-lg")
+                                  ((:div
+                                    :class "flex flex-col border-b border-gray-100 p-6 text-center sm:border-0 sm:border-r")
+                                  
+                                   (:div
+                                    ((:label :for (the length-input id)
+                                             :class "ml-1 block text-sm font-medium text-gray-700")
+                                     (str (the length-input prompt)))
+                                         
+                                    ((:div :class "mt-1 ml-1")
+                                     (str (the length-input form-control-string))))
+
+                                   (:div
+                                    ((:label :for (the height-input id)
+                                             :class "mt-5 ml-1 block text-sm font-medium text-gray-700")
+                                     (str (the height-input prompt)))
+                                    ((:div :class "mt-1 ml-1")
+                                     (str (the height-input form-control-string))))
+
+                                   (:div
+                                    ((:label :for (the width-input id)
+                                             :class "mt-5 ml-1 block text-sm font-medium text-gray-700")
+                                     (str (the width-input prompt)))
+                                    ((:div :class "mt-1 ml-1")
+                                     (str (the width-input form-control-string))))
+
                                  
-                                 ))
+                                   ((:div :class "mt-5 ml-1") (str (the submit-button form-control-string)))
+                                   ((:div :class "mt-8 ml-1") (str (the view-selector form-control-string)))
+                                   ;;(:p ((:span :class "relative inline-block text-left")(str (the view-selector html-string))))
+                                 
+                                   ))))
 
    (length-input :type 'number-form-control
                  :default 3
+                 :class "shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-gray-300 rounded-md"
                  ;;:ajax-submit-on-change? t
                  :prompt "Length")
 
    (width-input :type 'number-form-control
-                :default 100
+                :default 50
                 ;;:ajax-submit-on-change? t
                 :prompt "Width")
 
@@ -101,8 +132,6 @@
                   :onclick (the (gdl-ajax-call :form-controls (list (the length-input)
                                                                     (the height-input)
                                                                     (the width-input)))))
-
-
    (viewport-section :type 'sheet-section
 		     :inner-html (with-cl-who-string ()
                                    (str (the svg-string))))
