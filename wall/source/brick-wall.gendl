@@ -1,26 +1,60 @@
 (in-package #:wall)
 
 
-(define-object brick (box)
+(define-object brick-wall (box)
   :input-slots
-  ((width 10) (height 4) (length 3)))
+  ((num-layers (floor (/ (the height) (the brick-height))))
+   (mortar-height 1)
+   (brick-height 4)
+   (brick-width 10)
+   (brick-cost 1.5))
 
+  :computed-slots
+  ((num-bricks (sum-elements (the brick-layers)(the-element number-of-bricks)))
+   (brick-volume (sum-elements (the brick-layers) (the-element total-brick-volume)))
+   (total-cost (sum-elements (the brick-layers) (the-element total-brick-cost)))
+   
+   (mortar-volume (+ (sum-elements (the brick-layers) (the-element mortar-volume))
+                     (* (1- (the num-layers))(* (the mortar-height)(the width)(the length))))))
+  
+  :objects
+  (
+   (brick-layers :type 'brick-layer
+                 :sequence (:size (the num-layers))
+                 :brick-width (the brick-width)
+                 :brick-height (the brick-height)
+                 :offset? (oddp (the-child index))
+                 :center (translate (the center)
+                                    :up (* (the-child index) (+ (the-child height)
+                                                                (the mortar-height))))
+                 :brick-cost (the brick-cost)
+                 :display-controls (list :color :red))))
 
 
 (define-object brick-layer (box)
   :input-slots
-  ((num-bricks (floor(/ (the width) (the brick-width))))
+  ((num-bricks (floor (/ (the width) (the brick-width))))
    (offset? nil)
    (mortar-size (/ (the leftover) (1- (the num-bricks))))
    (brick-height 3)
    (brick-width 10)
-   (height (the brick-height)))
+   (height (the brick-height))
+   brick-cost
+   )
 
   :computed-slots
   ((leftover (- (the width) (* (the brick-width) (the num-bricks))))
-   (number-of-bricks (the bricks number-of-elements))
-   (total-volume (* (the number-of-bricks)(* (the width)(the length)(the height)))))
 
+   
+   (number-of-bricks (the bricks number-of-elements))
+   
+   (total-brick-volume (sum-elements (the bricks) (the-element volume)))
+
+   (total-brick-cost (* (the number-of-bricks) (the brick-cost)))
+
+   (mortar-volume (* (- (the width)
+                        (sum-elements (the bricks) (the-element width)))
+                     (the length) (the height))))
   
   :objects
   (
@@ -40,32 +74,14 @@
                                                (half (+ (the-child width)
                                                         (the-child previous width))))))))))
 
-(define-object brick-wall (box)
+(define-object brick (box)
   :input-slots
-  ((num-layers (floor (/ (the height) (the brick-height))))
-   (mortar-height 1)
-   (brick-height 4)
-   (brick-width 10)
-   (brick-cost 1.5))
+  ((width 10) (height 4) (length 3)))
 
-  :computed-slots
-  ((num-bricks (sum-elements (the brick-layers)(the-element number-of-bricks)))
-   (total-cost (* (the brick-cost)(the num-bricks)))
-   (brick-volume (* (the brick-height)(the brick-width)(the length)))
-   (total-volume (* (the num-bricks)(the brick-volume)))
-   (mortar-volume (* (1- (the num-layers))(* (the mortar-height)(the width)(the length)))))
-  
-  
-  :objects
-  (
-   (brick-layers :type 'brick-layer
-                 :sequence (:size (the num-layers))
-                 :brick-width (the brick-width)
-                 :brick-height (the brick-height)
-                 :offset? (oddp (the-child index))
-                 :center (translate (the center)
-                                    :up (* (the-child index) (+ (the-child height)
-                                                                (the mortar-height))))
-                 :display-controls (list :color :red))))
+
+
+
+
+
 
 
