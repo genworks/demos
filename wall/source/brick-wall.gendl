@@ -17,7 +17,8 @@
    (height (the brick-height)))
 
   :computed-slots
-  ((leftover (- (the width) (* (the brick-width) (the num-bricks)))))
+  ((leftover (- (the width) (* (the brick-width) (the num-bricks))))
+   (number-of-bricks (the bricks number-of-elements)))
 
   
   :objects
@@ -43,7 +44,12 @@
   ((num-layers (floor (/ (the height) (the brick-height))))
    (mortar-height 1)
    (brick-height 4)
-   (brick-width 10))
+   (brick-width 10)
+   (brick-cost 1.5))
+
+  :computed-slots
+  ((num-bricks (sum-elements (the brick-layers)(the-element number-of-bricks)))
+   (total-cost (* (the brick-cost)(the num-bricks))))
   
   
   :objects

@@ -6,22 +6,28 @@
  background-color: #aaa;
  font-family: "helvetica Neue", Helvetica, Arial, sans-serif;
  grid-template-columns: 1fr;
- grid-template-rows: auto auto 1fr;
+ grid-template-rows: auto auto 1fr auto;
  grid-template-areas: "title"
                       "inputs"
-                      "viewport";
+                      "viewport"
+                      "team"
+                      "table";
 }
 
 
 @media (min-width: 700px) {
     .gridfoo {
         grid-template-columns: auto 1fr;
-        grid-template-rows: auto 1fr;
-        grid-template-areas: "title title"
-                             "inputs viewport";
+        grid-template-rows: auto 1fr auto;
+        grid-template-areas: "blank title"
+                             "inputs viewport"
+                             "team table";
         
     }
 }
+
+.blank {
+    grid-area:blank;}
 
 
 .title {
@@ -32,12 +38,27 @@
 }
 
 .viewport {
-    grid-area: viewport;}
+    grid-area: viewport;
+    display: flex;
+    align-items: center;
+    justify-content: center;}
 
 .inputs {
     grid-area: inputs;
     display: flex;
     align-items: center;
 }
+
+.team {
+    grid-area: team;
+    display: flex;
+    align-items: center;
+    justify-content: center;}
+
+.table {
+    grid-area: table;
+    display: flex;
+    align-items: center;
+    justify-content: center;}
 
 

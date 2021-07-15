@@ -2,7 +2,8 @@
 
 (define-object assembly (base-ajax-graphics-sheet)
 
-  :input-slots ((title "Roofless House Design"))
+  :input-slots ((title "Roofless House Design") (meet "Meet our Leadership"))
+  
   
   :computed-slots
   (
@@ -21,17 +22,20 @@
                        (str (the development-links))
                        ((:div :class "gridfoo")
                         ((:div :class "cell title")
-                         ((:h2 :class "text-2xl font-bold leading-7 text-gray-900 sm:text-3xl sm:truncate")
+                         ((:h2 :class "text-2xl font-bold leading-7 text-red-600 sm:text-3xl sm:truncate")
                           (str (the title))))
                         ((:div :class "cell inputs")(str (the inputs-section main-div)))
                         ((:div :class "cell viewport")(str (the viewport-section main-div)))
+                        ((:div :class "cell team")(str (the team-section main-div)))
+                        ((:div :class "cell table")(str (the table-section main-div)))
                         )))
    
    (vector-graphics-onclick? nil)
    (display-list-object-roots (list (the wall) (the side-wall) (the right-wall) (the back-wall)))
-   (length 800) (width 800)
+   (length 500) (width 500)
    (background-color :grey)
    (view-direction-default :trimetric)
+
    )
   
 
@@ -106,6 +110,7 @@
                                  
                                    ((:div :class "mt-5 ml-1") (str (the submit-button form-control-string)))
                                    ((:div :class "mt-8 ml-1") (str (the view-selector form-control-string)))
+                                   
                                    ;;(:p ((:span :class "relative inline-block text-left")(str (the view-selector html-string))))
                                  
                                    ))))
@@ -135,7 +140,74 @@
    (viewport-section :type 'sheet-section
 		     :inner-html (with-cl-who-string ()
                                    (str (the svg-string))))
+
+   (team-section :type 'sheet-section
+                 :inner-html (with-cl-who-string ()
+                               ((:div :class "bg-white gap-12 lg:gap-8")
+                                (str "hey now"))))
+
+
+   (table-section :type 'sheet-section
+                  :inner-html (with-cl-who-string ()
+                                ((:div :class "flex flex-col")
+                                 ((:div :class "my-2 overflow-x-auto sm:-mx-6 lg:-mx-8")
+                                  ((:div :class "py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8")
+                                   ((:div :class "shadow overflow-hidden border-b border-gray-200 sm:rounded-lg")
+                                    ((:table :class "min-w-full divide-y divide-gray-200")
+                                     ((:thead :class "bg-gray-50")
+                                      (:tr
+                                       ((:th :scope "col" :class "px-6 py-3 text-left text-xs font-medium text-red-500 uppercase tracking-wider")(str "Number of Bricks"))
+                                       ((:th :scope "col" :class "px-6 py-3 text-left text-xs font-medium text-red-500 uppercase tracking-wider")(str "Total Cost"))
+                                       ((:th :scope "col" :class "px-6 py-3 text-left text-xs font-medium text-red-500 uppercase tracking-wider")(str "General Inquiries"))
+                                       ((:th :scope "col" :class "px-6 py-3 text-left text-xs font-medium text-red-500 uppercase tracking-wider")(str "Sales Inquiries"))
+                                       ((:th :scope "col" :class "px-6 py-3 text-left text-xs font-medium text-red-500 uppercase tracking-wider")(str "GitLab"))
+                                       ((:th :scope "col" :class "px-6 py-3 text-left text-xs font-medium text-red-500 uppercase tracking-wider")(str "Quicklisp")))
+                                      ((:tr :class "bg-white")
+                                       ((:td :class "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900")(str (+ (the wall num-bricks)(the side-wall num-bricks)(the right-wall num-bricks)(the back-wall num-bricks))))
+                                       ((:td :class "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900")(str (+ (the wall total-cost)(the side-wall total-cost)(the right-wall total-cost)(the back-wall total-cost))))
+                                       ((:td :class "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900")(str "info@genworks.com"))
+                                       ((:td :class "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900")(str "sales@genworks.com"))
+                                       ((:td :class "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900")(str "The Gendl Project"))
+                                       ((:td :class "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900")(str "(ql:quickload :gendl)") :br "(gendl:start-gendl!)"))))))))))
+                               
+                               
+                               
+                                       
+                                                                                                                                                  
+                                                                                                                                               
+                               
+                                         
+
+                               
+
+                               
+
+                               #+nil
+                               ((:div :class "bg-white grid grid-cols-1 gap-12 lg:grid-cols-3 lg:gap-8")
+                                ((:div: :class "space-y-5 sm:space-y-4")
+                                 ((:h2 :class "text-3xl font-extrabold tracking-tight sm:text-4xl")(str (the meet))))
+                                ((:div: :class "space-y-5 sm:space-y-4")
+                                 ((:h2 :class "text-3xl font-extrabold tracking-tight sm:text-4xl")(str "2"))
+                                ((:div: :class "space-y-5 sm:space-y-4")
+                                 ((:h2 :class "text-3xl font-extrabold tracking-tight sm:text-4xl")(str "hi")))))
+                               #+nil
+                               ((:div :class "bg-white")
+                                ((:div :class "mx-auto py-12 px-4 max-w-7xl sm:px-6 lg:px-8 lg:py-24")
+                                 ((:div :class "grid grid-cols-1 gap-12 lg:grid-cols-3 lg:gap-8")
+                                  ((:div: :class "space-y-5 sm:space-y-4")
+                                   ((:h2 :class "text-3xl font-extrabold tracking-tight sm:text-4xl")(str (the meet)))))))
+
+
+
+
    ))
+
+
+
+
+                               
+
+   
 
 
 
