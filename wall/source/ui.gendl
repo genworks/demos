@@ -45,7 +45,16 @@
    (total-cost-bricks (+ (the wall total-cost)
                          (the side-wall total-cost)
                          (the right-wall total-cost)
-                         (the back-wall total-cost))))
+                         (the back-wall total-cost)))
+
+   (total-volume-bricks (+ (the wall total-volume)
+                           (the side-wall total-volume)
+                           (the right-wall total-volume)
+                           (the back-wall total-volume)))
+   (total-volume-mortar (+ (the wall mortar-volume)
+                           (the side-wall mortar-volume)
+                           (the right-wall mortar-volume)
+                           (the back-wall mortar-volume))))
   
 
   :objects
@@ -167,8 +176,8 @@ border-b border-gray-100 p-6 text-center sm:border-0 sm:border-r")
                                       (:tr
                                        ((:th :scope "col" :class "px-6 py-3 text-left text-xs font-medium  text-red-500 uppercase tracking-wider")(str "Number of Bricks"))
                                        ((:th :scope "col" :class "px-6 py-3 text-left text-xs font-medium text-red-500 uppercase tracking-wider")(str "Total Cost"))
-                                       ((:th :scope "col" :class "px-6 py-3 text-left text-xs font-medium text-red-500 uppercase tracking-wider")(str "General Inquiries"))
-                                       ((:th :scope "col" :class "px-6 py-3 text-left text-xs font-medium text-red-500 uppercase tracking-wider")(str "Sales Inquiries"))
+                                       ((:th :scope "col" :class "px-6 py-3 text-left text-xs font-medium text-red-500 uppercase tracking-wider")(str "Total Brick Volume"))
+                                       ((:th :scope "col" :class "px-6 py-3 text-left text-xs font-medium text-red-500 uppercase tracking-wider")(str "Total Mortar Volume"))
                                        ((:th :scope "col" :class "px-6 py-3 text-left text-xs font-medium text-red-500 uppercase tracking-wider")(str "GitLab"))
                                        ((:th :scope "col" :class "px-6 py-3 text-left text-xs font-medium text-red-500 uppercase tracking-wider")(str "Quicklisp")))
                                       ((:tr :class "bg-white")
@@ -178,8 +187,10 @@ border-b border-gray-100 p-6 text-center sm:border-0 sm:border-r")
                                        ((:td :class "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900")
                                         (fmt "$~$" (the total-cost-bricks)))
                                        
-                                       ((:td :class "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900")(str "info@genworks.com"))
-                                       ((:td :class "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900")(str "sales@genworks.com"))
+                                       ((:td :class "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900")
+                                        (str (the total-volume-bricks))" units cubed")
+                                       ((:td :class "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900")
+                                        (str (the total-volume-mortar))" units cubed")
                                        ((:td :class "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900")(str "The Gendl Project"))
                                        ((:td :class "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900")(str "(ql:quickload :gendl)") :br "(gendl:start-gendl!)"))))))))))))
                                
