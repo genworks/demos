@@ -20,4 +20,4 @@
 ;; 
 
 
-("lumber" "package" "patches" "product" "planked-back" "planked-base" "planking")
+("lumber" "package" "planking" "patches" "product" "planked-back" "planked-base" )

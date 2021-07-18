@@ -15,6 +15,7 @@
 
   :objects
   ((surface :type 'planking:planked-surface
+            :plank-type 'lumber:2x6
             :display-controls (list :color :brown :transparency 0.5)
             :perimeter (the perimeter-points))
 
