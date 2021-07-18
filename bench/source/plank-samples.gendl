@@ -22,6 +22,7 @@
 
 (in-package :bench)
 
+#+nil
 (define-object plank-samples (base-object)
 
 
@@ -30,7 +31,7 @@
   :objects
   ((ref-box :type 'box)
    
-   (planking :type 'planking
+   (planking :type 'planking:planked-surface
 	     :display-controls (list :color :brown)
 	     :plank-type 'lumber:2x6
 	     :perimeter (let* ((p1 (the (vertex :top :left :front)))

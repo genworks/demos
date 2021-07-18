@@ -115,11 +115,11 @@
 ;; Planking assembly
 ;;
 
-(defmethod before-types ((self planking)(chosen-identifier (eql :assembly)))
+(defmethod before-types ((self planking:planked-surface)(chosen-identifier (eql :assembly)))
   (list-elements (the planks) (the-element type)))
 	  
 
-(defmethod before-input-plists ((self planking)(chosen-identifier (eql :assembly)))
+(defmethod before-input-plists ((self planking:planked-surface)(chosen-identifier (eql :assembly)))
   (mapcar #'inputs-from (list-elements (the planks))))
 
 
