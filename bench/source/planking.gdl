@@ -97,38 +97,51 @@
 		    ;;
 		    :center* (cond ((the-child datum?) (the center))
 				   ((eql (the-child) (the-child front))
-				    (let* ((z-center (flush-center (the center) (the-child datum (face-center :bottom))
-								   (the p-plane) (the u-plane)))
+				    (let* ((z-center
+                                             (flush-center (the center)
+                                                           (the-child datum
+                                                                      (face-center :bottom))
+                                                           (the p-plane) (the u-plane)))
 					   (p-plank (if (the perimeter)
-							(let ((y-min (least #'get-y (the perimeter))))
-							  (inter-line-plane z-center
-									    (the (face-normal-vector :front))
-									    y-min (the (face-normal-vector :front))))
+							(let ((y-min
+                                                                (least #'get-y
+                                                                       (the perimeter))))
+							  (inter-line-plane
+                                                           z-center
+                                                           (the (face-normal-vector :front))
+                                                           y-min (the (face-normal-vector
+                                                                       :front))))
 							(the p-plank))))
-				      (flush-center z-center (the-child datum (face-center :right)) p-plank (the u-front))))
-				  
+				      (flush-center z-center
+                                                    (the-child datum
+                                                               (face-center :right))
+                                                    p-plank (the u-front))))
 				   (t (translate (the-child previous center)
 						 :rear
 						 (+ (the-child width) (the spacing)))))
-		    :center (the-child center*))) ;; FLAG -- add adjustment for assymetcial perimeter.
+                    ;; FLAG -- add adjustment for assymetcial perimeter.
+		    :center (the-child center*))) 
 
   :functions
-  ((perimeter-bounds (point)
-		     (setq point (make-point (get-x point) (get-y point) 0))
-		     (let* ((intersects (remove
-					 nil
-					 (mapcar #'(lambda(a b)
-						     (setq a (make-point (get-x a) (get-y a) 0))
-						     (setq b (make-point (get-x b) (get-y b) 0))
-						     (inter-line-segment point (the (face-normal-vector :right))
-									 a b))
-						 (the perimeter) (rest (the perimeter)))))
-			    (x-min (least #'get-x intersects))
-			    (x-max (most #'get-x intersects)))
-		       (list x-min x-max)))))
+  ((perimeter-bounds
+    (point)
+    (setq point (make-point (get-x point) (get-y point) 0))
+    (let* ((intersects (remove
+			nil
+			(mapcar #'(lambda(a b)
+				    (setq a (make-point (get-x a) (get-y a) 0))
+				    (setq b (make-point (get-x b) (get-y b) 0))
+				    (inter-line-segment point
+                                                        (the (face-normal-vector :right))
+							a b))
+				(the perimeter) (rest (the perimeter)))))
+	   (x-min (least #'get-x intersects))
+	   (x-max (most #'get-x intersects)))
+      (list x-min x-max)))))
 
 ;;
-;; FLAG -- promote this to a geom-base utility, or make it a local :function here in the above object def. 
+;; FLAG -- promote this to a geom-base utility, or make it
+;;         a local :function here in the above object def. 
 ;;
 (defun inter-line-segment (p-line u-line a b)
   (let ((u-segment (subtract-vectors b a)))

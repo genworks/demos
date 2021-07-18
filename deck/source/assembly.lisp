@@ -15,7 +15,7 @@
 
   :objects
   ((surface :type 'planking:planked-surface
-            :display-controls (list :color :brown)
+            :display-controls (list :color :brown :transparency 0.5)
             :perimeter (the perimeter-points))
 
    (boundary :type 'global-polyline
