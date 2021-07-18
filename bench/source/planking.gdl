@@ -19,10 +19,11 @@
 ;; <http://www.gnu.org/licenses/>.
 ;; 
 
-(in-package :bench)
+(gwl:define-package :planking (:export #:planked-surface))
 
+(in-package :planking)
 
-(define-object planking (base-object)
+(define-object planked-surface (base-object)
 
   :input-slots ((p-plane (the (face-center :top)))
 		(u-plane (the (face-normal-vector :top)))
@@ -35,7 +36,7 @@
 
 		(u-front (cross-vectors (the u-plank) (the u-plane)))
 		
-		(plank-type '2x4)
+		(plank-type 'lumber:2x4)
 		(spacing-nominal 1/4)
 		;; FLAG -- input perimeter polygon.
 
@@ -126,6 +127,9 @@
 			    (x-max (most #'get-x intersects)))
 		       (list x-min x-max)))))
 
+;;
+;; FLAG -- promote this to a geom-base utility, or make it a local :function here in the above object def. 
+;;
 (defun inter-line-segment (p-line u-line a b)
   (let ((u-segment (subtract-vectors b a)))
   (let ((possible (inter-line-line p-line u-line a u-segment)))

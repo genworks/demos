@@ -36,7 +36,7 @@
 	  ;;:display-controls (list :color (if (the painted?) :brown :tan))
 	  )
    
-   (planking :type 'planking
+   (planking :type 'planking:planked-surface
 	     :pass-down (plank-type)
 	     :p-plane (the (face-center :top))
 	     :u-plane (the (face-normal-vector :top))

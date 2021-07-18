@@ -30,7 +30,7 @@
   ((frame :type 'base-frame
 	  :pass-down (armrest-overhang))
    
-   (planking :type 'planking
+   (planking :type 'planking:planked-surface
 	     :pass-down (plank-type)
 	     :p-plane (the frame (crossmembers 0) (face-center :right))
 	     :u-plane (the (face-normal-vector :top))
