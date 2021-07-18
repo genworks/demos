@@ -1,0 +1,55 @@
+;;
+;; Copyright 2020 Genworks International 
+;;
+;; This source file is part of the General-purpose Declarative
+;; Language project (Gendl).
+;;
+;; This source file contains free software: you can redistribute it
+;; and/or modify it under the terms of the GNU Affero General Public
+;; License as published by the Free Software Foundation, either
+;; version 3 of the License, or (at your option) any later version.
+;; 
+;; This source file is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;; Affero General Public License for more details.
+;; 
+;; You should have received a copy of the GNU Affero General Public
+;; License along with this source file.  If not, see
+;; <http://www.gnu.org/licenses/>.
+;; 
+
+
+(in-package :bench)
+
+(define-object planked-back (base-object)
+
+  :input-slots (width length height display-controls
+		      recline-angle-degrees
+		      plank-type crossmember-spread)
+
+  :computed-slots ((strings-for-display "back"))
+  
+  :objects
+  ((frame :type 'back-frame
+	  :pass-down (recline-angle-degrees crossmember-spread)
+	  ;;:display-controls (list :color (if (the painted?) :brown :tan))
+	  )
+   
+   (planking :type 'planking
+	     :pass-down (plank-type)
+	     :p-plane (the (face-center :top))
+	     :u-plane (the (face-normal-vector :top))
+	     :p-plank (the (face-center :front))
+	     :u-plank (the (face-normal-vector :right))
+	     :shorter-plank-indices (list 1 2)
+	     :shorter-plank-length (the width)
+	     :longer-plank-length (+ (the width)
+				     (twice (the-object (make-object (the-child plank-type))
+							width))))))
+
+
+(define-object test-planked-back (planked-back)
+  :computed-slots
+  ((width (+ 3 56)) (length 19) (height (+ 1/2 3)) (display-controls (list :color :green))
+   (recline-angle-degrees 15) (plank-type '2x4)))

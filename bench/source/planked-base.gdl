@@ -1,0 +1,60 @@
+;;
+;; Copyright 2020 Genworks International 
+;;
+;; This source file is part of the General-purpose Declarative
+;; Language project (Gendl).
+;;
+;; This source file contains free software: you can redistribute it
+;; and/or modify it under the terms of the GNU Affero General Public
+;; License as published by the Free Software Foundation, either
+;; version 3 of the License, or (at your option) any later version.
+;; 
+;; This source file is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;; Affero General Public License for more details.
+;; 
+;; You should have received a copy of the GNU Affero General Public
+;; License along with this source file.  If not, see
+;; <http://www.gnu.org/licenses/>.
+;; 
+
+
+(in-package :bench)
+
+(define-object planked-base (base-object)
+
+  :input-slots (armrest-overhang plank-type)
+  
+  :objects
+  ((frame :type 'base-frame
+	  :pass-down (armrest-overhang))
+   
+   (planking :type 'planking
+	     :pass-down (plank-type)
+	     :p-plane (the frame (crossmembers 0) (face-center :right))
+	     :u-plane (the (face-normal-vector :top))
+	     :length (- (the length) (the armrest-overhang))
+	     :perimeter (let* ((inside-length (- (the length) (the armrest-overhang)))
+			       (leg-width (half (the frame legs-width)))
+			       (p1 (translate (the (vertex :top :front :right)) :left leg-width :rear (the armrest-overhang)))
+			       (p2 (translate p1 :rear leg-width))
+			       (p3 (translate p2 :right leg-width))
+			       (p4 (translate p3 :rear (- inside-length (the frame legs-width))))
+			       (p5 (translate p4 :left leg-width))
+			       (p6 (translate p5 :rear leg-width))
+			       (p7 (translate p6 :left (- (the width) (the frame legs-width))))
+			       (p8 (translate p7 :front leg-width))
+			       (p9 (translate p8 :left leg-width))
+			       (p10 (translate p9 :front (- inside-length (the frame legs-width))))
+			       (p11 (translate p10 :right leg-width))
+			       (p12 (translate p11 :front leg-width)))
+			  (list p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p1)))))
+
+
+
+(define-object test-planked-base (planked-base)
+  :computed-slots
+  ((armrest-overhang 3/2) (plank-type '2x4) (length 55/2) (width 66) (height 25)))
+
+

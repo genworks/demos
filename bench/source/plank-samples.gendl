@@ -1,0 +1,42 @@
+;;
+;; Copyright 2020 Genworks International 
+;;
+;; This source file is part of the General-purpose Declarative
+;; Language project (Gendl).
+;;
+;; This source file contains free software: you can redistribute it
+;; and/or modify it under the terms of the GNU Affero General Public
+;; License as published by the Free Software Foundation, either
+;; version 3 of the License, or (at your option) any later version.
+;; 
+;; This source file is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;; Affero General Public License for more details.
+;; 
+;; You should have received a copy of the GNU Affero General Public
+;; License along with this source file.  If not, see
+;; <http://www.gnu.org/licenses/>.
+;; 
+
+
+(in-package :bench)
+
+(define-object plank-samples (base-object)
+
+
+  :computed-slots ((length 17 :settable) (width 15) (height 3))
+  
+  :objects
+  ((ref-box :type 'box)
+   
+   (planking :type 'planking
+	     :display-controls (list :color :brown)
+	     :plank-type 'lumber:2x6
+	     :perimeter (let* ((p1 (the (vertex :top :left :front)))
+			       (p2 (the (vertex :top :left :rear)))
+			       (p3 (the (vertex :top :right :rear)))
+			       (p4 (the (vertex :top :right :front)))
+			       (p5 p1))
+			  (list p1 p2 p3 p4 p5)))))
+

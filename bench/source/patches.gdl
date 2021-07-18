@@ -1,0 +1,97 @@
+;;;; -*- coding: utf-8 -*-
+;;
+;; Copyright 2020 Genworks International
+;;
+;; This source file is part of the General-purpose Declarative
+;; Language project (Gendl).
+;;
+;; This source file contains free software: you can redistribute it
+;; and/or modify it under the terms of the GNU Affero General Public
+;; License as published by the Free Software Foundation, either
+;; version 3 of the License, or (at your option) any later version.
+;; 
+;; This source file is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;; Affero General Public License for more details.
+;; 
+;; You should have received a copy of the GNU Affero General Public
+;; License along with this source file.  If not, see
+;; <http://www.gnu.org/licenses/>.
+;; 
+
+;;
+;; This file can be purged with latest build. 
+;;
+
+;;
+;; Below can be cleared with 1596
+;;
+
+(in-package :geom-base)
+
+
+#+nil
+(#+allegro
+ excl:without-package-locks
+ #-allegro progn
+
+ (defun flush-center (ref-center datum p-plane u-plane &optional (u-datum u-plane))
+   (translate-along-vector ref-center u-datum
+			   (distance-to-plane datum p-plane u-plane u-datum)))
+
+ (defun distance-to-plane (datum p-plane u-plane &optional (u-datum u-plane))
+   (3d-distance datum (inter-line-plane datum u-datum p-plane u-plane)))
+
+ (eval-when (:compile-toplevel :load-toplevel :execute)
+   (export '(flush-center distance-to-plane) :geom-base)))
+
+;;
+;; All below can be cleared as of 1596
+;;
+
+;;(in-package :gdl)
+
+#+nil
+(#+allegro
+ excl:without-package-locks
+ #-allegro progn
+
+
+ 
+ (defun %unbind-dependent-slots% (object slot &key updating?)
+   (let ((current (gethash (list object slot) *unbound-slots*)))
+     (unless current
+       (setf (gethash (list object slot) *unbound-slots*) t)
+       (if (slot-exists-p object slot)
+           (let ((slot-value (slot-value object slot)))
+             (when (not (eq (first (ensure-list slot-value)) 'gdl-rule:%unbound%))
+               (when (and *eager-setting-enabled?* (null (second slot-value)))
+                 (push (list object slot) *leaf-resets*))
+               (let ((list-or-hash (second slot-value)))
+                 (if (listp list-or-hash)
+                     (mapc #'(lambda(notify-cons)
+                               (destructuring-bind (node . messages) notify-cons
+                                 (mapc #'(lambda(message) 
+                                           (%unbind-dependent-slots% node message 
+                                                                     :updating? updating?)) 
+                                       messages))) list-or-hash)
+                     (maphash #'(lambda(node messages)
+                                  (mapc #'(lambda(message) 
+                                            (%unbind-dependent-slots%  node message 
+                                                                       :updating? updating?)) 
+					messages)) list-or-hash)))
+               (if (third slot-value)
+                   (setf (second (slot-value object slot)) nil)
+                   (setf (slot-value object slot)
+			 (if (or updating? (not (the-object object remember-children?))
+				 (not *remember-previous-slot-values?*))
+			     'gdl-rule::%unbound%
+			     (list 'gdl-rule::%unbound% nil nil (first (slot-value object slot))))))))
+           (when (and (find-class 'gdl-remote nil) (typep object 'gdl-remote))
+             (the-object object (unbind-remote-slot slot)))))))) 
+
+
+
+
+

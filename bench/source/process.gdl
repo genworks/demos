@@ -1,0 +1,110 @@
+;;
+;; Copyright 2020 Genworks International 
+;;
+;; This source file is part of the General-purpose Declarative
+;; Language project (Gendl).
+;;
+;; This source file contains free software: you can redistribute it
+;; and/or modify it under the terms of the GNU Affero General Public
+;; License as published by the Free Software Foundation, either
+;; version 3 of the License, or (at your option) any later version.
+;; 
+;; This source file is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;; Affero General Public License for more details.
+;; 
+;; You should have received a copy of the GNU Affero General Public
+;; License along with this source file.  If not, see
+;; <http://www.gnu.org/licenses/>.
+;; 
+
+
+(in-package :bench)
+
+;;
+;; FLAG -- promote to its own generic package similar to SPPA
+;;
+
+(define-object process-object (outline-specialization-mixin)
+  :input-slots
+  (after
+
+   (available-identifiers (list  :painting :assembly  :drilling :cutting)))
+
+  :computed-slots
+  ((outline-objects (the after leaves))
+   
+   ;;(chosen-identifier (first (the available-identifiers)))
+
+
+   (applied-identifier (if (the applied-operation)
+			   (the applied-operation chosen-identifier)
+			   :purchasing))
+
+   (applied-operation (first
+		       (remove-if #'zerop
+				  (list-elements (the operation))
+				  :key #'(lambda(object)
+					   (the-object object before number-of-elements)))))
+
+   (input-objects (when (the applied-operation)
+		    (the applied-operation left-over-input-objects)))
+
+   (strings-for-display (format nil "~:(~a~) of ~a" (the applied-identifier)
+				(the after type)
+				#+nil
+				(if (eql (the applied-identifier) :purchasing)
+				    (the after type)
+				    (the after strings-for-display)))))
+
+  
+  :objects
+  ((sub-processes :type 'process-object
+		  :sequence (:size (length (the input-objects)))
+		  :after (nth (the-child index) (the input-objects))))
+  
+  :hidden-objects
+  ((operation :type 'process-operation
+	      :sequence (:size (length (the available-identifiers)))
+	      :chosen-identifier (nth (the-child index) (the available-identifiers))
+	      :hidden? (eql (the-child) (the applied-operation))
+	      :after (the after))))
+
+(define-object process-operation ()
+  :input-slots
+  (chosen-identifier
+   after)
+
+  :computed-slots
+  ((left-over-input-objects (list-elements (the before)))
+
+   (before-types (before-types (the after) (the chosen-identifier)))
+   
+   (before-input-plists (before-input-plists (the after) (the chosen-identifier))))
+
+  :objects
+  ((before :sequence (:size (length (the before-input-plists)))
+	   :type (:sequence (the before-types))
+	   :parameters (nth (the-child index) (the before-input-plists)))))
+
+
+(defparameter *ignored-inputs*
+  (list  :%orientation% :obliqueness :local-box
+	 :bounding-box :use-local-box? :quantify-box 
+	 :transitory-slots :visible-children :hidden?))
+
+(defun inputs-from (object &key (ignored-inputs *ignored-inputs*))
+  (let ((messages
+	 (append (the-object object (message-list :category :optional-input-slots))
+		 (the-object object (message-list :category :required-input-slots))
+		 (the-object object (message-list :category :defaulted-input-slots)))))
+    (mapcan #'(lambda(message)
+		(list message (the-object object (evaluate message))))
+	    (remove-if #'(lambda(mess)
+			   (member mess ignored-inputs))
+		       messages))))
+
+
+
+
