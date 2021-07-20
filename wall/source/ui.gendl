@@ -60,8 +60,8 @@
    (inputs-section :type 'sheet-section
                    :inner-html (with-cl-who-string ()
                                  ((:div
-                                   :class "ml-3 mr-3 rounded-lg bg-blue-500 shadow-lg flex flex-col \
-border-b border-gray-100 p-6 text-center sm:border-0 sm:border-r")
+                                   :class "ml-3 mr-3 rounded-lg bg-blue-500 shadow-lg flex flex-col \border-b border-gray-100 p-6 text-center sm:border-0 sm:border-r")
+                                  ;;sm-border-0
                                   
                                   (dolist (input (list (the length-input) (the height-input) (the width-input)))
                                     (htm

@@ -81,14 +81,24 @@
 		    :rear (the planks last)
 		    :front (the (planks 1))
 
-		    :pseudo-inputs (datum datum? rear front center*)
+		    :pseudo-inputs (datum datum? rear front center* length-and-endpoints
+                                          mid-point)
 		    
-		    :length (if (the perimeter)
-				(apply #'3d-distance
-				       (the (perimeter-bounds (the-child center))))
-				(if (member (the-child index) (the shorter-plank-indices))
-				    (the shorter-plank-length) (the longer-plank-length)))
+		    :length-and-endpoints
+                    (if (the perimeter)
+                        (let ((bounds (the (perimeter-bounds (the-child center*)))))
+                          (destructuring-bind (start end) bounds
+                            (list :length (3d-distance start end)
+                                  :start start :end end)))
+                        (error "We just work with perimeters for now.~%")
+                        #+nil
+                        (if (member (the-child index) (the shorter-plank-indices))
+                            (the shorter-plank-length) (the longer-plank-length)))
 
+                    :mid-point (midpoint (getf (the-child length-and-endpoints) :start)
+                                         (getf (the-child length-and-endpoints) :end))
+                                         
+                    :length (getf (the-child length-and-endpoints) :length)
 		    
 		    :hidden? (the-child datum?)
 		    :orientation (alignment :top (the u-plane) :rear (the u-plank))
@@ -106,7 +116,7 @@
 							(let ((y-min
                                                                 (least #'get-y
                                                                        (the perimeter))))
-							  (inter-line-plane
+							  (inter-line-plane 
                                                            z-center
                                                            (the (face-normal-vector :front))
                                                            y-min (the (face-normal-vector
@@ -120,7 +130,10 @@
 						 :rear
 						 (+ (the-child width) (the spacing)))))
                     ;; FLAG -- add adjustment for assymetcial perimeter.
-		    :center (the-child center*))) 
+		    :center (make-point (get-x (the-child mid-point))
+                                        (get-y (the-child center*))
+                                        (get-z (the-child center*)))))
+                                        
 
   :functions
   ((perimeter-bounds
