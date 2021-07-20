@@ -81,24 +81,26 @@
 		    :rear (the planks last)
 		    :front (the (planks 1))
 
-		    :pseudo-inputs (datum datum? rear front center* length-and-endpoints
+		    :pseudo-inputs (datum datum? rear front center* length-and-center
                                           mid-point)
 		    
-		    :length-and-endpoints
+		    :length-and-center
                     (if (the perimeter)
                         (let ((bounds (the (perimeter-bounds (the-child center*)))))
                           (destructuring-bind (start end) bounds
                             (list :length (3d-distance start end)
-                                  :start start :end end)))
-                        (error "We just work with perimeters for now.~%")
-                        #+nil
-                        (if (member (the-child index) (the shorter-plank-indices))
-                            (the shorter-plank-length) (the longer-plank-length)))
+                                  :center (make-point (get-x (midpoint start end))
+                                                      (get-y (the-child center*))
+                                                      (get-z (the-child center*))))))
+                        (list :length
+                              (if (member (the-child index) (the shorter-plank-indices))
+                                  (the shorter-plank-length) (the longer-plank-length))
+                              :center (the-child center*)
 
-                    :mid-point (midpoint (getf (the-child length-and-endpoints) :start)
-                                         (getf (the-child length-and-endpoints) :end))
-                                         
-                    :length (getf (the-child length-and-endpoints) :length)
+                              ))
+
+                    :length (getf (the-child length-and-center) :length)
+                    :center (getf (the-child length-and-center) :center)
 		    
 		    :hidden? (the-child datum?)
 		    :orientation (alignment :top (the u-plane) :rear (the u-plank))
@@ -128,11 +130,8 @@
                                                     p-plank (the u-front))))
 				   (t (translate (the-child previous center)
 						 :rear
-						 (+ (the-child width) (the spacing)))))
-                    ;; FLAG -- add adjustment for assymetcial perimeter.
-		    :center (make-point (get-x (the-child mid-point))
-                                        (get-y (the-child center*))
-                                        (get-z (the-child center*)))))
+						 (+ (the-child width) (the spacing)))))))
+
                                         
 
   :functions
