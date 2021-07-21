@@ -2,11 +2,14 @@
 
 (define-object assembly (base-ajax-graphics-sheet)
 
-  :input-slots ((title "Roofless House Design") (meet "Meet our Leadership"))
+  :input-slots ((title "Roofless House Design") 
+                (image-format-default :svg))
   
   
   :computed-slots
   (
+
+   (use-x3dom? t)
    (additional-header-content
     (with-cl-who-string ()
       ((:meta :charset "UTF-8"))
@@ -15,8 +18,24 @@
       ((:link :href "/wall-static/tailwind.css" :rel "stylesheet"))
       ((:link :href "/wall-static/styles.css" :rel "stylesheet"))))
 
-
    
+
+
+   (viewport-script
+    (progn 
+      ;;(the inner-html)
+      (cond ((member (the image-format-selector value) (list :x3dom :svg))
+	     (with-cl-who-string ()
+               (:div
+                ((:script :type "text/javascript")
+                 (str (the viewport-js-text))
+                 
+		 ;;(str (the popup-menu-text))
+
+                 ))))
+            (t ""))))
+
+   (use-svgpanzoom? t)
 
    (main-sheet-body  (with-cl-who-string ()
                        (str (the development-links))
@@ -25,7 +44,8 @@
                          ((:h2 :class "text-2xl font-bold leading-7 text-blue-800 sm:text-3xl sm:truncate")
                           (str (the title))))
                         ((:div :class "cell inputs")(str (the inputs-section main-div)))
-                        ((:div :class "cell viewport")(str (the viewport-section main-div)))
+                        ((:div :id "viewport" :class "cell viewport")(str (the viewport-section main-div)))
+                        ((:div :id "viewport-script") (str (the viewport-script-section main-div)))
                         ((:div :class "cell table")(str (the table-section main-div)))
                         )))
 
@@ -55,7 +75,9 @@
 
   
   (
-   (deck :type 'deck:assembly)
+   (deck :type 'deck:assembly
+         :length (the length-input value)
+         :width (the width-input value))
 
 
    (house :type 'wall:house
@@ -101,8 +123,16 @@
    
    (viewport-section :type 'sheet-section
 		     :inner-html (with-cl-who-string ()
-                                   (str (the svg-string))))
+                                   (ecase (the image-format-selector value)
+                                     ((:png :jpg) (str (the raster-graphics)))
+                                     (:svg (str (the svg-string)))
+                                     (:x3dom (str (the x3dom-graphics))))))
+   
 
+   (viewport-script-section :type 'sheet-section
+                            :js-to-eval :parse                                   
+                            :inner-html (the viewport-script))
+                                     
 
    (table-section :type 'sheet-section
                   :inner-html (with-cl-who-string ()
@@ -129,14 +159,46 @@
                                
    
                                
-
   
 
+(define-lens (html-format assembly)()
+  :output-functions
+  (("Void. Writes an embedded X3D tag and included content for the <tt>view-object</tt> child of this object. 
+The <tt>view-object</tt> child should exist and be of type <tt>web-drawing</tt>."
 
-
-                               
-
-   
-
-
-
+    embedded-x3dom-world
+    (&key (include-view-controls? nil))
+    
+    (declare (ignore include-view-controls?))
+    
+    ;; (the (restore-slot-default! :js-to-eval))
+    
+    (with-cl-who ()
+      
+      (when (typep (the :view-object) 'null-part)
+        (error "A valid :view-object of type web-drawing is required in the sheet 
+to call the :write-embedded-x3d-world function."))
+          
+      (cond ((the no-graphics?)
+             (htm
+              ((:div :id "empty-viewport" :class "empty-viewport")
+               (str (the empty-display-list-message)))))
+            (t
+             (let ((*display-controls* (the display-controls-hash)))
+               (htm
+                ((:span :id "x3d-viewport")
+                 ((:|X3D| :id "x3dom-1" :style "background: #d3d3d3"
+                    :width (if (numberp (the width)) (format nil "~apx" (the width)) (the width))
+                    :height (if (numberp (the length)) (format nil "~apx" (the length)) (the length)))
+                  (:|Scene|
+                     
+                    ((:|navigationinfo| :|id| "navi" :|transitionTime| "0.0"
+                       ))
+                     
+                     
+                    (with-format (x3d *stream*) 
+                      (let ((*onclick-function* (the onclick-function)))
+                        (write-the view-object cad-output)))))
+                 
+                 )
+                ))))))))
