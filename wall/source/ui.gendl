@@ -22,7 +22,7 @@
                        (str (the development-links))
                        ((:div :class "gridfoo")
                         ((:div :class "cell title")
-                         ((:h2 :class "text-2xl font-bold leading-7 text-red-600 sm:text-3xl sm:truncate")
+                         ((:h2 :class "text-2xl font-bold leading-7 text-blue-800 sm:text-3xl sm:truncate")
                           (str (the title))))
                         ((:div :class "cell inputs")(str (the inputs-section main-div)))
                         ((:div :class "cell viewport")(str (the viewport-section main-div)))
@@ -40,9 +40,9 @@
                            :value (format nil "~a cubic inches" (the total-volume-mortar)))))
    
    (vector-graphics-onclick? nil)
-   (display-list-object-roots (list (the house)))
+   (display-list-object-roots (list (the house)(the deck)))
    (length 500) (width 500)
-   (background-color :grey)
+   (background-color "#ffffff")
    (view-direction-default :trimetric)
 
    (total-number-of-bricks (the house total-number-of-bricks))
@@ -52,7 +52,13 @@
 
 
   :objects
-  ((house :type 'wall:house
+
+  
+  (
+   (deck :type 'deck:assembly)
+
+
+   (house :type 'wall:house
           :wall-length (the length-input value)
           :wall-width (the width-input value)
           :wall-height (the height-input value))
@@ -60,14 +66,14 @@
    (inputs-section :type 'sheet-section
                    :inner-html (with-cl-who-string ()
                                  ((:div
-                                   :class "ml-3 mr-3 rounded-lg bg-blue-500 shadow-lg flex flex-col \border-b border-gray-100 p-6 text-center sm:border-0 sm:border-r")
+                                   :class "ml-3 mr-3 rounded-lg bg-blue-800 shadow-lg flex flex-col \border-b border-gray-100 p-6 text-center sm:border-0 sm:border-r")
                                   ;;sm-border-0
                                   
                                   (dolist (input (list (the length-input) (the height-input) (the width-input)))
                                     (htm
                                      (:div
                                       ((:label :for (the-object input id)
-                                               :class "text-lg font-bold ml-1 block text-sm font-medium text-gray-700")
+                                               :class "text-lg font-bold ml-1 block text-sm font-medium text-white")
                                        (str (the-object input prompt)))
                                       ((:div :class "mt-1 ml-1") (str (the-object input form-control-string))))))
 
@@ -78,13 +84,21 @@
                                  
                                   )))
 
-   (length-input :type 'number-form-control :default 3 :class "text-lg" :prompt "Length")
-   (width-input :type 'number-form-control :default 50 :class "text-lg" :prompt "Width")
-   (height-input :type 'number-form-control :default 15 :class "text-lg" :prompt "Height")
-   (submit-button :type 'button-form-control :prompt " OK " :class "btn-blue"
+   (length-input :type 'number-form-control :default 3 :class "text-lg rounded-lg" :prompt "Length")
+   (width-input :type 'number-form-control :default 50 :class "text-lg rounded-lg" :prompt "Width")
+   (height-input :type 'number-form-control :default 15 :class "text-lg rounded-lg" :prompt "Height")
+   (submit-button :type 'button-form-control :prompt " OK " :class "text-white bg-green-600 hover:bg-green-700 btn"
                   :onclick (the (gdl-ajax-call :form-controls (list (the length-input)
                                                                     (the height-input)
                                                                     (the width-input)))))
+   (view-selector :type 'menu-form-control
+                  :size 1
+                  :prompt "View"
+                  :class "rounded-lg"
+                  :onchange (the (gdl-ajax-call :form-controls (list (the-child))))
+                  :choice-list (plist-keys (the standard-views))
+                  :default (the view-direction-default))
+   
    (viewport-section :type 'sheet-section
 		     :inner-html (with-cl-who-string ()
                                    (str (the svg-string))))
@@ -95,7 +109,7 @@
                                 ((:div :class "flex flex-col")
                                  ((:div :class "my-2 overflow-x-auto sm:-mx-6 lg:-mx-8")
                                   ((:div :class "py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8")
-                                   ((:div :class "shadow overflow-hidden border-b border-gray-200 sm:rounded-lg")
+                                   ((:div :class "shadow overflow-hidden border-b border-gray-200 sm:rounded-lg bg-blue-800")
                                     
                                     ((:table :class "min-w-full divide-y divide-gray-200")
                                      ((:thead :class "bg-gray-50")
@@ -104,7 +118,7 @@
                                          (let ((heading (getf column :heading)))
                                            (htm
                                             ((:th :scope "col" :class
-                                                  "px-6 py-3 text-left text-xs font-medium  text-red-500 uppercase tracking-wider")
+                                                  "px-6 py-3 text-left text-xs font-medium  text-white uppercase tracking-wider")
                                              (str heading))))))
                                       ((:tr :class "bg-white")
                                        (dolist (column (the table-data))

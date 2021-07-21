@@ -3,14 +3,27 @@
 (define-object assembly (base-object)
 
   :input-slots
-  ((width (* 10 12))
-   (length (* 20 12))
+  ((width (* 10 12) :settable)
+   (length (* 20 12) :settable)
    (perimeter-points (let ((path (list (the (vertex :top :left :front))
                                        (the (edge-center :top :left))
                                        (the (edge-center :top :rear))
                                        (the (vertex :top :right :rear))
                                        (the (vertex :top :right :front)))))
-                       (append path (list (first path))))))
+                       (append path (list (first path)))))
+   
+   (joist-pitch-default 16) :settable
+
+   (inner-width (- (the width) (the joist-reference height)))
+   
+   (number-of-joists (let ((nominal (1+ (ceiling (/ (- (the width) (twice (the joist-reference height)))
+                                                    (the joist-pitch-default))))))
+                       (let* ((gap-width (/ (the inner-width)
+                                            (- nominal 1))))
+                         (if (<= gap-width 16) nominal (1+ nominal)))))
+
+   )
+
 
 
   :objects
@@ -20,5 +33,28 @@
             :perimeter (the perimeter-points))
 
    (boundary :type 'global-polyline
-              :vertex-list (the perimeter-points))))
+             :vertex-list (the perimeter-points))
+
+   (joist-reference :type 'lumber:2x6
+                    :hidden? t)
+   
+   (joists :type 'lumber:2x6
+           :sequence (:size (the number-of-joists))
+           :orientation (alignment :top (the (face-normal-vector :right))
+                                   :rear (the (face-normal-vector :rear)))
+
+
+           :center (cond ((the-child first?) (translate (the (edge-center :top :right))
+                                                        :down (half (the-child width))
+                                                        :left (half (the-child height))))
+                         ((the-child last?) (translate (the (edge-center :top :left))
+                                                        :down (half (the-child width))
+                                                        :right (half (the-child height))))
+
+                         ((eql (the-child) (the joists last previous))
+                          (midpoint (the-child previous center)
+                                    (the joists last center)))
+                         
+                         (t (translate (the-child previous center)
+                                       :left (the joist-pitch-default)))))))
 
