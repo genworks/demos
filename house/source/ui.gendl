@@ -1,9 +1,11 @@
-(in-package :wall-ui)
+(in-package :house-ui)
 
-(define-object assembly (base-ajax-graphics-sheet)
+(define-object assembly (base-ajax-graphics-sheet geysr:assembly) ;;(base-ajax-graphics-sheet)
 
   :input-slots ((title "Roofless House Design") 
-                (image-format-default :svg))
+                (image-format-default :svg)
+                ;;(image-format-default :x3dom)
+                )
   
   
   :computed-slots
@@ -15,27 +17,33 @@
       ((:meta :charset "UTF-8"))
       ((:meta :name "viewport" :content "width=device-width, initial-scale=1.0"))
       (:title "Document")
-      ((:link :href "/wall-static/tailwind.css" :rel "stylesheet"))
-      ((:link :href "/wall-static/styles.css" :rel "stylesheet"))))
+      ((:link :href "/house-static/tailwind.css" :rel "stylesheet"))
+      ((:link :href "/house-static/styles.css" :rel "stylesheet"))
+      ((:link :href "/geysr-static/menu.css" :rel "stylesheet"))
 
-   
+      ))
 
-
-   (viewport-script
-    (progn 
-      ;;(the inner-html)
-      (cond ((member (the image-format-selector value) (list :x3dom :svg))
-	     (with-cl-who-string ()
-               (:div
-                ((:script :type "text/javascript")
-                 (str (the viewport-js-text))
-                 
-		 ;;(str (the popup-menu-text))
-
-                 ))))
-            (t ""))))
 
    (use-svgpanzoom? t)
+   (x3dom? (eql (the viewport image-format-selector value) :x3dom))
+
+
+   (respondent self)
+   (resize-callback (format nil "gdlResize('~a');" (the root-path)))
+   (body-onpageshow (unless (the x3dom?) (the resize-callback)))
+   (body-onresize (unless (the x3dom?) (the resize-callback)))
+   (body-onpageload (unless (the x3dom?) (the resize-callback)))
+
+   (menu-included-children (list :view))
+   (menu-div-class "popup-menu")
+
+   (menu-clear-func #'(lambda()
+                        ()))
+
+   (viewport-dimensions (list :width 500  :length 500) :settable)   
+
+
+   (svg-class "rounded-lg")
 
    (main-sheet-body  (with-cl-who-string ()
                        (str (the development-links))
@@ -44,9 +52,23 @@
                          ((:h2 :class "text-2xl font-bold leading-7 text-blue-800 sm:text-3xl sm:truncate")
                           (str (the title))))
                         ((:div :class "cell inputs")(str (the inputs-section main-div)))
-                        ((:div :id "viewport" :class "cell viewport")(str (the viewport-section main-div)))
-                        ((:div :id "viewport-script") (str (the viewport-script-section main-div)))
+
+                        ((:div :class "cell viewport" :id "viewport")
+			 (str (the viewport main-div)))
+
                         ((:div :class "cell table")(str (the table-section main-div)))
+                        
+			((:div :id "menu-script")
+			 (str (the menu main-div))
+			 (str (the menu-script main-div)))
+			
+			((:div :id "viewport-script" :style "display: none;")
+			 (str (the viewport-script main-div)))
+
+                        
+                        ;;((:div :id "viewport" :class "cell viewport")(str (the viewport-section main-div)))
+                        
+                        
                         )))
 
 
@@ -61,7 +83,7 @@
    
    (vector-graphics-onclick? nil)
    (display-list-object-roots (list (the house)(the deck)))
-   (length 500) (width 500)
+   ;;(length 500) (width 500)
    (background-color "#ffffff")
    (view-direction-default :trimetric)
 
@@ -80,7 +102,7 @@
          :width (the width-input value))
 
 
-   (house :type 'wall:house
+   (house :type 'house:assembly
           :wall-length (the length-input value)
           :wall-width (the width-input value)
           :wall-height (the height-input value))
@@ -120,18 +142,22 @@
                   :onchange (the (gdl-ajax-call :form-controls (list (the-child))))
                   :choice-list (plist-keys (the standard-views))
                   :default (the view-direction-default))
-   
+
+   #+nil
    (viewport-section :type 'sheet-section
 		     :inner-html (with-cl-who-string ()
+                                   (str (the viewport main-div))
+                                   (str (the viewport-script main-div))
+                                   #+nil
                                    (ecase (the image-format-selector value)
                                      ((:png :jpg) (str (the raster-graphics)))
                                      (:svg (str (the svg-string)))
                                      (:x3dom (str (the x3dom-graphics))))))
-   
 
-   (viewport-script-section :type 'sheet-section
-                            :js-to-eval :parse                                   
-                            :inner-html (the viewport-script))
+   (viewport-script :type 'sheet-section
+		    :js-to-eval :parse
+		    :inner-html (the viewport viewport-script))
+   
                                      
 
    (table-section :type 'sheet-section
@@ -155,12 +181,42 @@
                                          (let ((value (getf column :value)))
                                            (htm
                                             ((:td :class "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900")
-                                             (str value))))))))))))))))
+                                             (str value))))))))))))))
+
+   (viewport :type 'geysr:viewport
+             :display-list-object-roots (the display-list-object-roots)
+	     :view-direction-default :trimetric
+	     :image-format-default (the image-format-default)
+	     :image-format-plist (list :png "PNG image"
+				       :jpeg "JPEG image"
+				       :x3dom "Shaded"
+				       ;;:web3d "VRML/X3D"
+				       :svg "Wireframe")
+	     
+	     :empty-display-list-message (with-cl-who-string ()
+					   (:p (:h2 (fmt "Viewport Display-List is currently empty."))))
+
+	     :div-style "height: 100%; width: 100%"
+	     :geysr self
+	     :div-class "viewport-wrapper"
+	     :root-object self
+	     ;;:length (the length)
+	     ;;:width (the width)
+             :length (if (the x3dom?) "100%" (getf (the viewport-dimensions) :length))
+	     :width (if (the x3dom?) "100%" (getf (the viewport-dimensions) :width))
+
+	     :onclick-function nil
+	     :background-color (the background-color)
+	     )
+
+
+
+   ))
                                
    
                                
   
-
+#+nil
 (define-lens (html-format assembly)()
   :output-functions
   (("Void. Writes an embedded X3D tag and included content for the <tt>view-object</tt> child of this object. 

@@ -1,6 +1,6 @@
-(in-package :wall)
+(in-package :house)
 
-(define-object house (base-object)
+(define-object assembly (base-object)
 
   :input-slots (wall-length wall-width wall-height)
 

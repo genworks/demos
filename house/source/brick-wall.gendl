@@ -1,4 +1,4 @@
-(in-package #:wall)
+(in-package #:house)
 
 
 (define-object brick-wall (box)

@@ -1,0 +1,222 @@
+(in-package :pui)
+
+
+;;
+;; FLAG -- reconstruct geysr based on this mixin. 
+;;
+
+(define-object node-mixin  (base-ajax-sheet)
+
+  :input-slots
+  ((viewport-dimensions (list (list :width 800 :length 550)) :settable)
+
+   (empty-display-list-greeting
+    (with-cl-who-string ()
+      (:p (:h2 (fmt "Welcome to the Gendl Production User Interface.")))
+      (:p (fmt
+	   "The PUI is for presenting Gendl applications to end-users."))))
+
+   (design-mode? nil))
+
+
+
+   :computed-slots
+  (
+   (local-assets? (the design-mode?)  :settable)
+   (use-ajax? (not (the design-mode?)))
+   (use-svgpanzoom? t)
+   (use-x3dom? t)
+   (use-fontawesome? t)
+
+   (root-object-type (class-of self))
+
+   (root-object-type-valid? (and (the root-object-type)
+				 (typep (ignore-errors
+					  (find-class
+					   (ignore-errors
+					     (read-safe-string (the root-object-type)))))
+					'gdl-class)))
+
+   (root-object (the root-object-object) :settable)
+
+   (root-object-object self)
+
+   (additional-header-content
+    (with-cl-who-string ()
+      (unless (the design-mode?)
+	(htm
+	 ((:meta :name "viewport" :content "width=device-width, initial-scale=1.0, shrink-to-fit=no"))
+	 ((:meta :name "description" :content "Gendl Production User Interface"))
+	 ((:meta :name "author" :content "Genworks"))
+	 ((:meta :name "keywords" :content "KBE, CL"))
+	 ((:meta :name "mobile-web-app-capable" :content "yes"))
+
+         #+nil ;; flag -- why is this needed? 
+         (unless *developing?*
+	   (htm ((:script :type "text/javascript")
+		 "window.onerror = function(){location.reload()};")))))
+      (str (the local-css-links))))
+
+   (body-onpageshow (when (the use-ajax?) "gdlResize();"))
+   (body-onresize (when (the use-ajax?) "gdlResize();"))
+   (body-onpageload "gdlResize();")
+
+   (local-css-links
+    (with-cl-who-string ()
+      (string-append
+       (htm
+	((:link :href "/pui/styles.css" :rel "stylesheet"))
+	((:link :href "/pui/menu.css" :rel "stylesheet")))
+       (if (the additional-css-links)
+	   (dolist (link (ensure-list (the additional-css-links)))
+	     (htm ((:link :href link :rel "stylesheet")))) ""))))
+
+   (main-sheet-body
+    (with-cl-who-string (:indent t)
+      ((:div :class "grid")
+       ((:div :id "menu-cell" :class "cell menu menuToggle")
+	((:input :type "checkbox" :class "dp-none"))
+	((:span :class "dp-none"))((:span :class "dp-none"))((:span :class "dp-none"))
+	(str (the menu main-div)))
+       ((:div :id "tree" :class "cell tree") (str (the tree main-div)))
+       ((:div :id "model-inputs" :class "cell model-inputs")
+	(str (the model-inputs-section main-div)))
+
+
+       ((:div :id "viewport" :class "cell viewport")
+	(str (the viewport main-div)))
+       
+       ((:div :id "viewport-script") (str (the viewport-script main-div)))
+       
+       ((:div :id "menu-script") (str (the menu-script main-div))))
+      
+      (unless (the design-mode?)
+	(htm
+	 (:script "
+ tree = document.getElementById('tree'); 
+ tree.addEventListener('onresize', function(){gdlResize();});
+
+"))))))
+
+
+  :hidden-objects
+  ((model-inputs-section
+    :type 'sheet-section
+    :inner-html (with-cl-who-string ()
+                  "No model inputs specified."))
+
+   (menu :type 'menu
+         
+	 :set-image-format-func #'(lambda(format)
+				    (the viewport image-format-selector (set-slot! :value format)))
+         
+	 :set-view-func #'(lambda(view) (the viewport view-selector (set-slot! :value view)))
+	 :clear-func (the menu-clear-func)
+	 :image-format (the viewport image-format-selector value)
+	 :view (the viewport view-selector value) 
+	 :sheet-object self
+	 :viewport-js-text (the viewport viewport-js-text)
+	 :image-format-plist (the viewport image-format-plist))
+
+
+   (tree :type 'tree 
+	 :display-controls-hash (make-hash-table)
+	 :target-object (the root-object))
+
+
+   (user-inputs :type 'user-inputs
+		:geysr self
+		:node (the inspector node)
+		:pass-down (root-object))
+   
+   (inspector :type 'inspector
+	      :pass-down (root-object onclick-function click-mode design-mode?)
+	      :geysr self
+              :display-controls-hash (the tree display-controls-hash))
+
+   (viewport-section :type 'sheet-section
+		     :div-class "gwl-iframe-section"
+		     :inner-html (if (eql (the click-mode) :user-interface)
+				     (the ui inner-html)
+				     (the viewport inner-html)))
+
+   (ui :type 'sheet-section)
+
+   #+nil
+   (ui :type 'iframe
+       :url (when (the ui-object)
+	      (progn (gwl::register-instance (the ui-object))
+		     (the ui-object url))))
+		
+   
+   (viewport :type 'viewport
+	     :geysr self
+	     :div-class "viewport-wrapper"
+	     :pass-down (root-object root-object-type)
+	     :length (getf (the viewport-dimensions) :length)
+	     :width (getf (the viewport-dimensions) :width)
+	     :onclick-function nil
+	     :background-color "#d3d3d3"
+
+	     :empty-display-list-message
+	     (with-cl-who-string ()
+
+	       (str (the empty-display-list-greeting))
+
+	       (:p "The Display List is currently empty. You may click a node (in the tree at the upper-left) to apply the "
+		   (:i ((:a :class "menu-show" :href "#" :onclick (the (menu-control-js "the__mode")))
+			(fmt "~a" (the click-mode)))) " operation.")
+	       
+	       (:p "The rendering mode is currently "
+		   (:i ((:a :class "menu-show" :href "#"
+			    :onclick (the (menu-control-js
+					   (list "the__view" "the__view__graphics-format-menu"))))
+			(fmt "~a" (the menu image-format))))
+
+		   (let ((graphics-format-show (the (menu-control-js
+						     (list "the__view" "the__view__graphics-format-menu")))))
+		     (ecase (the menu image-format)
+		       (:svg
+			(htm ". You can try "
+			     
+			     (:i ((:a :class "menu-show" :href "#"
+				      :onclick graphics-format-show)
+				  "x3dom"))
+			     " for a shaded, navigable view, or one of the "
+			     (:i ((:a :class "menu-show" :href "#"
+				      :onclick graphics-format-show)
+				  "raster formats")) " (png or jpeg)."))
+		       (:x3dom
+			(htm ". You can try "
+			     
+			     (:i ((:a :class "menu-show" :href "#"
+				      :onclick graphics-format-show)
+				  "svg"))
+			     " for a wireframe, pannable and zoomable view, or one of the "
+			     (:i ((:a :class "menu-show" :href "#"
+				      :onclick graphics-format-show)
+				  "raster formats")) " (png or jpeg)."))
+
+		       ((:png :jpeg)
+			(htm ". You can try "
+			     
+			     (:i ((:a :class "menu-show" :href "#"
+				      :onclick graphics-format-show)
+				  "svg"))
+			     " for a wireframe, pannable and zoomable view, or "
+			     (:i ((:a :class "menu-show" :href "#"
+				      :onclick graphics-format-show)
+				  "x3dom")) " for a shaded, navigable view.")))))))
+
+
+   (viewport-script :type 'sheet-section
+		    :js-to-eval :parse
+		    :inner-html (the viewport viewport-script))
+				  
+   (menu-script :type 'sheet-section
+		:js-to-eval :parse
+		:inner-html (the menu menu-script)))
+  
+  
+
+  )
