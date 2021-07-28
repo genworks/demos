@@ -3,6 +3,6 @@
 (asdf:defsystem #:deck :description
  "The Gendl® deck Subsystem" :author "Genworks International"
  :license "Affero Gnu Public License (http://www.gnu.org/licenses/)"
- :serial t :version "20210721" :depends-on (:bench)
+ :serial t :version "20210728" :depends-on (:pui :bench)
  :defsystem-depends-on nil :components
  ((:file "source/package") (:file "source/assembly")))
