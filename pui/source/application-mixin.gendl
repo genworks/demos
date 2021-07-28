@@ -1,0 +1,177 @@
+(in-package :pui)
+
+
+;;
+;; FLAG -- try replacing geysr:assembly mixed in here with a more generic mixin mixed into both here and geysr:assembly.
+;;
+(define-object application-mixin  (geysr:assembly)
+
+  :input-slots
+  ((root-object self)
+   (root-object-type (class-of (the root-object)))
+   (title "Gendl Production User Interface (PUI)")
+   (author "Gendl User")
+   (meta-keywords (list "KBE" "CL"))
+   (pui-application-toplevel self :defaulting))
+
+  :trickle-down-slots (pui-application-toplevel)
+
+
+  :computed-slots
+  ((x3dom? (eql (the viewport image-format-selector value) :x3dom))
+   (resize-callback (format nil "puiResize('~a');" (the root-path)))
+   (body-onpageshow (unless (the x3dom?) (the resize-callback)))
+   (body-onresize (unless (the x3dom?) (the resize-callback)))
+   (body-onpageload (unless (the x3dom?) (the resize-callback)))
+
+   ;;(body-onpageshow (the resize-callback))
+   ;;(body-onresize  (the resize-callback))
+   ;;(body-onpageload (the resize-callback))
+
+   
+
+   (local-css-link
+    (with-cl-who-string ()
+      (string-append
+       (htm
+        ((:link :href "/pui-static/tailwind.css" :rel "stylesheet"))
+	((:link :href "/pui-static/styles.css" :rel "stylesheet"))
+	((:link :href "/pui-static/menu.css" :rel "stylesheet")))
+       (if (the additional-css-links)
+	   (dolist (link (ensure-list (the additional-css-links)))
+	     (htm ((:link :href link :rel "stylesheet")))) ""))))
+
+   (additional-header-content
+    (with-cl-who-string ()
+      (unless (the design-mode?)
+	(htm
+	 ((:meta :name "viewport" :content "width=device-width, initial-scale=1, shrink-to-fit=no"))
+	 ((:meta :name "description" :content (the title)))
+	 ((:meta :name "author" :content (the author)))
+	 ((:meta :name "keywords" :content (format nil "~{~a~^,~}" (the meta-keywords))))
+	 ((:meta :name "mobile-web-app-capable" :content "yes"))
+	 ((:meta :name "viewport" :content "width=device-width, initial-scale=1.0"))
+
+         #+nil
+	 (unless *developing?*
+	   (htm ((:script :type "text/javascript")
+		 "window.onerror = function(){location.reload()};")))))
+
+      (str (the local-css-link))))
+
+   (additional-header-js-content
+    (with-cl-who-string ()
+      ((:script :src "/pui-static/pui.js"))))
+
+   (model-inputs-default-slots (append (the (message-list :message-type :local :category :modifiable-optional-inputs))
+                                       (the (message-list :message-type :local :category :modifiable-attributes))))
+
+   (model-inputs-default-types (mapcar #'(lambda(key)
+                                           (let ((value (the (evaluate key))))
+                                             (etypecase value
+                                               (number 'number-form-control)
+                                               (string 'text-form-control))))
+                                       (the model-inputs-default-slots)))
+                                                
+
+   (model-inputs-html 
+    (with-cl-who-string ()
+      ((:div
+        :class "ml-3 mr-3 rounded-lg bg-blue-800 shadow-lg flex flex-col \border-b border-gray-100 p-6 text-center sm:border-0 sm:border-r")
+
+
+       (if (plusp (the model-inputs-default number-of-elements))
+           (htm
+            (dolist (input (list-elements (the model-inputs-default)))
+              (htm
+               (:div
+                ((:label :for (the-object input id)
+                         :class "text-lg font-bold ml-1 mt-3 block text-sm font-medium text-white")
+                 (str (the-object input prompt)))
+                ((:div :class "mt-1 ml-1") (str (the-object input form-control-string))))))
+            ((:div :class "mt-5 ml-1") (str (the submit-button-default form-control-string))))
+           (htm
+            ((:span :class "text-lg font-bold ml-1 block text-sm font-medium text-white")
+             "No Default Model-Inputs"))))))
+
+    
+
+   (main-sheet-body
+    (with-cl-who-string (:indent t)
+      ((:div :class "grid")
+       ((:div :id "menu-cell" :class "cell menu menuToggle")
+	((:input :type "checkbox" :class "dp-none"))
+	((:span :class "dp-none"))((:span :class "dp-none"))((:span :class "dp-none"))
+	(str (the menu main-div)))
+
+       ((:div :id "tree" :class "cell tree") (str (the tree main-div)))
+
+       ((:div :id "model-inputs" :class "cell model-inputs")
+	(str (the model-inputs-section main-div)))
+
+       #+nil
+       ((:div :id "inspector" :class "cell inspector")
+	(str (the inspector-or-inputs-section main-div)))
+
+
+       ((:div :id "viewport" :class "cell viewport")
+	(str (the viewport main-div)))
+       
+       
+       ((:div :id "viewport-script") (str (the viewport-script main-div)))
+       ((:div :id "menu-script") (str (the menu-script main-div))))
+      (unless (the design-mode?)
+	(htm
+	 (:script "
+ tree = document.getElementById('tree'); 
+ tree.addEventListener('onresize', function(){gdlResize();});
+
+"))))))
+
+
+  :functions
+  ((set-default-settables!
+    ()
+    (dolist (model-input (list-elements (the model-inputs-default)))
+      (the (set-slot! (theo model-input input-key) (theo model-input value))))))
+  
+  
+  :hidden-objects
+  ((model-inputs-default :type (:sequence (the model-inputs-default-types))
+                         :sequence (:size (length (the model-inputs-default-types)))
+                         :input-key (make-keyword (nth (the-child index) (the model-inputs-default-slots)))
+                         :default (the (evaluate (the-child input-key)))
+                         :prompt (format nil "~:(~a~)" (the-child input-key)))
+
+   (submit-button-default :type 'button-form-control
+                          :prompt " OK "
+                          :class "text-white bg-green-600 hover:bg-green-700 btn"
+                          :onclick (the (gdl-ajax-call :form-controls (list-elements (the model-inputs-default))
+                                                       :function-key :set-default-settables!)))
+
+   (model-inputs-section :type 'sheet-section
+                         :inner-html (with-cl-who-string ()
+                                       (str (the model-inputs-html))))
+
+   (tree :type 'tree
+	 :pass-down (onclick-function click-mode expand-mode design-mode?)
+	 :display-controls-hash (make-hash-table)
+         :application-instance self
+	 :target-object (the pui-application-toplevel root-object))
+
+   (viewport :type 'viewport
+	     :pui-application self
+	     :div-class "viewport-wrapper"
+	     :pass-down (root-object root-object-type)
+             :display-list-object-roots (list (the root-object))
+	     :length (getf (the viewport-dimensions) :length)
+	     :width (getf (the viewport-dimensions) :width)
+	     :onclick-function nil
+	     :background-color "#d3d3d3"
+
+	     :empty-display-list-message
+	     (with-cl-who-string ()
+
+	       (str (the empty-display-list-greeting))
+
+	       (:p "The Display List is currently empty.")))))

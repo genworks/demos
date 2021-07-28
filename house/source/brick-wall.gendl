@@ -1,7 +1,7 @@
 (in-package #:house)
 
 
-(define-object brick-wall (box)
+(define-object brick-wall (pui:application-mixin box)
   :input-slots
   ((num-layers (floor (/ (the height) (the brick-height))))
    (mortar-height 1)
@@ -54,7 +54,9 @@
 
    (mortar-volume (* (- (the width)
                         (sum-elements (the bricks) (the-element width)))
-                     (the length) (the height))))
+                     (the length) (the height)))
+
+   )
   
   :objects
   (
@@ -63,8 +65,13 @@
            :width (if (and (the offset?) (or (the-child first?) (the-child last?)))
                       (half (the brick-width)) (the brick-width))
            :height (the brick-height)
-           :center (let ((start-point (if (the-child first?) (the center)
-                                          (the-child previous center))))
+           :center (let #+nil
+                     ((start-point (if (the-child first?) (the center)
+                                       (the-child previous center))))
+
+                     ((start-point (if (the-child first?) (the (face-center :left))
+                                       (the-child previous center))))
+                     
                      (translate  start-point
                                  :right (if (the-child first?) (half (the-child width))
                                             (+ (if (the offset?) (the mortar-size)

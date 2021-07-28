@@ -1,3 +1,3 @@
 (in-package :gdl-user)
 
-(gwl:define-package :production-user-interface  (:nicknames #:pui) (:export #:node-mixin))
+(gwl:define-package :production-user-interface  (:nicknames #:pui) (:export #:application-mixin))

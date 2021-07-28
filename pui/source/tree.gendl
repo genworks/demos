@@ -1,0 +1,70 @@
+(in-package :pui)
+
+(define-object tree (geysr:tree)
+
+  :input-slots (application-instance)
+
+  
+  :computed-slots
+  ((safe-children (let ((children (call-next-method)))
+                    (remove-if-not #'(lambda(child) (typep child 'application-mixin)) children)))
+
+   (local-target (the application-instance root-object)))
+
+
+  :functions ((tree-node-view
+               ()
+               (with-cl-who-string ()
+      
+                 (:li
+                  (when (the child-nodes)
+                    (if (the closed?)
+                        (htm ((:span 
+                               :class "directory far fa-plus-square" 
+                               :title "Expand"
+		               :style "cursor: default;"
+                               :onclick (unless (the design-mode?) (the (gdl-ajax-call :function-key :toggle-state!))))))
+                        (htm ((:span 
+                               :class "expanded far fa-minus-square"
+		               :title "Collapse"
+		               :style "cursor: default;"
+                               :onclick (unless (the design-mode?)(the (gdl-ajax-call :function-key :toggle-state!))))))))
+
+                  (unless (the child-nodes)
+                    (htm ((:span :class "leaf fab fa-envira"))))
+
+                  ((:a :class (progn
+                                (if (eql (the local-target) (the target-object))
+                                    "tree-node bg-blue-500 rounded-lg"
+                                    "tree-node bg-gray-500"))
+                       :title (glisp:replace-regexp (string-capitalize (the click-mode)) "-" " ")
+                       :href (the target-object url))
+	           (esc (the safe-strings-for-display)))
+       
+                  ;; if there are siblings, make them here (inside the li)      
+                  (when (and (typep self 'tree) 
+                             (the open?)
+                             (the child-nodes))
+                    (htm
+                     (:ul
+                      (mapc #'(lambda (tree-node) 
+                                (str (the-object tree-node tree-node-view)))
+                            (the child-nodes)))))))))
+
+  
+
+  :hidden-objects ((nodes :type 'tree
+                          :sequence (:size (length (the safe-children)))
+			  :remember-children? t
+			  :pseudo-inputs (remember-children?) ;; FLAG -- need internal Gendl update to remove need for this. 
+                          :pass-down (application-instance
+                                      %tree-root% respondent onclick-function expand-mode display-controls-hash
+                                      show-onmouseover-buttons? click-mode)
+                          :target-object (let ((node (nth (the-child index) (the safe-children))))
+                                           (if (listp node)
+                                               (make-object 'tasty-child-error
+                                                            :error (getf node :error)
+                                                            :object-key (getf node :object-key))
+                                               node)))))
+
+

@@ -1,5 +1,7 @@
 (in-package :deck)
 
+(define-object ui (assembly pui:application-mixin))
+
 (define-object assembly (base-object)
 
   :input-slots

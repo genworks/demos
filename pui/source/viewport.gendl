@@ -1,0 +1,15 @@
+(in-package :pui)
+
+
+;;
+;; FLAG -- try replacing geysr:viewport mixed in here with a more generic mixin mixed into both here and geysr:viewport.
+;;
+
+(define-object viewport  (geysr:viewport)
+
+  :input-slots ((pui-application (the parent))
+
+                (respondent (the pui-application)))
+
+
+  :computed-slots ((popup-menu-text nil)))

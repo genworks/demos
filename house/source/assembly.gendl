@@ -1,0 +1,69 @@
+(in-package :house)
+
+(define-object assembly (pui:application-mixin base-object)
+
+  
+  :input-slots ((wall-length 4) (wall-width 80 :settable) (wall-height 12 :settable)
+                                (length (the wall-width)))
+
+  :computed-slots
+  ((total-number-of-bricks (+ (the front-wall num-bricks)
+                              (the side-wall num-bricks)
+                              (the right-wall num-bricks)
+                              (the back-wall num-bricks)))
+
+   (total-cost-bricks (+ (the front-wall total-cost)
+                         (the side-wall total-cost)
+                         (the right-wall total-cost)
+                         (the back-wall total-cost)))
+   
+   (total-volume-bricks (+ (the front-wall brick-volume)
+                           (the side-wall brick-volume)
+                           (the right-wall brick-volume)
+                           (the back-wall brick-volume)))
+
+   (total-volume-mortar (+ (the front-wall mortar-volume)
+                           (the side-wall mortar-volume)
+                           (the right-wall mortar-volume)
+                           (the back-wall mortar-volume))))
+  
+  :objects
+  ((front-wall :type 'brick-wall
+               :length (the wall-length)
+               :width (the wall-width)
+               :height (the wall-height)
+               :center (translate (the center)
+                                  :front
+                                  (half (the length))
+                                  ))
+
+   (back-wall :type 'brick-wall
+              :length (the front-wall length)
+              :width (the front-wall width)
+              :height (the front-wall height)
+              :center (translate (the center)
+                                 :back
+                                 (half (the length))
+
+                                 ))
+
+  
+   (side-wall :type 'brick-wall
+              :length (the front-wall length)
+              :width (the front-wall width)
+              :height (the front-wall height)
+              :center (translate (the center) :left 
+                                 (half (the length)))
+              :orientation (alignment :top (the (face-normal-vector :top))
+                                      :rear (the (face-normal-vector :left))))
+  
+   (right-wall :type 'brick-wall
+               :length (the front-wall length)
+               :width (the front-wall width)
+               :height (the front-wall height)
+               :orientation (alignment :top (the (face-normal-vector :top))
+                                       :rear (the (face-normal-vector :left)))
+               :center (translate (the center) :right 
+                                  (half (the length))
+                                  ))))
+

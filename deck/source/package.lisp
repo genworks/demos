@@ -1,4 +1,4 @@
-(gdl:define-package :deck (:export #:assembly))
+(gdl:define-package :deck (:export #:assembly  #:ui))
 
 
 
