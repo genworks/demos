@@ -1,10 +1,11 @@
 
 
+var resizeTimer;
 
 function puiResize(rp = 'nil')
 {
 
-    // clearTimeout(resizeTimer);
+    clearTimeout(resizeTimer);
 
     console.log('Running puiResize for ' + rp);
     resizeTimer = setTimeout(function () {
@@ -14,6 +15,34 @@ function puiResize(rp = 'nil')
 // }
 
 }
+
+
+
+//
+// debouncing technique from https://css-tricks.com/snippets/jquery/done-resizing-event/.
+//
+// More general debouncing function here: https://davidwalsh.name/javascript-debounce-function
+//
+var puiresizeTimer;
+
+function gdlpuiResize()
+{
+
+    console.log('Running gdlpuiResize');
+    // if  (document.getElementById('x3dom-1'))
+    // {}
+    //else
+    //{
+	      
+    clearTimeout(puiresizeTimer);
+    puiresizeTimer = setTimeout(function () {
+    
+	gdlAjax(null, 'args=' + encode64('(:|iid| '+ doublequote + gdliid + doublequote + ' :|bashee| (:%rp% nil) :|function| :set-slot! :|arguments| (:viewport-dimensions (:width ' + (document.getElementById('viewport').getBoundingClientRect().width) +  ' :length ' + (document.getElementById('viewport').getBoundingClientRect().height) + ')))'), true );}, 250);
+
+// }
+
+}
+
 
 
 
