@@ -35,8 +35,8 @@
 
                   ((:a :class (progn
                                 (if (eql (the local-target) (the target-object))
-                                    "tree-node bg-blue-500 rounded-lg"
-                                    "tree-node bg-gray-500"))
+                                    "tree-node bg-yellow-500 rounded-sm"
+                                    "tree-node "))
                        :title (glisp:replace-regexp (string-capitalize (the click-mode)) "-" " ")
                        :href (the target-object url))
 	           (esc (the safe-strings-for-display)))

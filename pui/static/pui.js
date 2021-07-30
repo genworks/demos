@@ -5,16 +5,18 @@ var resizeTimer;
 function puiResize(rp = 'nil')
 {
 
+    //
+    // FLAG -- set up to iterate through multiple viewports if there are. 
+    //
     clearTimeout(resizeTimer);
-
+    
     console.log('Running puiResize for ' + rp);
     resizeTimer = setTimeout(function () {
-    
-   gdlAjax(null, 'args=' + encode64('(:|iid| '+ doublequote + gdliid + doublequote + ' :|bashee| (:%rp% ' + rp + ') :|function| :set-slot! :|arguments| (:viewport-dimensions (:width ' + (document.getElementById('viewport').getBoundingClientRect().width) +  ' :length ' + (document.getElementById('viewport').getBoundingClientRect().height) + ')))'), true );}, 250);
-
-// }
-
+        
+        gdlAjax(null, 'args=' + encode64('(:|iid| '+ doublequote + gdliid + doublequote + ' :|bashee| (:%rp% ' + rp + ') :|function| :set-slot! :|arguments| (:viewport-dimensions (:width ' + (document.getElementById('viewport').getBoundingClientRect().width) +  ' :length ' + (document.getElementById('viewport').getBoundingClientRect().height) + ')))'), true );}, 250);
 }
+
+
 
 
 

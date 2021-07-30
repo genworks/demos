@@ -9,7 +9,82 @@
 
   :input-slots ((pui-application (the parent))
 
-                (respondent (the pui-application)))
+                (respondent (the pui-application))
+
+                (viewport-index (or (the index) 1)))
 
 
-  :computed-slots ((popup-menu-text nil)))
+  :computed-slots ((popup-menu-text nil)
+
+                   (inner-html
+                    (with-cl-who-string ()
+                      (let ((*display-controls* (the display-controls-hash)))
+                        (let ((image-format (if (the 2d-boxes?) (the image-format) :png)))
+	                  (ecase image-format
+                            (:links (the (write-geometry-links)))
+	                    (:svg (write-the svg-vector-graphics))
+                            (:raphael (write-the vector-graphics))
+                            ((:png :jpeg) (write-the raster-graphics))
+                            (:x3dom (the (write-embedded-x3dom-world :include-view-controls? nil))))))
+
+                      (str (the viewport-script-to-eval))))
+
+                   ;;
+                   ;; To go in header (only once for all viewports)
+                   ;; 
+                   (viewport-script-boilerplate "
+
+ var x3d_timer;
+
+ function x3draw (viewpoint = 'view-trimetric', x3dom_id = 'x3dom-1')
+ {
+  clearTimeout(x3d_timer);
+
+  x3d_timer = setTimeout(function () {
+  console.log('Running x3draw for ' + viewpoint + ' and ' + x3dom_id);
+  if (x3dom.type != 'undefined') x3dom.reload(); 
+  var elem = document.getElementById(viewpoint);
+  if (elem) elem.setAttribute('set_bind', 'true');
+  var x3domElem = document.getElementById(x3dom_id);
+  if (x3domElem) xruntime= x3domElem.runtime;
+  xruntime.showAll();
+  xruntime.resetView(); 
+
+ }, 250);
+
+ }
+
+ function svgpz (svg_id = 'svg-1') 
+ {
+   console.log('Running svgpz for ' + svg_id);
+
+   if (document.getElementById(svg_id))
+  {
+   panzoomElem = svgPanZoom('#' + svg_id, {
+   zoomEnabled: true,
+   controlIconsEnabled: true,
+   preventMouseEventsDefault: false,
+   fit: true,
+   minZoom: 0.01,
+   maxZoom: 100,
+   center: true});
+  }
+ }  ")
+                                            
+                   (viewport-script-to-eval
+                    (cond ((member (the image-format-selector value) (list :x3dom :svg))
+	                   (with-cl-who-string ()
+                             ((:script :type "text/javascript")
+                              (ecase (the image-format-selector value)
+                                ;;
+                                ;; FLAG -- compute x3dom_id properly.
+                                ;;
+                                (:x3dom (fmt "//clearTimeout(resizeTimer);
+                                              x3draw(viewpoint = 'view-~(~a~)', x3dom_id = 'x3dom-1');
+                                              //clearTimeout(resizeTimer);"
+                                             (the view-selector value)))
+                                ;;
+                                ;; FLAG -- compute svg_id properly.
+                                ;;
+                                (:svg (fmt "svgpz(svg_id = '~a')" "svg-1"))))))
+                          (t "")))))
