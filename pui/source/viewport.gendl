@@ -14,7 +14,7 @@
                 (viewport-index (or (the index) 1)))
 
 
-  :computed-slots ((popup-menu-text nil)
+  :computed-slots (
 
                    (inner-html
                     (with-cl-who-string ()
@@ -34,30 +34,26 @@
                    ;; 
                    (viewport-script-boilerplate "
 
- var x3d_timer;
-
  function x3draw (viewpoint = 'view-trimetric', x3dom_id = 'x3dom-1')
  {
-  clearTimeout(x3d_timer);
 
-  x3d_timer = setTimeout(function () {
-  console.log('Running x3draw for ' + viewpoint + ' and ' + x3dom_id);
   if (x3dom.type != 'undefined') x3dom.reload(); 
   var elem = document.getElementById(viewpoint);
   if (elem) elem.setAttribute('set_bind', 'true');
   var x3domElem = document.getElementById(x3dom_id);
+  var xruntime;
   if (x3domElem) xruntime= x3domElem.runtime;
-  xruntime.showAll();
-  xruntime.resetView(); 
+  if (xruntime) xruntime.resetView();  // FLAG -- remember user specified view and set to that.
+  if (xruntime) xruntime.fitAll(xruntime.getSceneBBox().min, xruntime.getSceneBBox().max);
 
- }, 250);
+  puiResizeDont = true;
+  setTimeout (() => {puiResizeDont = false;}, 500);
 
  }
 
+
  function svgpz (svg_id = 'svg-1') 
  {
-   console.log('Running svgpz for ' + svg_id);
-
    if (document.getElementById(svg_id))
   {
    panzoomElem = svgPanZoom('#' + svg_id, {
@@ -79,12 +75,13 @@
                                 ;;
                                 ;; FLAG -- compute x3dom_id properly.
                                 ;;
-                                (:x3dom (fmt "//clearTimeout(resizeTimer);
-                                              x3draw(viewpoint = 'view-~(~a~)', x3dom_id = 'x3dom-1');
-                                              //clearTimeout(resizeTimer);"
-                                             (the view-selector value)))
+                                (:x3dom
+                                 (fmt "x3draw(viewpoint = 'view-~(~a~)', x3dom_id = 'x3dom-1');"
+                                      (the view-selector value)))
                                 ;;
                                 ;; FLAG -- compute svg_id properly.
                                 ;;
-                                (:svg (fmt "svgpz(svg_id = '~a')" "svg-1"))))))
+                                (:svg (fmt "svgpz(svg_id = '~a');" "svg-1")))
+                              ;;(str (the popup-menu-text))
+                              )))
                           (t "")))))

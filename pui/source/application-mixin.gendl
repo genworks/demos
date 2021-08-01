@@ -2,7 +2,8 @@
 
 
 ;;
-;; FLAG -- try replacing geysr:assembly mixed in here with a more generic mixin mixed into both here and geysr:assembly.
+;; FLAG -- try replacing geysr:assembly mixed in here with a more generic mixin mixed
+;; into both here and geysr:assembly.
 ;;
 (define-object application-mixin  (geysr:assembly)
 
@@ -19,17 +20,12 @@
 
   :computed-slots
   ((x3dom? (eql (the viewport image-format-selector value) :x3dom))
-   (resize-callback (format nil "puiResize('~a');" (the root-path)))
-   ;;(resize-callback "x3draw();")
+   (resize-callback (format nil "puiResize(rp = '~a');" (the root-path)))
    
-   ;;(resize-callback "gdlpuiResize();")
    (body-onpageshow (the resize-callback))
-   ;;(body-onresize (unless (the x3dom?) (the resize-callback)))
    (body-onpageload (the resize-callback))
-
-   ;;(body-onpageshow (the resize-callback))
-   ;;(body-onresize  (the resize-callback))
-   ;;(body-onpageload (the resize-callback))
+   (body-onresize (the resize-callback))
+   
 
    (first-viewport (the viewport))
    
@@ -129,26 +125,13 @@
        
        ((:div :id "menu-script") (str (the menu-script main-div))))
 
-      (unless (or (the x3dom?) (the design-mode?))
-	(htm
-
-
-         #+nil
-         (:script
-          "
- inputs = document.getElementById('model-inputs'); 
- inputs.addEventListener('onresize', function(){puiResize()});
-
-"
-          )
-
-	 (:script
-          (fmt "
+      (:script
+       (fmt "
  inputs = document.getElementById('model-inputs'); 
  inputs.addEventListener('onresize', function(){~a});
 
 "
-               (the resize-callback))))))))
+            (the resize-callback))))))
 
 
   :functions
@@ -197,3 +180,37 @@
 	       (str (the empty-display-list-greeting))
 
 	       (:p "The Display List is currently empty.")))))
+
+
+
+(define-lens (html-format application-mixin) ()
+  :output-functions
+  ((main-sheet
+    ()
+    (with-cl-who ()
+      (str (the doctype-string))
+      ((:html :lang "en" :class (the html-class))
+       ((:head :class (the head-class))
+	(:title (str (the title)))
+        (:meta :charset "UTF-8")
+        (when (the include-default-favicon?)
+          (htm (:link :rel "icon" :type "image/x-icon" :href "/static/gwl/images/favicon.ico")))
+        (when (the additional-header-content) (str (the additional-header-content)))
+        (str (the standard-javascript-section inner-html))
+        (when (the additional-header-js-content)
+          (str (the additional-header-js-content))))
+       
+       ((:body :class (the body-class)
+	       :onpageshow (the body-onpageshow)
+               :onload (the body-onload)
+	       :onresize (the body-onresize))
+        (the reset-html-sections!)
+
+        (str (the main-sheet-body))
+        
+        #+nil
+        ((:div :id (the dom-id))
+         (str (the main-sheet-body))
+         )
+        ))))))
+    
