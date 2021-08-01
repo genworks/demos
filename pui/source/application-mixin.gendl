@@ -1,6 +1,21 @@
 (in-package :pui)
 
 
+#|
+
+ NOTE
+
+  This part needs standard documentation added!
+
+ NOTE: after you compile & load an object definition which mixes in pui:application-mixin, you can
+       visit an instance by going to http://localhost:<port>/make?object=<object-name>
+
+     e.g.  http://localhost:9000/make?object=deck:assembly
+
+
+|#
+
+
 ;;
 ;; FLAG -- try replacing geysr:assembly mixed in here with a more generic mixin mixed
 ;; into both here and geysr:assembly.
