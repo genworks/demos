@@ -13,7 +13,7 @@
                                        (the (vertex :top :right :front)))))
                        (append path (list (first path)))))
    
-   (joist-pitch-default 16) :settable
+   (joist-pitch-default 16 :settable)
 
    (inner-width (- (the width) (the joist-reference height)))
    
