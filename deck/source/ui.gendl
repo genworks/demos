@@ -1,0 +1,22 @@
+(in-package :deck)
+
+(define-object ui (assembly pui:application-mixin)
+  :computed-slots
+  (
+   (width (* 10 12) :settable)
+   (length (* 20 12) :settable))
+
+  :objects
+  ((surface :type 'planking-ui
+            :plank-type 'lumber:2x6
+            :display-controls (list :color :brown :transparency 0.5)
+            :perimeter (the perimeter-points))
+
+   (joisting :type 'joisting-ui
+             :lumber-type 'lumber:2x6
+             :pass-down (number-of-joists joist-pitch-default)
+             )))
+
+(define-object planking-ui (pui:application-mixin planking:planked-surface))
+
+(define-object joisting-ui (pui:application-mixin joisting))
