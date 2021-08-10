@@ -15,6 +15,10 @@
    
    (joist-pitch-default 16) :settable
 
+   (leg-pitch-default 32)
+
+   (number-of-legs-length 2)
+
    (inner-width (- (the width) (the joist-reference height)))
    
    (number-of-joists
@@ -45,7 +49,26 @@
    (joisting :type 'joisting
              :lumber-type 'lumber:2x6
              :pass-down (number-of-joists joist-pitch-default)
-             )))
+             )
+  
+  (beams-first :type 'beam-first
+               :lumber-type 'lumber:2x6
+               :length (the width))
+
+   (beams-second :type 'beam-second
+                 :lumber-type 'lumber:2x6)
+
+   (legs-length :type 'legs-length
+                :lumber-type 'lumber:2x6
+                :pass-down (number-of-legs-length leg-pitch-default))
+                
+
+
+   
+   ))
+
+
+
 
 (define-object joisting (base-object)
   :input-slots
@@ -80,5 +103,65 @@
                          
                          (t (translate (the-child previous center)
                                        :left (the joist-pitch)))))))
+
+(define-object beam-first (base-object)
+  :input-slots
+  (lumber-type length)
+
+  :objects
+  ((beams :type 'lumber:2x6
+          :sequence (:size 2)
+          :display-controls (list :color :red)
+          :orientation
+          (alignment :top (the (face-normal-vector :rear))
+                     :left (the (face-normal-vector :top)))
+
+          :center (if (oddp (the-child index))
+                      (translate (the center) :front (the length) :down (* 1.5(the-child width)))
+                      (translate (the center) :back (the length) :down (* 1.5(the-child width)))))))
+
+
+          
+(define-object beam-second (base-object)
+  :input-slots
+  (lumber-type)
+
+  :objects
+  ((beams :type 'lumber:2x6
+          :sequence (:size 2)
+          :display-controls (list :color :yellow)
+          :orientation
+          (alignment :top (the (face-normal-vector :right))
+                     :left (the (face-normal-vector :top)))
+
+
+          :center (if (oddp (the-child index))
+                      (translate (the center) :right (half (the width)) :down (* 1.5(the-child width)))
+                      (translate (the center) :left (half (the width)) :down (* 1.5(the-child width)))))))
+
+
+
+(define-object legs-length (base-object)
+  :input-slots
+  ((lumber-type)
+   (number-of-legs-effective (the number-of-legs-length))
+   (leg-pitch (the leg-pitch-default)))
+
+
+  :objects
+  ((leg-seq :type 'lumber:4x4
+           :sequence (:size (the number-of-legs-effective))
+           :display-controls (list :color :green)
+           :orientation
+           (alignment :top (the (face-normal-vector :right))
+                      :left (the (face-normal-vector :top))
+
+
+
+           ))))
+                               
+                            
+                     
+  
 
   
