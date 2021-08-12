@@ -15,9 +15,13 @@
    
    (joist-pitch-default 16 :settable)
 
-   (leg-pitch-default 32)
+   (space-per-leg 120 :settable)
 
-   (number-of-legs-length 2)
+   (leg-pitch-half-default (/ (the space-per-leg)(1+ (/ (- (the number-of-legs-length) 4) 2))))
+
+   (number-of-legs-length (+ 4(* 2 (floor(/ (the length) (the space-per-leg)) ))))
+
+   (leg-height 36 :settable)
 
    (inner-width (- (the width) (the joist-reference height)))
    
@@ -51,17 +55,20 @@
              :pass-down (number-of-joists joist-pitch-default)
              )
   
-  (beams-first :type 'beam-first
-               :lumber-type 'lumber:2x6
-               :length (the width))
-
+   (beams-first :type 'beam-first
+                :lumber-type 'lumber:2x6
+                :length (the width))
+   
    (beams-second :type 'beam-second
                  :lumber-type 'lumber:2x6)
-
+   
    (legs-length :type 'legs-length
                 :lumber-type 'lumber:2x6
-                :pass-down (number-of-legs-length leg-pitch-default))
-                
+                :number-of-legs-effective (the number-of-legs-length)
+                :deck-length (the length)
+                :length (the leg-height)
+                :leg-pitch (the leg-pitch-half-default))
+   
 
 
    
@@ -144,21 +151,56 @@
 (define-object legs-length (base-object)
   :input-slots
   ((lumber-type)
+   deck-length
+   length
+   (beam-height (* 1.5(the beams-first length)))
    (number-of-legs-effective (the number-of-legs-length))
-   (leg-pitch (the leg-pitch-default)))
+   (leg-pitch (the leg-pitch-half-default)))
 
 
   :objects
   ((leg-seq :type 'lumber:4x4
-           :sequence (:size (the number-of-legs-effective))
-           :display-controls (list :color :green)
-           :orientation
-           (alignment :top (the (face-normal-vector :right))
-                      :left (the (face-normal-vector :top))
+            :sequence (:size (the number-of-legs-effective))
+            :display-controls (list :color :green)
+
+            
+            :orientation
+            (alignment :top (the (face-normal-vector :front))
+                       :rear (the (face-normal-vector :top)))
+
+
+            :center (if (oddp (the-child index)) (translate (the center)
+                                                           :down (+ (half (the-child length))11)
+                                                            :left (half (the width))
+                                                           :front (half (the deck-length))
+                                                           :back (* (1- (the-child index)) (the leg-pitch)))
+                        (translate (the center)
+                                   :down (+ (half (the-child length))11)
+                                   :right (half (the width))
+                                   :front (half (the deck-length))
+                                   :back (* (the-child index) (the leg-pitch)))
+                                                                        
 
 
 
-           ))))
+
+
+            #+nil(if (oddp (the-child index)) (translate (the center)
+                                                           :down (half (the leg-height))
+                                                           :left (half (the width))
+                                                           :front (half (the length))
+                                                           :back (* (floor (/ (the-child index) 2) ) (the leg-pitch)))
+                                                (translate (the center)
+                                                           :down (half (the leg-height))
+                                                           :right (half (the width))
+                                                           :front (half (the length))
+                                                           :back (* (floor (/ (the-child index) 2) ) (the leg-pitch))))
+            
+                                                           
+            
+
+
+            ))))
                                
                             
                      
