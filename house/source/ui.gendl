@@ -82,7 +82,7 @@
                            :value (format nil "~a cubic inches" (the total-volume-mortar)))))
    
    (vector-graphics-onclick? nil)
-   (display-list-object-roots (list (the house)(the deck)))
+   (display-list-object-roots (list (the house)))
    ;;(length 500) (width 500)
    (background-color "#ffffff")
    (view-direction-default :trimetric)
@@ -97,6 +97,8 @@
 
   
   (
+
+   #+nil
    (deck :type 'deck:assembly
          :length (the length-input value)
          :width (the width-input value))
