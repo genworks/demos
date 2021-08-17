@@ -40,8 +40,15 @@
 (defun save (&key (pathname (let ((directory (ensure-directories-exist "~/pdfs/")))
 				       (merge-pathnames "pamphlet.pdf" directory))))
   (with-format (pdf-multipage pathname)
-    (write-the-object (make-object 'assembly) cad-output)))
+    (write-the-object (make-object 'assembly) cad-output))
+
+  (format t "~&~%Done. Saved pamphlet to ~a.~%" pathname))
 
 
+(format t "~&~%Note: (pamphet:save) function has now been defined. 
 
+So you can do (pamphlet:save) and it will create the PDF file
+and will report the location.~%
+" )
 			   
+
