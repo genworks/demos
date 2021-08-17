@@ -91,7 +91,8 @@
 
    #+allegro
    (mountain :type 'surf::test-fitted-surface
-	     'test-trimmed-from-projected-2)
+	     ;;'test-trimmed-from-projected-2
+	     )
 
    #-allegro (mountain :type 'box :length 10 :width 20 :height 8)
    

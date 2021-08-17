@@ -36,3 +36,12 @@
    (side-2 :type 'side-2 
 	   :pass-down (border-boxes? page-length page-width x-percentage y-percentage text-x-scale)
 	   )))
+
+(defun save (&key (pathname (let ((directory (ensure-directories-exist "~/pdfs/")))
+				       (merge-pathnames "pamphlet.pdf" directory))))
+  (with-format (pdf-multipage pathname)
+    (write-the-object (make-object 'assembly) cad-output)))
+
+
+
+			   
