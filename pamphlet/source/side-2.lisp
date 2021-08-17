@@ -242,7 +242,9 @@ the Common Lisp developer community. Please do not hesitate to sign in and conve
       (:h-align :center :left-margin 12 :right-margin 12 :color (gethash :white *color-table-decimal*))
       (vspace 20)
       (with-style (:text-x-scale 0.9 :font "Helvetica-Bold" :font-size 25)
-	"New Tagline Here"))))
+	"New Tagline Here"
+	;;"Hey Now"
+	))))
 
    
    #+nil
