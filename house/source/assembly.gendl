@@ -3,7 +3,7 @@
 (define-object assembly (pui:application-mixin base-object)
 
   
-  :input-slots ((wall-length 4) (wall-width 80 :settable) (wall-height 12 :settable) (dummy-value 0 :settable)
+  :input-slots ((wall-length 4) (wall-width 80 :settable) (wall-height 12 :settable)
                                 (length (the wall-width)))
 
   :computed-slots

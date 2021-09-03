@@ -21,7 +21,7 @@
 
    (number-of-legs-length (+ 4(* 2 (floor(/ (the length) (the space-per-leg)) ))))
 
-   (leg-height 36 :settable)
+   (leg-height 36)
 
    (inner-width (- (the width) (the joist-reference height)))
    
@@ -57,17 +57,17 @@
   
    (beams-first :type 'beam-first
                 :lumber-type 'lumber:2x6
-                :length (the width))
+                :length (the width)
+                :deck-length (the length))
    
    (beams-second :type 'beam-second
                  :lumber-type 'lumber:2x6)
    
-   (legs-length :type 'legs-length
+   (legs-length :type 'legs
                 :lumber-type 'lumber:2x6
-                :number-of-legs-effective (the number-of-legs-length)
+                :number-of-legs-lwise-effective (the number-of-legs-length)
                 :deck-length (the length)
-                :length (the leg-height)
-                :leg-pitch (the leg-pitch-half-default))
+                :length (the leg-height))
    
 
 
@@ -113,7 +113,9 @@
 
 (define-object beam-first (base-object)
   :input-slots
-  (lumber-type length)
+  ((lumber-type)
+   (length)
+   (deck-length))
 
   :objects
   ((beams :type 'lumber:2x6
@@ -124,8 +126,8 @@
                      :left (the (face-normal-vector :top)))
 
           :center (if (oddp (the-child index))
-                      (translate (the center) :front (the length) :down (* 1.5(the-child width)))
-                      (translate (the center) :back (the length) :down (* 1.5(the-child width)))))))
+                      (translate (the center) :front (half (the deck-length)) :down (* 1.5(the-child width)))
+                      (translate (the center) :back (half (the deck-length)) :down (* 1.5(the-child width)))))))
 
 
           
@@ -148,19 +150,21 @@
 
 
 
-(define-object legs-length (base-object)
+(define-object legs (base-object)
   :input-slots
   ((lumber-type)
    deck-length
-   length
+   length 
    (beam-height (* 1.5(the beams-first length)))
-   (number-of-legs-effective (the number-of-legs-length))
-   (leg-pitch (the leg-pitch-half-default)))
+   (number-of-legs-lwise-effective (the number-of-legs-length)))
+
+  :computed-slots
+  ((leg-pitch (/ (the deck-length)(1- (half (the number-of-legs-lwise-effective))))))
 
 
   :objects
-  ((leg-seq :type 'lumber:4x4
-            :sequence (:size (the number-of-legs-effective))
+  ((leg-seq-lengthwise :type 'lumber:4x4
+            :sequence (:size (the number-of-legs-lwise-effective))
             :display-controls (list :color :green)
 
             
@@ -173,32 +177,13 @@
                                                            :down (+ (half (the-child length))11)
                                                             :left (half (the width))
                                                            :front (half (the deck-length))
-                                                           :back (* (1- (the-child index)) (the leg-pitch)))
+                                                           :back (* (half(1- (the-child index))) (the leg-pitch)))
                         (translate (the center)
                                    :down (+ (half (the-child length))11)
                                    :right (half (the width))
                                    :front (half (the deck-length))
-                                   :back (* (the-child index) (the leg-pitch)))
-                                                                        
-
-
-
-
-
-            #+nil(if (oddp (the-child index)) (translate (the center)
-                                                           :down (half (the leg-height))
-                                                           :left (half (the width))
-                                                           :front (half (the length))
-                                                           :back (* (floor (/ (the-child index) 2) ) (the leg-pitch)))
-                                                (translate (the center)
-                                                           :down (half (the leg-height))
-                                                           :right (half (the width))
-                                                           :front (half (the length))
-                                                           :back (* (floor (/ (the-child index) 2) ) (the leg-pitch))))
-            
-                                                           
-            
-
+                                   :back (* (half(the-child index)) (the leg-pitch)))
+                                                                      
 
             ))))
                                

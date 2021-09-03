@@ -14,9 +14,26 @@
 
    (joisting :type 'joisting-ui
              :lumber-type 'lumber:2x6
-             :pass-down (number-of-joists joist-pitch-default)
-             )))
+             :pass-down (number-of-joists joist-pitch-default))
+
+   (beams-widthwise :type 'beam-first-ui
+                :lumber-type 'lumber:2x6
+                :length (the width)
+                     :deck-length (the length))
+
+   (legs :type 'legs-ui
+                :lumber-type 'lumber:2x6
+                :number-of-legs-lwise-effective (the number-of-legs-length)
+                :deck-length (the length)
+                :length (the leg-height))))
 
 (define-object planking-ui (pui:application-mixin planking:planked-surface))
 
-(define-object joisting-ui (pui:application-mixin joisting))
+(define-object joisting-ui (pui:application-mixin joisting)
+  :computed-slots
+  ((number-of-joists-effective (the number-of-joists) :settable)
+   (joist-pitch (the joist-pitch-default) :settable)))
+
+(define-object beam-first-ui (pui:application-mixin beam-first))
+
+(define-object legs-ui (pui:application-mixin legs))
