@@ -47,7 +47,7 @@
 
 (format t "~&~%Note: (pamphet:save) function has now been defined. 
 
-So you can do (pamphlet:save) and it will create the PDF file
+So you can do (pamphlet:save!) and it will create the PDF file
 and will report the location.~%
 " )
 			   
