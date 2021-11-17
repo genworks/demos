@@ -62,7 +62,7 @@
 		 :length (the panel-1 length) :width (the panel-1 width))
 
 
-   
+   #+nil
    (bpo-note :type 'bpo-note
 	     :length (* (the panel-1 page-length) 0.20)
 	     :width (* (the panel-1 page-width) 0.45))
@@ -123,7 +123,8 @@
 	    :objects (list (the panel-1-note))
 	    :object-roots (list ))
    
-   
+
+   #+nil
    (bpo-note-panel :type 'base-view
 		   :center (translate (the panel-1 center)
 				      :front (* (the panel-1 page-length) 0.24)
@@ -138,6 +139,8 @@
 		   :border-box? (the border-boxes?)
 		   :objects (list (the bpo-note)))
 
+
+   #+nil
    (gauge-panel :type 'base-view
 		:center (translate (the panel-1 center)
 				   :front (* (the panel-1 page-length) 0.235)
@@ -204,7 +207,7 @@
 	      :length (* (the panel-3 page-length) 0.6)
 
 	      :objects (list (the pie))
-	      :center (translate (the panel-3 center) :rear 32 :left 50)
+	      :center (translate (the panel-3 center) :rear 15 :left 50)
 	      :border-box? nil
 	      ;;:left-margin 5
 	      :view-scale .4
@@ -326,19 +329,18 @@
        (with-style (:h-align  :justified :font-size 12 :left-margin 12 :right-margin 12 :text-x-scale (the text-x-scale))
 	 (vspace 25)
 	 (with-p (:h-align :center :color (gethash :red-violet-medium *color-table-decimal*) :font-size 27)
-	   "What is GDL?")
+	   "What is Genworks GDL?")
 	 (vspace 7)
 	 (with-p ()
 	   (with-style (:font "Helvetica-Bold" :font-size 12 :color (gethash :orange *color-table-decimal*))
-	     "A no-nonsense approach for creating web-based and technical software applications.")
-	   " GDL, or General-purpose Declarative Language, enables rapid development 
-of many types of end-user computer applications. With the convenience of a spreadsheet, 
-it delivers the flexibility and capacity of a state-of-the-art Internet-savvy programming 
-environment.")
+	     "A no-nonsense approach for creating web-based and technical software applications. ")
+           "Genworks GDL combines the best aspects of a spreadsheet, a
+dynamic object-oriented programming language, a parametric CAD system,
+a web application server, and a Knowledge-management system.")
 	 (with-p ()
 	   (vspace 7)
 	   (with-style (:font "Helvetica-Bold" :font-size 12 :color (gethash :orange *color-table-decimal*))
-	     "Web-centric, " +odq+ "clientless" +cdq+ " deployment.")
+	     "Web-centric, " +odq+ "clientless" +cdq+ " deployment. ")
 	   (with-style (:font-size 12)
 	     " Both GDL and the applications you create with it run "
 	     +odq+ "out-of-the-box" +cdq+ " as pure web services, with no need for specialized 
@@ -355,15 +357,28 @@ of 16 years industry experience in engineering, business, and high-productivity 
 	 (with-p (:h-align :center)
 	   (vspace 7)
 	   (with-style (:font "Helvetica-Bold" :font-size 12 :text-x-scale 0.85)
-	     "Examples of Typical Applications:"))
+	     "Applications In Production Now:"))
 	 
-	 (vspace 141)
+	 (vspace 12)
 	 
 	 (with-p (:h-align :left :font "Helvetica-Oblique" :font-size 10)
 	   (hspace 0)
-	   "Design & Engineering Automation." (hspace 22) "Business Project Tracking.")
+	   "Design & Engineering Automation. A multinational Civil
+Engineering firm uses a Genworks GDL application to design, configuration,
+and generate detailed site drawings for large-scale storage
+vessels. This company runs some $500MM of business annually through
+this Genworks GDL application annually."
+           (vspace 10)
+           "Large-scale Generative 3D Websites. A nationally
+           recognized educational supplier runs a \"game-ified\"
+           web-based STEM e-learning solution, with upwards of 1,000
+           unique users daily, generating solid geometric models for
+           display in web browsers"
+           (vspace 10)
+           "Please contact Genworks for a confidential introduction to
+these and other satisfied customers."
 
-	 ))))))
+           )))))))
 
 
 (define-object panel-2-note (geom-base::typeset-block)
@@ -375,27 +390,28 @@ of 16 years industry experience in engineering, business, and high-productivity 
        ()
        (with-style (:h-align  :justified :font-size 12 :left-margin 12 :right-margin 12 :text-x-scale (the text-x-scale))
 	 (with-p (:h-align :center :color (gethash :orange *color-table-decimal*) :font-size 27)
-	   (vspace 25) "What you need:")
+	   "Why GDL is different")
 	 (vspace 9)
 	 (with-p ()
 	   (with-style (:font "Helvetica-Bold"  :color (gethash :orange *color-table-decimal*))
 	     "Smaller, cleaner solutions for business and engineering.")
-	   " You are working under unprecedented time and budget constraints in this age 
-of rapid globalization. Are your current tools up to the challenge?")
+	   " With Genworks GDL you are working with a set of modular
+	   software toolkits -- not a bloated desktop application environment.")
 	 (vspace 175)
 	 (with-p ()
 	   (with-style (:font "Helvetica-Bold"  :color (gethash :orange *color-table-decimal*))
 	     "Shorter development cycles.")
-	   " Tools which cannot keep pace with today's extreme programming paradigms can pose an acute handicap. When
-project schedules begin to slip, not only do costs increase, so do the risks of the project missing its "
-	  +odq+ "window of opportunity." +cdq+
-	  " You need a " +odq+ "secret weapon" +cdq+ " which arms you with the stability and flexibility to thrive in today's environment.")
+	   "The dynamic, interactive development feedback loop which
+can be achieved with Genworks GDL (thanks to its ANSI Common Lisp
+foundation) remains second to none, even compared with fancy
+\"modern\" IDEs. With a bit of focus and practice you can achieve what
+you may not have thought possible.")
 	 (vspace 8)
 	 (with-p ()
 	   (with-style (:font "Helvetica-Bold"  :color (gethash :orange *color-table-decimal*))
 	     "Low maintenance costs and high longevity.")
-	   " In many cases, the cost of long-term maintenance for a software 
-project can represent a staggering 80% of the overall cost. Compounding 
+	   "In many cases, the cost of long-term maintenance for a software 
+project can represent over 80% of the overall cost. Compounding 
 this, applications which are based on fleeting " +odq+ "fashionable" +cdq+ " 
 technologies  become outdated remarkably soon and require even more costly 
 and risky rework. You need tools which can handle long-term maintenance 
@@ -413,31 +429,35 @@ in a reliable and cost-effective manner.")))))))
 	(:h-align :justified :font-size 12 :left-margin 12 :right-margin 18 :text-x-scale (the text-x-scale))
 	(vspace 25)
 	(with-p (:h-align :center :color (gethash :blue *color-table-decimal*) :font-size 27)
-	  "What you get:")
+	  "Time-tested Features")
 	(vspace 9)
 	(with-p ()
 	  (with-style (:font "Helvetica-Bold" :color (gethash :orange *color-table-decimal*))
 	    "GDL's unique features... more than the sum of their parts.")
-	  " General-purpose Declarative Language consists of an ANSI Standard dynamic object-oriented 
-programming environment, transparently integrated with an extensible application code generator.
-This means you can rapidly develop, incrementally test, and easily debug "
+	  "Genworks GDL consists of an extremely stable, time-tested,
+ANSI Standard dynamic object-oriented programming environment,
+seamlessly integrated with a growing set of engineering and software
+toolkits such as HTML generators and solid modeling kernel libraries.
+This means you can rapidly develop, incrementally test, and easily
+debug "
 	  (with-style (:font "Helvetica-Bold") "any type")
 	  " of web application, from art to architecture, business to engineering, scheduling to manufacturing.")
-	(vspace 141)
+	(vspace 138)
 	(with-p ()
 	  (with-style (:font "Helvetica-Bold" :font-size 12 :color (gethash :orange *color-table-decimal*))
 	    "Graphics and geometry at your service.")
-	  " Your needs for geometry may stop at basic business charts and graphs, or extend all the
-way into the wide world of complex curves, surfaces, and solids. Whatever your requirements, GDL 
-applications will conveniently perform computations, generate output, and interface to a great 
-variety of standard data formats.")
+	  " Your needs for geometry may stop at basic business charts
+and graphs, or extend all the way into the wide world of complex
+curves, surfaces, and solids. Whatever your requirements, Genworks GDL
+applications will conveniently perform computations, generate output,
+and interface to a great variety of standard CAD and document data formats.")
 	(vspace 10)
 	(with-p ()
 	  (with-style (:font "Helvetica-Bold" :font-size 12 :color (gethash :orange *color-table-decimal*))
 	    "Why Wait?")
 	  " Schedule a "
 	  (with-style (:font "Helvetica-Bold") "free")
-	  " Trial evaluation of GDL or a "
+	  " Trial evaluation of Genworks GDL or a "
 	  (with-style (:font "Helvetica-Bold") "free")
 	  " preliminary Project Impact Assessment.
 Genworks and its worldwide representatives are here to listen to your needs and assist you each 

@@ -46,10 +46,11 @@
    (panel-2-note :type 'panel-2-note-s1
 		 :width (the panel-2 width) :length (the panel-2 length))
    
-   
+
    (devo-image :type 'pdf-image
 	       ;;:image-file "~/genworks/gdl/apps/pamphlet/images/cabin.jpg"
-	       :image-file (merge-pathnames "images/cabin.jpg" *home*)
+	       ;;:image-file (merge-pathnames "images/cabin.jpg" *home*)
+               :image-file (merge-pathnames "images/primi-plane-geysr-emacs.jpg" *home*)
 	       :width (* (the panel-2 page-width) 0.95)
 	       :length (* (the-child width) 0.70)
 	       :keep-aspect-ratio? nil
@@ -130,7 +131,8 @@
 	    :border-box? (the border-boxes?)
 	    :projection-vector (getf *standard-views* :top)
 	    ;;:fit-to-page? nil
-	    :objects (list (the panel-2-note) (the devo-image)))
+	    :objects (list (the panel-2-note) (the devo-image)
+                           ))
 
    
    (panel-3-background :type 'base-view
@@ -198,35 +200,35 @@
        (with-style (:h-align :justified :font-size 12 :left-margin 12 :right-margin 12 :text-x-scale (the text-x-scale))
 	 (vspace 25) 
 	 (with-p (:h-align :center :color (gethash :aquamarine-medium *color-table-decimal*) :font-size 27)
-	   "Based on Free, Open-source Kernel")
+	   "Based on Free, Open-source Kernel ")
 	 (vspace 9)
 	 (with-p (:font "Helvetica-Bold" :font-size 12 :color (gethash :orange *color-table-decimal*))
-	   "Genworks GDL is based on The Gendl Project, a free, open-source software project")
+	   "Genworks GDL is a commercial suite build upon The Gendl Project, a free, open-source KBE system.")
 	 (vspace 9)
 	 (with-p ()
 	   (with-style (:font "Helvetica-Bold" :font-size 12 :color (gethash :orange *color-table-decimal*))
-	     "Zero-risk Investment")
+	     "Zero-risk Investment ")
 	   (with-style (:font "Helvetica-Oblique") "gitlab.common-lisp.net/gendl/gendl.git") :eol
 	   "By recording your executable corporate knowledge in Genworks GDL, you are guaranteeing its accessibility 
 into the future, forever.")
 	 (vspace 9)
 	 (with-p ()
 	   (with-style (:font "Helvetica-Bold" :font-size 12 :color (gethash :orange *color-table-decimal*))
-	     "ANSI Standard")
+	     "ANSI Standard ")
 	   (with-style (:font "Helvetica-Oblique") "common-lisp.net") :eol
 	   "Genworks GDL is implemented in portable ANSI Common Lisp, an official language standard as certified by 
 the American National Standards Institute (ANSI).")
 	 (vspace 9)
 	 (with-p ()
 	   (with-style (:font "Helvetica-Bold" :font-size 12 :color (gethash :orange *color-table-decimal*))
-	     "Happy Active Customers") :eol
+	     "Happy Active Customers ") :eol
 	   (with-style (:font "Helvetica-Oblique") "  www.genworks.com") :eol
 	   "For up-to-date contacts with current customers who would be open to discuss 
 their ongoing Genworks experience on an individual basis, please visit the above web page.")
 	 (vspace 9)
 	 (with-p()
 	   (with-style (:font "Helvetica-Bold" :font-size 12 :color (gethash :orange *color-table-decimal*))
-	     "Active Developer Community")
+	     "Active Developer Community ")
 	   (with-style (:font "Helvetica-Oblique" :font-size 12) "  www.genworks.com/contact") :eol
 	   "This venue hosts discussions and announcements relevant to Genworks products as well as 
 the Common Lisp developer community. Please do not hesitate to sign in and convey your interests.")))))))
@@ -308,9 +310,9 @@ the Common Lisp developer community. Please do not hesitate to sign in and conve
 	   (:h-align :center :left-margin 12 :right-margin 12  :color (gethash :white *color-table-decimal*)
 		     :font "Helvetica" :font-size 9)
 	
-	   #?"\251" "2004 Genworks International" :eol
-	   "255 E Brown, Suite 310" :eol
-	   "Birmingham, MI 48009 USA" :eol
+	   #?"\251" "2021 Genworks International" :eol
+	   "P.O. Box 7432" :eol
+	   "Bloomfield Hills, MI 48302 USA" :eol
 	   "+1 248-910-0912, +1 248-330-2979" :eol)
 	 
        (vspace 3)
@@ -318,7 +320,7 @@ the Common Lisp developer community. Please do not hesitate to sign in and conve
        (with-p
 	(:h-align :center :left-margin 12 :right-margin 12  :color (gethash :white *color-table-decimal*)
 		  :font "Helvetica-Oblique" :font-size 9 :text-x-scale (the text-x-scale))
-	"This pamphlet was created and typeset entirely with GDL/GWL."))))))
+	"Fun Fact: this pamphlet was created and typeset entirely with Genworks GDL."))))))
 
 
 #+nil
@@ -359,7 +361,7 @@ standards-compliant geometry input/output.")
       ("Input Protocols/Formats" "including HTTP, HTML, XML, SEXP, SOAP, SQL, Unicode, IGES, STEP, SAT, POP, IMAP.")
       ("Base Language Features" "dynamic typing, automatic memory management, incremental compilation,
 source transformation macros, meta-object protocol, multithreading.")
-      ("GDL/GWL Language Features" "in-memory object and value caching, dependency-tracking, demand-driven updating, 
+      ("Genworks GDL Language Features" "in-memory object and value caching, dependency-tracking, demand-driven updating, 
 primitives library, flexible output formats and skins, object-oriented database wrappers, tight object-to-URI mapping,
 web session tracking.")
       ("Development Productivity Features" "graphical development inspector and browser, incremental compilation and updating of running application, context-sensitive colorizing and syntax-checking editing environment, client/server development with remote host.")
@@ -379,7 +381,7 @@ telephone and email.")
      (with-p (:h-align :center :left-margin 12 :right-margin 12)
        (vspace 179)
        (with-style (:text-x-scale 0.69 :font "Helvetica-Bold" :font-size 13)
-	 "The GDL/GWL Application Development System.")
+	 "The Genworks GDL Application Development System.")
        (vspace 1.5)
        (typeset::table
 	(:padding 2 :cell-padding 1.5  :col-widths (list 60 160) :border 0.1 
