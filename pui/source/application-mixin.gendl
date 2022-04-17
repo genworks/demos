@@ -37,9 +37,14 @@
   ((x3dom? (eql (the viewport image-format-selector value) :x3dom))
    (resize-callback (format nil "puiResize(rp = '~a');" (the root-path)))
    
-   (body-onpageshow (the resize-callback))
-   (body-onpageload (the resize-callback))
-   (body-onresize (the resize-callback))
+   ;;(body-onpageshow (unless (the x3dom?) (the resize-callback)))
+   ;;(body-onpageload (unless (the x3dom?) (the resize-callback)))
+   ;;(body-onresize (unless (the x3dom?) (the resize-callback)))
+
+   (body-onpageshow nil)
+   (body-onpageload nil)
+   (body-onresize nil)
+
    
 
    (first-viewport (the viewport))
