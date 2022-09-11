@@ -42,7 +42,8 @@
 ;;
 ;; FLAG -- move to GWL supported
 ;;
-(defun publish-redirect (host server source-path target-url &key (response-code *response-found*))
+(defun publish-redirect
+    (&key host server source-path target-url (response-code *response-found*))
   (net.aserve:publish
    :path source-path :host host :server server
    :function #'(lambda(req ent)
