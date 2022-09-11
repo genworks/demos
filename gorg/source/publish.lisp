@@ -103,8 +103,11 @@
       (dolist (host (list "www.gendl.org" "gendl.org" "www.gendl.com" "gendl.com"
                           "www.gendl.net" "gendl.net"))
 
-        (publish-redirect :host host :server server :source-path "/"
-                          :target-url "https://gitlab.common-lisp.net/gendl/gendl")
+        (publish-redirect
+         :host host :server server :source-path "/"
+         :target-url "https://gitlab.common-lisp.net/gendl/gendl/-/tree/devo")
+
+
         
         (publish-shared 'landing :server server :path "/gorg"))))
 
