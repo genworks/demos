@@ -85,8 +85,8 @@
 
   (with-all-servers
       (server)
-      (dolist (host "www.gendl.org" "gendl.org" "www.gendl.com" "gendl.com"
-                    "www.gendl.net" "gendl.net")
+      (dolist (host (list "www.gendl.org" "gendl.org" "www.gendl.com" "gendl.com"
+                          "www.gendl.net" "gendl.net"))
         (net.aserve:publish
          :path "/" :host host :server server
          :function #'(lambda(req ent)
