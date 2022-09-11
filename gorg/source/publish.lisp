@@ -39,6 +39,20 @@
 	"gendl.org" "www.gendl.org"
 	"gendl.com" "www.gendl.com"))
 
+;;
+;; FLAG -- move to GWL supported
+;;
+(defun publish-redirect (host server source-path target-url &key (response-code *response-found*))
+  (net.aserve:publish
+   :path source-path :host host :server server
+   :function #'(lambda(req ent)
+                 (with-http-response (req ent :response response-code)
+                   (setf (reply-header-slot-value req :cache-control) "no-cache")
+                   (setf (reply-header-slot-value req :pragma) "no-cache")
+                   (setf (reply-header-slot-value req :location) target-url)
+                   (setf (reply-header-slot-value req :response) response-code)
+                   (with-http-body (req ent))))))
+
 (defun initialize ()
 
 
@@ -87,18 +101,11 @@
       (server)
       (dolist (host (list "www.gendl.org" "gendl.org" "www.gendl.com" "gendl.com"
                           "www.gendl.net" "gendl.net"))
-        (net.aserve:publish
-         :path "/" :host host :server server
-         :function #'(lambda(req ent)
-                       (with-http-response (req ent)
-                         (setf (reply-header-slot-value req :cache-control) "no-cache")
-                         (setf (reply-header-slot-value req :pragma) "no-cache")
-                         (setf (reply-header-slot-value req :location)
-                               "https://gitlab.common-lisp.net/gendl/gendl")
-                         (setf (reply-header-slot-value req :response) *response-found*)
-                         (with-http-body (req ent))))))
 
-      (publish-shared 'landing :server server :path "/gorg")))
+        (publish-redirect :host host :server server :source-path "/"
+                          :target-url "https://gitlab.common-lisp.net/gendl/gendl")
+        
+        (publish-shared 'landing :server server :path "/gorg"))))
 
 
   
