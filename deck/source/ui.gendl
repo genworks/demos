@@ -17,9 +17,9 @@
              :pass-down (number-of-joists joist-pitch-default))
 
    (beams-widthwise :type 'beam-first-ui
-                :lumber-type 'lumber:2x6
-                :length (the width)
-                     :deck-length (the length))
+                    :lumber-type 'lumber:2x6
+                    :length (the width)
+                    :deck-length (the length))
 
    (legs :type 'legs-ui
                 :lumber-type 'lumber:2x6
