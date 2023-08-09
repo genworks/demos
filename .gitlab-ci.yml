@@ -8,16 +8,17 @@ stages:
 update:
   stage: update
   tags:
+    - demos
     - website
   script:
     - bash -x ./ci-script.sh linux git-pull
-
   
 build:
   stage: build
   tags:
+    - demos
     - website
-#  when: manual
+  when: manual
   script:
     - bash -x ./ci-script.sh linux load-script make-genworks-site
 
