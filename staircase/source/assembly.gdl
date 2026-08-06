@@ -1,0 +1,312 @@
+;;;; -*- Mode: Lisp; Package: staircase-demo -*-
+;;;;
+;;;; Parametric outdoor staircase in dimensional deckwood lumber,
+;;;; built on the lumber system's stock primitives (demos/lumber).
+;;;; Inspiration: a real lakeside embankment staircase with ~14
+;;;; treads, single-side handrail, sloped grass embankment site.
+;;;;
+;;;; Every structural member is a lumber part carrying its own
+;;;; stock-keeping data, so the bill of materials aggregates from the
+;;;; model tree (lumber:bill-of-materials) and cannot drift from the
+;;;; geometry.  Cross-section dimensions come from the lumber tables;
+;;;; change a member's nominal size and the geometry follows.
+
+(in-package :staircase-demo)
+
+(define-object staircase (base-object)
+
+  :documentation
+  (:description "Parametric outdoor staircase in dimensional deckwood
+lumber: two sloped stringers with plumb and level end cuts, treads of
+two gapped deck boards, optional risers ripped from 2x8 stock,
+optional skirt boards, and a single-side handrail of 4x4 posts under
+a plumb-cut 2x4 rail.  Geometry and the bill of materials both derive
+from the same lumber part objects."
+   :author "Genworks International")
+
+  :input-slots
+  (;; Overall geometry (inches)
+   (total-rise       96)    ; 8 feet vertical
+   (total-run        144)   ; 12 feet horizontal
+   (number-of-steps  14)
+   (stairs-width     36)    ; outside-to-outside of the two stringers
+   (nosing           1)     ; tread overhang past the riser face
+
+   ;; Stock selection; actual dimensions come from the lumber tables.
+   (tread-nominal    "2x6")
+   (stringer-nominal "2x10")
+   (riser-nominal    "2x8")
+   (skirt-nominal    "1x12")
+   (post-nominal     "4x4")
+   (rail-nominal     "2x4")
+
+   (tread-board-gap  1/4)   ; drainage gap between tread boards
+
+   ;; Optional features
+   (include-risers? t :settable)
+   (include-skirt?  nil :settable)
+   (handrail?       t :settable)
+
+   ;; Handrail (single side, per the reference photo)
+   (post-every      3)    ; a post at every Nth tread, plus the top
+   (handrail-height 36)   ; post height above the tread surface
+   (rail-overhang   3)    ; rail run past the end posts
+
+   ;; Scaffold for the solids toggle: lumber-type returns surf-based
+   ;; solid part types on solids-capable images when this is t.
+   (solids? nil :settable))
+
+  :computed-slots
+  ((rise-per-step (/ (the total-rise) (the number-of-steps)))
+   (run-per-step  (/ (the total-run)  (the number-of-steps)))
+
+   (slope-angle  (* (/ 180 pi) (atan (the total-rise) (the total-run))))
+   (slope-length (sqrt (+ (expt (the total-run) 2)
+                          (expt (the total-rise) 2))))
+   ;; multiply a front-to-back span by this to get its length along
+   ;; the slope
+   (slope-factor (/ (the slope-length) (the total-run)))
+
+   ;; Shared tilt for anything running the length of the slope
+   ;; (stringers, skirts, rail): rotate the object's own rear and top
+   ;; axes about its right axis by the slope angle.
+   (sloped-orientation
+    (alignment :rear (rotate-vector-d (the (face-normal-vector :rear))
+                                      (the slope-angle)
+                                      (the (face-normal-vector :right)))
+               :top  (rotate-vector-d (the (face-normal-vector :top))
+                                      (the slope-angle)
+                                      (the (face-normal-vector :right)))))
+
+   ;; Section dimensions from the lumber tables.
+   (tread-board-width (second (lumber:nominal-section (the tread-nominal))))
+   (tread-thickness   (first (lumber:nominal-section (the tread-nominal))))
+   (tread-depth (+ (* 2 (the tread-board-width)) (the tread-board-gap)))
+   (stringer-thickness (first (lumber:nominal-section (the stringer-nominal))))
+   (stringer-depth     (second (lumber:nominal-section (the stringer-nominal))))
+   (riser-thickness (first (lumber:nominal-section (the riser-nominal))))
+   (skirt-thickness (first (lumber:nominal-section (the skirt-nominal))))
+   (post-size (second (lumber:nominal-section (the post-nominal))))
+   (rail-depth (second (lumber:nominal-section (the rail-nominal))))
+
+   (tread-length (- (the stairs-width) (* 2 (the stringer-thickness))))
+
+   ;; centerline lateral offset of each stringer from the stair centerline
+   (stringer-offset (/ (- (the stairs-width) (the stringer-thickness)) 2))
+
+   ;; posts and rail center on this lateral offset, hugging the
+   ;; outside face of one stringer
+   (rail-side-offset (+ (the stringer-offset) (/ (the post-size) 2)))
+
+   ;; Tread indices carrying a handrail post: every post-every-th,
+   ;; plus the top tread so the rail never ends unsupported.
+   (post-indices (let (result)
+                   (dotimes (i (the number-of-steps))
+                     (when (or (zerop (mod i (the post-every)))
+                               (= i (1- (the number-of-steps))))
+                       (push i result)))
+                   (nreverse result)))
+
+   ;; The rail spans bottom post to top post plus a little overhang,
+   ;; its underside riding the post tops.
+   (rail-span-y  (+ (* (1- (the number-of-steps)) (the run-per-step))
+                    (the post-size)
+                    (* 2 (the rail-overhang))))
+   (rail-length  (* (the rail-span-y) (the slope-factor)))
+   (rail-center-y (* (1- (the number-of-steps)) (/ (the run-per-step) 2)))
+   (rail-center-z (+ (the (post-top-z (/ (1- (the number-of-steps)) 2)))
+                     (/ (the rail-depth) 2)))
+
+   ;; Aggregated from the lumber parts in the tree; see demos/lumber.
+   (bill-of-materials (lumber:bill-of-materials self))
+
+   (bom-text (lumber:bom-text
+              self
+              :title (format nil "Cut list: ~a steps, ~,1f in rise over ~,1f in run (~,1f deg)"
+                             (the number-of-steps) (float (the total-rise))
+                             (float (the total-run)) (the slope-angle))))
+
+   (display-controls (list :color :wood-light)))
+
+  :functions
+  ((step-y      (index) (* index (the run-per-step)))
+   (tread-top-z (index) (+ (* (1+ index) (the rise-per-step))
+                           (/ (the tread-thickness) 2)))
+   (post-top-z  (index) (+ (the (tread-top-z index)) (the handrail-height)))
+
+   ;; Side profile of a stringer or skirt board as a closed global
+   ;; polyline in the y-z plane at lateral offset LATERAL-X: plumb
+   ;; (vertical) cuts at the bottom front and at the top, a level cut
+   ;; along the ground, top and underside edges parallel to the slope,
+   ;; DEPTH apart measured perpendicular to the slope.  The top edge
+   ;; passes through the riser-face/tread-underside corners, so the
+   ;; tread-and-riser sawtooth shows above a clean plank line.
+   (stringer-profile
+    (lateral-x depth)
+    (let* ((m (/ (the total-rise) (the total-run)))
+           (c-top (+ (- (the rise-per-step) (/ (the tread-thickness) 2))
+                     (* m (- (/ (the tread-depth) 2) (the nosing)))))
+           (c-bot (- c-top (* depth (the slope-factor))))
+           (front-y (- (the nosing) (/ (the tread-depth) 2)))
+           (level-end-y (max front-y (- (/ c-bot m))))
+           (top-y (+ (* (1- (the number-of-steps)) (the run-per-step))
+                     (/ (the tread-depth) 2))))
+      (mapcar (lambda (yz)
+                (translate (the center)
+                           :right lateral-x
+                           :rear (first yz)
+                           :up (second yz)))
+              (list (list front-y 0)
+                    (list level-end-y 0)
+                    (list top-y (+ (* m top-y) c-bot))
+                    (list top-y (+ (* m top-y) c-top))
+                    (list front-y (+ (* m front-y) c-top))
+                    (list front-y 0))))))
+
+  :objects
+  ((treads :type 'tread
+           :sequence (:size (the number-of-steps))
+           :board-nominal (the tread-nominal)
+           :board-gap (the tread-board-gap)
+           :solids? (the solids?)
+           :width  (the tread-length)
+           :length (the tread-depth)
+           :height (the tread-thickness)
+           :display-controls (list :color :wood-light)
+           :center (translate (the center)
+                              :rear (the (step-y (the-child index)))
+                              :up   (- (the (tread-top-z (the-child index)))
+                                       (/ (the tread-thickness) 2))))
+
+   ;; Riser boards rip to the step rise from riser-nominal stock and
+   ;; stand on edge, face nosing behind the tread front edge.
+   (risers :type (lumber:lumber-type :solids? (the solids?))
+           :sequence (:size (if (the include-risers?) (the number-of-steps) 0))
+           :nominal (the riser-nominal)
+           :width (the rise-per-step)
+           :stock-description (format nil "~a rip" (the riser-nominal))
+           :length (the tread-length)
+           :display-controls (list :color :wood-medium)
+           :orientation (alignment :rear (the (face-normal-vector :right))
+                                   :right (the (face-normal-vector :top)))
+           :center (translate (the center)
+                              :rear (+ (the (step-y (the-child index)))
+                                       (- (/ (the tread-depth) 2))
+                                       (the nosing)
+                                       (/ (the riser-thickness) 2))
+                              :up   (* (+ (the-child index) 1/2)
+                                       (the rise-per-step))))
+
+   ;; Stringers run the slope with proper plumb and level end cuts,
+   ;; extruded laterally from the side profile.
+   (stringers :type 'stringer
+              :sequence (:size 2)
+              :nominal (the stringer-nominal)
+              :slope-length (the slope-length)
+              :display-controls (list :color :wood-dark)
+              :projection-vector (the (face-normal-vector :right))
+              :vertex-list (the (stringer-profile
+                                 (- (* (if (zerop (the-child index)) 1 -1)
+                                       (the stringer-offset))
+                                    (/ (the stringer-thickness) 2))
+                                 (the stringer-depth))))
+
+   ;; Skirt boards share the stringer profile, hung two inches deeper
+   ;; on the outside faces.
+   (skirts :type 'stringer
+           :sequence (:size (if (the include-skirt?) 2 0))
+           :nominal (the skirt-nominal)
+           :slope-length (the slope-length)
+           :display-controls (list :color :wood-medium)
+           :projection-vector (the (face-normal-vector :right))
+           :vertex-list (the (stringer-profile
+                              (- (* (if (zerop (the-child index)) 1 -1)
+                                    (+ (the stringer-offset)
+                                       (/ (+ (the stringer-thickness)
+                                             (the skirt-thickness))
+                                          2)))
+                                 (/ (the skirt-thickness) 2))
+                              (+ (the stringer-depth) 2))))
+
+   (posts :type (lumber:lumber-type :solids? (the solids?))
+          :sequence (:size (if (the handrail?) (length (the post-indices)) 0))
+          :nominal (the post-nominal)
+          :length (the handrail-height)
+          :display-controls (list :color :wood-dark)
+          :orientation (alignment :rear (the (face-normal-vector :top))
+                                  :top (the (face-normal-vector :rear)))
+          :center (let ((tread-index (nth (the-child index) (the post-indices))))
+                    (translate (the center)
+                               :rear  (the (step-y tread-index))
+                               :up    (- (the (post-top-z tread-index))
+                                         (/ (the handrail-height) 2))
+                               :right (the rail-side-offset))))
+
+   ;; The rail rides the post tops on edge, plumb-cut at both ends:
+   ;; angle-cut-lumber's miter runs across the wide face, and with
+   ;; that face standing vertical the cuts come out plumb.
+   (rail :type (lumber:lumber-type :cut? t :solids? (the solids?))
+         :hidden? (not (the handrail?))
+         :nominal (the rail-nominal)
+         :length (the rail-length)
+         :front-angle-degrees (the slope-angle)
+         :rear-angle-degrees (- (the slope-angle))
+         :display-controls (list :color :wood-dark)
+         :orientation (alignment :rear (rotate-vector-d
+                                        (the (face-normal-vector :rear))
+                                        (the slope-angle)
+                                        (the (face-normal-vector :right)))
+                                 :right (rotate-vector-d
+                                         (the (face-normal-vector :top))
+                                         (the slope-angle)
+                                         (the (face-normal-vector :right))))
+         :center (translate (the center)
+                            :rear  (the rail-center-y)
+                            :up    (the rail-center-z)
+                            :right (the rail-side-offset)))))
+
+
+(define-object tread (base-object)
+
+  :documentation
+  (:description "One stair tread: two deck boards running across the
+stair width, separated by a drainage gap.  Width, length, and height
+describe the tread's overall envelope and come from the parent."
+   :author "Genworks International")
+
+  :input-slots
+  (board-nominal board-gap (solids? nil))
+
+  :computed-slots
+  ((board-width (second (lumber:nominal-section (the board-nominal)))))
+
+  :objects
+  ((boards :type (lumber:lumber-type :solids? (the solids?))
+           :sequence (:size 2)
+           :nominal (the board-nominal)
+           :length (the width)
+           :orientation (alignment :rear (the (face-normal-vector :right))
+                                   :top (the (face-normal-vector :top)))
+           :center (translate (the center)
+                              :rear (* (if (zerop (the-child index)) -1 1)
+                                       (/ (+ (the board-width) (the board-gap))
+                                          2))))))
+
+
+(define-object stringer (global-polygon-projection lumber:lumber-mixin)
+
+  :documentation
+  (:description "A stringer or skirt board: stock lumber cut to a
+custom side profile (supplied by the parent as a global vertex list)
+and extruded through its own thickness.  Too shaped for
+angle-cut-lumber's single cut per end, but still a lumber part for
+bill-of-materials purposes: it reports its stock and its long-point
+length along the slope."
+   :author "Genworks International")
+
+  :input-slots
+  (slope-length)
+
+  :computed-slots
+  ((cut-length (the slope-length))
+   (projection-depth (the height))))

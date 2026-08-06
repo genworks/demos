@@ -1,0 +1,222 @@
+;;;; -*- Mode: Lisp; Package: lumber -*-
+;;;;
+;;;; Dimensional-lumber primitives: boards described by a nominal
+;;;; cross-section name plus a length, rendered as boxes when
+;;;; square-cut and as global-polygon-projections when the ends carry
+;;;; angle cuts.  Every board knows its store-bought stock sizes, so a
+;;;; bill of materials can be aggregated from the model tree itself
+;;;; (see bom.lisp).
+;;;;
+;;;; Axis convention (matching the original bench-demo lumber):
+;;;; length runs along the local rear axis, width (the wide face
+;;;; dimension) along right, height (the thickness) along top.
+
+(in-package :lumber)
+
+;; Actual (thickness width) in inches for each nominal size.
+(defparameter *nominal-sections*
+  '(("1x2" 3/4 3/2) ("1x4" 3/4 7/2) ("1x6" 3/4 11/2)
+    ("1x8" 3/4 29/4) ("1x10" 3/4 37/4) ("1x12" 3/4 45/4)
+    ("2x2" 3/2 3/2) ("2x4" 3/2 7/2) ("2x6" 3/2 11/2)
+    ("2x8" 3/2 29/4) ("2x10" 3/2 37/4) ("2x12" 3/2 45/4)
+    ("4x4" 7/2 7/2) ("4x6" 7/2 11/2) ("6x6" 11/2 11/2)))
+
+;; Store-bought lengths in inches, shortest first.  Sizes not listed
+;; in *stock-lengths-overrides* sell in the default lengths.
+(defparameter *default-stock-lengths* (list 96 120 144 168 192))
+
+(defparameter *stock-lengths-overrides*
+  '(("4x4" 96 120 144) ("4x6" 96 120 144) ("6x6" 96 120 144)))
+
+(defun nominal-section (nominal)
+  "List of (thickness width) in inches for the nominal size string
+NOMINAL, e.g. \"2x6\" -> (3/2 11/2)."
+  (or (rest (assoc nominal *nominal-sections* :test #'string-equal))
+      (error "Unknown nominal lumber size ~s." nominal)))
+
+(defun stock-lengths-for (nominal)
+  "Store-bought lengths in inches for NOMINAL, shortest first."
+  (or (rest (assoc nominal *stock-lengths-overrides* :test #'string-equal))
+      *default-stock-lengths*))
+
+(defun nominal-numbers (nominal)
+  "The two nominal-inch numbers named by NOMINAL, e.g. \"2x6\" -> (2 6)."
+  (let ((x (position-if (lambda (char) (char-equal char #\x)) nominal)))
+    (list (parse-integer nominal :end x)
+          (parse-integer nominal :start (1+ x)))))
+
+(defun degrees->radians (degrees) (* pi (/ degrees 180)))
+
+
+(define-object lumber-mixin (base-object)
+
+  :documentation
+  (:description "Common stock-keeping behavior for a piece of
+dimensional lumber: actual cross-section dimensions looked up from
+the nominal size, store-bought stock lengths, and a bom-plist for
+tree-walking bill-of-materials aggregation.  Mix with a geometric
+type; see lumber and angle-cut-lumber."
+   :author "Genworks International")
+
+  :input-slots
+  ((nominal "2x4")
+
+   ;; Override for rips and other reworked stock, e.g. "2x8 rip".
+   (stock-description (the nominal))
+
+   ;; Actual section dimensions default from the nominal size; a rip
+   ;; overrides one of them along with stock-description.
+   (height (first (nominal-section (the nominal))))
+   (width (second (nominal-section (the nominal))))
+
+   (stock-lengths (stock-lengths-for (the nominal))))
+
+  :computed-slots
+  (;; Length of stock consumed by this piece; angle-cut boards
+   ;; redefine as their long-point length.
+   (cut-length (the length))
+
+   ;; Shortest store-bought board this piece cuts from, nil when the
+   ;; piece outruns the longest stock.
+   (buy-length (find-if (lambda (stock) (>= stock (the cut-length)))
+                        (the stock-lengths)))
+
+   (board-feet (let ((numbers (nominal-numbers (the nominal))))
+                 (/ (* (first numbers) (second numbers)
+                       (/ (the cut-length) 12))
+                    12)))
+
+   (bom-plist (list :stock (the stock-description)
+                    :cut-length (the cut-length)
+                    :buy-length (the buy-length)))))
+
+
+(define-object lumber (box lumber-mixin)
+  :documentation
+  (:description "A square-cut board: a box whose cross-section comes
+from the nominal size.  Length is supplied or trickles down."
+   :author "Genworks International"))
+
+
+(define-object angle-cut-mixin (base-object)
+
+  :documentation
+  (:description "Profile math for a board with an optional angle cut
+on either end, in carpentry terms: with cut-plane :miter (the
+default) the angle runs across the wide face, as cut by a chop saw
+with the board flat -- the shape of a stair stringer's plumb and
+level cuts or a picture-frame corner.  With cut-plane :bevel the
+angle runs through the thickness, as cut with the saw blade tilted.
+A positive angle cuts material away from the right (:miter) or top
+(:bevel) side; a negative angle cuts from the opposite side.  Length
+measures long point to long point.  For a compound cut, model with
+real solids.  Mix with a geometric type: see angle-cut-lumber
+(wireframe) and angle-cut-lumber-solid (surf brep, solids.lisp)."
+   :author "Genworks International")
+
+  :input-slots
+  ((front-angle-degrees 0)
+   (rear-angle-degrees 0)
+   (cut-plane :miter))
+
+  :computed-slots
+  ((profile-thickness (ecase (the cut-plane)
+                        (:bevel (the height))
+                        (:miter (the width))))
+
+   (projection-depth (ecase (the cut-plane)
+                       (:bevel (the width))
+                       (:miter (the height))))
+
+   (projection-vector (ecase (the cut-plane)
+                        (:bevel (the (face-normal-vector :right)))
+                        (:miter (the (face-normal-vector :top)))))
+
+   (front-inset (* (the profile-thickness)
+                   (tan (degrees->radians (abs (the front-angle-degrees))))))
+   (rear-inset (* (the profile-thickness)
+                  (tan (degrees->radians (abs (the rear-angle-degrees))))))
+
+   ;; Profile corners as (u v): u along length from the front end, v
+   ;; across the profile.  A positive angle insets the high-v corner,
+   ;; a negative angle the low-v corner.
+   (profile-uv
+    (let ((l2 (half (the length)))
+          (t2 (half (the profile-thickness))))
+      (list (list (+ (- l2) (if (minusp (the front-angle-degrees))
+                                (the front-inset) 0))
+                  (- t2))
+            (list (- l2 (if (minusp (the rear-angle-degrees))
+                            (the rear-inset) 0))
+                  (- t2))
+            (list (- l2 (if (plusp (the rear-angle-degrees))
+                            (the rear-inset) 0))
+                  t2)
+            (list (+ (- l2) (if (plusp (the front-angle-degrees))
+                                (the front-inset) 0))
+                  t2))))
+
+   ;; Closed global polyline of the profile, in the plane of the
+   ;; face the extrusion starts from.
+   (vertex-list
+    (let* ((base (translate (the center)
+                            (ecase (the cut-plane) (:bevel :left) (:miter :bottom))
+                            (half (the projection-depth))))
+           (across (ecase (the cut-plane) (:bevel :up) (:miter :right)))
+           (points (mapcar (lambda (uv)
+                             (translate base
+                                        :rear (first uv)
+                                        across (second uv)))
+                           (the profile-uv))))
+      (append points (list (first points)))))))
+
+
+(define-object angle-cut-lumber (angle-cut-mixin global-polygon-projection lumber-mixin)
+
+  :documentation
+  (:description "Wireframe angle-cut board: the angle-cut-mixin
+profile extruded as a global-polygon-projection."
+   :author "Genworks International"))
+
+
+;;; Convenience types for common sizes.
+
+(define-object 1x2 (lumber) :input-slots ((nominal "1x2")))
+(define-object 1x4 (lumber) :input-slots ((nominal "1x4")))
+(define-object 1x6 (lumber) :input-slots ((nominal "1x6")))
+(define-object 1x8 (lumber) :input-slots ((nominal "1x8")))
+(define-object 1x10 (lumber) :input-slots ((nominal "1x10")))
+(define-object 1x12 (lumber) :input-slots ((nominal "1x12")))
+(define-object 2x2 (lumber) :input-slots ((nominal "2x2")))
+(define-object 2x4 (lumber) :input-slots ((nominal "2x4")))
+(define-object 2x6 (lumber) :input-slots ((nominal "2x6")))
+(define-object 2x8 (lumber) :input-slots ((nominal "2x8")))
+(define-object 2x10 (lumber) :input-slots ((nominal "2x10")))
+(define-object 2x12 (lumber) :input-slots ((nominal "2x12")))
+(define-object 4x4 (lumber) :input-slots ((nominal "4x4")))
+(define-object 4x6 (lumber) :input-slots ((nominal "4x6")))
+(define-object 6x6 (lumber) :input-slots ((nominal "6x6")))
+
+
+(defun find-symbol-ci (name package)
+  "Case-portable find-symbol: match NAME against symbol names with
+string-equal, so the same call works on traditional and modern-mode
+images."
+  (let (result)
+    (do-symbols (symbol package)
+      (when (string-equal (symbol-name symbol) name)
+        (setq result symbol)
+        (return)))
+    result))
+
+(defun lumber-type (&key cut? solids?)
+  "Type symbol for a lumber part: angle-cut or square, wireframe or
+solid.  Asking for solids falls back to the wireframe type unless a
+solids-capable (surf/SMLib) image has defined the solid variants."
+  (let ((wireframe (if cut? 'angle-cut-lumber 'lumber)))
+    (if solids?
+        (let ((solid (and (find-package :surf)
+                          (find-symbol-ci (if cut? "angle-cut-lumber-solid" "lumber-solid")
+                                          :lumber))))
+          (if (and solid (find-class solid nil)) solid wireframe))
+        wireframe)))

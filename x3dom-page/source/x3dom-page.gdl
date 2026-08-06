@@ -1,0 +1,54 @@
+;;;; -*- Mode: Lisp; Package: x3dom-page -*-
+;;;;
+;;;; x3dom-page: write a standalone x3dom HTML page for any Gendl
+;;;; object -- a static snapshot viewer needing no running Gendl
+;;;; server, so demo output can be posted on plain web hosting.
+;;;;
+;;;; Usage:
+;;;;   (x3dom-page:write-x3dom-page
+;;;;     (make-object 'staircase-demo:staircase)
+;;;;     "/projects/demos/staircase/static/staircase.html"
+;;;;     :title "Parametric Staircase")
+
+(gdl:define-package :x3dom-page (:export #:write-x3dom-page))
+(in-package :x3dom-page)
+
+(defparameter *x3dom-js-url* "https://www.x3dom.org/download/x3dom.js")
+(defparameter *x3dom-css-url* "https://www.x3dom.org/download/x3dom.css")
+
+(defun scene-string (objects)
+  "X3D scene fragment for OBJECTS, a Gendl object or list of objects."
+  (with-output-to-string (stream)
+    (dolist (object (if (listp objects) objects (list objects)))
+      (with-format (geom-base:x3d stream)
+        (write-the-object object cad-output-tree)))))
+
+(defun write-x3dom-page (objects path &key (title "Gendl Model")
+                                        (background-color "1 1 1")
+                                        (x3dom-js-url *x3dom-js-url*)
+                                        (x3dom-css-url *x3dom-css-url*))
+  "Write a standalone HTML page at PATH showing OBJECTS (a Gendl
+object or list of objects) in an interactive x3dom viewport.  The
+page runs without any Gendl server; its only external references
+are the x3dom script and stylesheet at X3DOM-JS-URL and
+X3DOM-CSS-URL.  Returns the truename of the written file."
+  (ensure-directories-exist path)
+  (with-open-file (out path :direction :output
+                       :if-exists :supersede :if-does-not-exist :create)
+    (format out "<!DOCTYPE html>~%<html lang=\"en\">~%<head>~%")
+    (format out "<meta charset=\"utf-8\"/>~%<title>~a</title>~%" title)
+    (format out "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>~%")
+    (format out "<script src=\"~a\"></script>~%" x3dom-js-url)
+    (format out "<link rel=\"stylesheet\" href=\"~a\"/>~%" x3dom-css-url)
+    (format out "<style>html,body{margin:0;height:100%}x3d{width:100%;height:100%;display:block}</style>~%")
+    (format out "</head>~%<body>~%")
+    (format out "<x3d showStat=\"false\" showLog=\"false\">~%<Scene>~%")
+    (format out "<Background skyColor=\"~a\"></Background>~%" background-color)
+    (write-string (scene-string objects) out)
+    (format out "~%</Scene>~%</x3d>~%")
+    ;; Fit the model once the x3dom runtime is up; registering the
+    ;; ready hook here in body runs before x3dom initializes on
+    ;; DOMContentLoaded.
+    (format out "<script>x3dom.runtime.ready=function(){var el=document.querySelector('x3d');if(el&&el.runtime){el.runtime.resetView();el.runtime.fitAll();}};</script>~%")
+    (format out "</body>~%</html>~%"))
+  (truename path))

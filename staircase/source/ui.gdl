@@ -1,0 +1,158 @@
+;;;; -*- Mode: Lisp; Package: staircase-demo -*-
+;;;;
+;;;; Web UI: base-html-page + viewport-html-div with x3dom, Tailwind
+;;;; utility classes riding the default gwl-graphics-style.css build
+;;;; (see the tailwind pipeline notes in org).  session-control-mixin
+;;;; keeps public instances mortal: without it every visit and every
+;;;; crawler hit mints an immortal instance.
+
+(in-package :staircase-demo)
+
+(define-object staircase-ui (session-control-mixin base-html-page)
+
+  :documentation
+  (:description "Interactive staircase demo page: parameter form, live
+x3dom viewport, and the cut list aggregated from the model's lumber
+parts."
+   :author "Genworks International")
+
+  :input-slots
+  ((title "Parametric Staircase Demo")
+   (objects (list (the model)))
+
+   (total-rise 96 :settable)
+   (total-run 144 :settable)
+   (number-of-steps 14 :settable)
+   (stairs-width 36 :settable)
+   (handrail? t :settable)
+   (include-risers? t :settable)
+   (include-skirt? nil :settable))
+
+  :computed-slots
+  ((use-svgpanzoom? t)
+   (use-x3dom? t)
+
+   (additional-header-content
+    (string-append
+     (with-lhtml-string () (:script (str (the viewport-renderers-js-baseline))))
+     (call-next-method)))
+
+   (body
+    (with-lhtml-string ()
+      (:div :class "max-w-5xl mx-auto p-8"
+        (:div :class "text-center mb-8"
+          (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
+               "Parametric Staircase")
+          (:p :class "text-lg text-gray-600"
+              "An outdoor staircase built entirely from parametric Gendl code -- adjust the parameters and rebuild live."))
+        (:div :class "bg-white rounded-lg shadow-lg p-6 mb-8"
+          (:h2 :class "text-xl font-semibold text-gray-800 mb-4" "Parameters")
+          (str (the control-form)))
+        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
+          (:div :class "px-6 py-4 bg-gray-50 border-b"
+            (:h3 :class "text-lg font-medium text-gray-900" "3D View"))
+          (:div :class "p-6 relative" :style "height: 600px;"
+            (str (the viewport-area div))))
+        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden"
+          (:div :class "px-6 py-4 bg-gray-50 border-b"
+            (:h3 :class "text-lg font-medium text-gray-900" "Cut List"))
+          (:div :class "p-6"
+            (:pre :class "text-sm font-mono text-gray-800 overflow-x-auto"
+                  (str (the model bom-text))))))))
+
+   (control-form
+    (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the total-rise-control id)
+                    "Total Rise (in)")
+            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the total-rise-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the total-run-control id)
+                    "Total Run (in)")
+            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the total-run-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the number-of-steps-control id)
+                    "Number of Steps")
+            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the number-of-steps-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the stairs-width-control id)
+                    "Width (in)")
+            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the stairs-width-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the handrail-control id)
+                    "Handrail")
+            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the handrail-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the risers-control id)
+                    "Risers")
+            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the risers-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the skirt-control id)
+                    "Skirt / Fascia")
+            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the skirt-control form-control))))
+      (:div :class "flex items-end"
+            (:button :type "submit"
+                     :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                     "Rebuild")))))
+
+  :objects
+  ((total-rise-control :type 'number-form-control
+                       :default (the total-rise)
+                       :domain :number :min 48 :max 240 :step 6)
+
+   (total-run-control :type 'number-form-control
+                      :default (the total-run)
+                      :domain :number :min 60 :max 360 :step 6)
+
+   (number-of-steps-control :type 'number-form-control
+                            :default (the number-of-steps)
+                            :domain :number :min 3 :max 30 :step 1)
+
+   (stairs-width-control :type 'number-form-control
+                         :default (the stairs-width)
+                         :domain :number :min 24 :max 72 :step 2)
+
+   (handrail-control :type 'menu-form-control
+                     :default (if (the handrail?) :yes :no)
+                     :size 1
+                     :ajax-submit-on-change? t
+                     :choice-plist '(:yes "Yes" :no "No"))
+
+   (risers-control :type 'menu-form-control
+                   :default (if (the include-risers?) :yes :no)
+                   :size 1
+                   :ajax-submit-on-change? t
+                   :choice-plist '(:yes "Yes" :no "No"))
+
+   (skirt-control :type 'menu-form-control
+                  :default (if (the include-skirt?) :yes :no)
+                  :size 1
+                  :ajax-submit-on-change? t
+                  :choice-plist '(:yes "Yes" :no "No"))
+
+   (model :type 'staircase
+          :total-rise (the total-rise-control value)
+          :total-run (the total-run-control value)
+          :number-of-steps (the number-of-steps-control value)
+          :stairs-width (the stairs-width-control value)
+          :handrail? (eq (the handrail-control value) :yes)
+          :include-risers? (eq (the risers-control value) :yes)
+          :include-skirt? (eq (the skirt-control value) :yes))
+
+   (viewport-area :type 'base-html-div
+                 :div-class "absolute inset-0"
+                 :js-to-eval (the view-x3dom js-to-eval)
+                 :inner-html (the view-x3dom inner-html))
+
+   (view-x3dom :type 'viewport-html-div
+              :dom-id (the viewport-area dom-id)
+              :image-format :x3dom
+              :projection-key :trimetric
+              :display-list-object-roots (the objects))))
