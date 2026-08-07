@@ -1,0 +1,27 @@
+
+========================================================
+BATCH REGRESSION TEST SUMMARY
+========================================================
+Total Tests:     5
+Passed:          5 (100.0%)
+Failed:          0 (0.0%)
+Errors:          0 (0.0%)
+Execution Time:  1.16 seconds
+
+RESULTS BY AIRFOIL FAMILY:
+Family                       Total  Pass   Fail   Pass%    Quality  Time(s) 
+--------------------------------------------------------------------------------
+4-digit-symmetric                 5      5      0   100.0%   100.0   0.233
+
+WORST PERFORMERS (by quality score):
+  0018: Quality 100.0 (4-digit-symmetric)
+  0015: Quality 100.0 (4-digit-symmetric)
+
+BEST PERFORMERS (by quality score):
+  0006: Quality 100.0 (4-digit-symmetric)
+  0009: Quality 100.0 (4-digit-symmetric)
+  0012: Quality 100.0 (4-digit-symmetric)
+  0015: Quality 100.0 (4-digit-symmetric)
+  0018: Quality 100.0 (4-digit-symmetric)
+
+========================================================

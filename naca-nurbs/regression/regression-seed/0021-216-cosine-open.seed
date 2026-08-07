@@ -1,0 +1,18 @@
+
+(:schema 1 :airfoil :|0021| :n-points 216 :cosine? t :roundtrip-max
+ 7.892991815694472e-16 :tangent-angle-max-deg 8.610492258398494e-4
+ :x-monotone? t :x-min 0.0 :x-max 1.0 :geom-max-abs-error 0.0
+ :tangent-unit-max 2.220446049250313e-16 :nose-tangent-diff 0.0
+ :curv-pos? t :curv-nose-dominant? t :split-x-discrete
+ 0.030431954201728728 :split-x-continuous 0.030000000000000027
+ :split-dx 4.3195420172870147e-4 :section-overlap? t
+ :section-tangent-split-delta 0.0 :proj-max-noseU 9.813077866773595e-18
+ :proj-max-mainU 9.12178326497112e-13 :proj-max-noseL
+ 9.813077866773595e-18 :proj-max-mainL 9.12178326497112e-13
+ :approx-max-noseU 2.328199235031765e-4 :approx-max-mainU
+ 4.892493702210446e-4 :approx-max-noseL 2.328199235031765e-4
+ :approx-max-mainL 4.892493702210446e-4 :tol-used-noseU 5.0e-4
+ :tol-used-mainU 0.001 :tol-used-noseL 5.0e-4 :tol-used-mainL 0.001
+ :approx-achieved-noseU 2.2960475427567263e-4 :approx-achieved-mainU
+ 4.852874534519875e-4 :approx-achieved-noseL 2.2960475427567263e-4
+ :approx-achieved-mainL 4.852874534519875e-4) 
