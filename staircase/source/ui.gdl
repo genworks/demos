@@ -58,10 +58,44 @@ parts."
             (str (the viewport-area div))))
         (:div :class "bg-white rounded-lg shadow-lg overflow-hidden"
           (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
-            (:h3 :class "text-lg font-medium text-gray-900" "Cut List"))
-          (:div :class "p-6"
-            (:pre :class "text-sm font-mono text-gray-800 overflow-x-auto"
-                  (str (the model bom-text))))))))
+            (:h3 :class "text-lg font-medium text-gray-900" "Cut List")
+            (:p :class "text-sm text-gray-600"
+                (fmt "~a steps, ~,1f in rise over ~,1f in run (~,1f deg)"
+                     (the number-of-steps-control value)
+                     (float (the total-rise-control value))
+                     (float (the total-run-control value))
+                     (the model slope-angle))))
+          (:div :class "overflow-x-auto"
+            (str (the bom-table)))))))
+
+   (bom-table
+    (with-lhtml-string ()
+      (:table :class "min-w-full divide-y divide-gray-200"
+        (:thead :class "bg-gray-50"
+          (:tr
+            (:th :class "px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" "Qty")
+            (:th :class "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" "Stock")
+            (:th :class "px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" "Cut (in)")
+            (:th :class "px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" "Buy (ft)")))
+        (:tbody :class "divide-y divide-gray-100"
+          (str (the bom-table-rows))))))
+
+   (bom-table-rows
+    (apply #'string-append
+           (mapcar
+            (lambda (line)
+              (with-lhtml-string ()
+                (:tr :class "hover:bg-gray-50"
+                  (:td :class "px-6 py-3 text-sm text-right tabular-nums text-gray-900"
+                       (fmt "~d" (getf line :count)))
+                  (:td :class "px-6 py-3 text-sm font-medium text-gray-900"
+                       (str (getf line :stock)))
+                  (:td :class "px-6 py-3 text-sm text-right tabular-nums text-gray-700"
+                       (fmt "~,2f" (float (getf line :cut-length))))
+                  (:td :class "px-6 py-3 text-sm text-right tabular-nums text-gray-700"
+                       (str (let ((buy (getf line :buy-length)))
+                              (if buy (format nil "~d" (floor buy 12)) "special")))))))
+            (the model bill-of-materials))))
 
    (control-form
     (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
