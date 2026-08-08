@@ -1,12 +1,5 @@
 (in-package :naca-nurbs)
 
-(defparameter *project-dir*
-  (let* ((base (glisp:source-pathname))
-         (base-dir (pathname-directory base)))
-    (make-pathname :name nil :type nil
-                   :directory (butlast base-dir)
-                   :defaults base)))
-
 (define-object ui (session-control-mixin base-html-page)
   
   :input-slots
@@ -68,7 +61,7 @@
               (:p :class "text-sm text-gray-600"
                   "Interactive view"))
             (:div :class "p-6 overflow-auto relative" :style "height: 600px;"
-              (:div :class "absolute top-2 left-2 z-20 bg-white/90 backdrop-blur px-2 py-1 rounded shadow-sm"
+              (:div :class "param-field absolute top-2 left-2 z-20 bg-white/90 backdrop-blur px-2 py-1 rounded-md border border-gray-200 shadow-sm"
                 (str (the left-format-selector form-control)))
               (str (the left-viewport-area div))))
           (:div :class "flex-1 min-w-0 bg-white rounded-lg shadow-lg overflow-hidden"
@@ -78,7 +71,7 @@
               (:p :class "text-sm text-gray-600"
                   "Interactive view"))
             (:div :class "p-6 overflow-auto relative" :style "height: 600px;"
-              (:div :class "absolute top-2 left-2 z-20 bg-white/90 backdrop-blur px-2 py-1 rounded shadow-sm"
+              (:div :class "param-field absolute top-2 left-2 z-20 bg-white/90 backdrop-blur px-2 py-1 rounded-md border border-gray-200 shadow-sm"
                 (str (the right-format-selector form-control)))
               (str (the right-viewport-area div)))))
         (:div :class "grid grid-cols-1 md:grid-cols-3 gap-6 mt-8"

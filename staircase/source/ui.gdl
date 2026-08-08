@@ -24,6 +24,9 @@ parts."
    (total-run 144 :settable)
    (number-of-steps 14 :settable)
    (stairs-width 36 :settable)
+   (nosing 1 :settable)
+   (post-every 3 :settable)
+   (handrail-height 36 :settable)
    (handrail? t :settable)
    (include-risers? t :settable)
    (include-skirt? nil :settable))
@@ -120,6 +123,21 @@ parts."
             (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
                   (str (the stairs-width-control form-control))))
       (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the nosing-control id)
+                    "Nosing (in)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the nosing-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the post-every-control id)
+                    "Post Every (treads)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the post-every-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the handrail-height-control id)
+                    "Rail Height (in)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the handrail-height-control form-control))))
+      (:div :class "space-y-2"
             (:label :class "block text-sm font-medium text-gray-700" :for (the handrail-control id)
                     "Handrail")
             (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
@@ -134,7 +152,7 @@ parts."
                     "Skirt / Fascia")
             (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
                   (str (the skirt-control form-control))))
-      (:div :class "flex items-end"
+      (:div :class "flex items-end col-span-2"
             (:button :type "submit"
                      :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
                      "Rebuild")))))
@@ -155,6 +173,18 @@ parts."
    (stairs-width-control :type 'number-form-control
                          :default (the stairs-width)
                          :domain :number :min 24 :max 72 :step 2)
+
+   (nosing-control :type 'number-form-control
+                   :default (the nosing)
+                   :domain :number :min 0 :max 2 :step 1/4)
+
+   (post-every-control :type 'number-form-control
+                       :default (the post-every)
+                       :domain :number :min 2 :max 6 :step 1)
+
+   (handrail-height-control :type 'number-form-control
+                            :default (the handrail-height)
+                            :domain :number :min 30 :max 42 :step 2)
 
    (handrail-control :type 'menu-form-control
                      :default (if (the handrail?) :yes :no)
@@ -179,6 +209,9 @@ parts."
           :total-run (the total-run-control value)
           :number-of-steps (the number-of-steps-control value)
           :stairs-width (the stairs-width-control value)
+          :nosing (the nosing-control value)
+          :post-every (the post-every-control value)
+          :handrail-height (the handrail-height-control value)
           :handrail? (eq (the handrail-control value) :yes)
           :include-risers? (eq (the risers-control value) :yes)
           :include-skirt? (eq (the skirt-control value) :yes))

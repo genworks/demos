@@ -267,6 +267,9 @@
   .z-20 {
     z-index: 20;
   }
+  .col-span-2 {
+    grid-column: span 2 / span 2;
+  }
   .container {
     width: 100%;
     @media (width >= 40rem) {
@@ -1221,6 +1224,9 @@
       --tw-outline-style: none;
       outline-style: none;
     }
+  }
+  .param-field select {
+    padding-right: calc(var(--spacing) * 6);
   }
 }
 @layer utilities;
