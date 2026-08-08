@@ -45,14 +45,12 @@
      (with-lhtml-string () (:script (str (the viewport-renderers-js-baseline))))
      (call-next-method)
      (with-lhtml-string ()
-       (:link :href "/demo/naca-nurbs-css/naca-nurbs-style.css"
+       (:link :href "/demo/css/demos-style.css"
               :rel "stylesheet" :type "text/css"))))
 
    (body
     (with-lhtml-string ()
-      (:div :style "padding: 40px; max-width: 1200px; margin: 0 auto; background: #f8f9fa;"
-        (:div :style "background: #e3f2fd; padding: 12px; margin-bottom: 20px; border-radius: 8px; border: 1px solid #bbdefb;"
-          (str (the development-links)))
+      (:div :class "max-w-7xl mx-auto p-8"
         (:div :class "text-center mb-8"
           (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
                "NACA NURBS Playground")
@@ -64,7 +62,7 @@
           (str (the control-form)))
         (:div :class "flex flex-col lg:flex-row gap-8"
           (:div :class "flex-1 min-w-0 bg-white rounded-lg shadow-lg overflow-hidden"
-            (:div :class "px-6 py-4 bg-gray-50 border-b"
+            (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
               (:h3 :class "text-lg font-medium text-gray-900"
                    "Left Viewport")
               (:p :class "text-sm text-gray-600"
@@ -74,7 +72,7 @@
                 (str (the left-format-selector form-control)))
               (str (the left-viewport-area div))))
           (:div :class "flex-1 min-w-0 bg-white rounded-lg shadow-lg overflow-hidden"
-            (:div :class "px-6 py-4 bg-gray-50 border-b"
+            (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
               (:h3 :class "text-lg font-medium text-gray-900"
                    "Right Viewport")
               (:p :class "text-sm text-gray-600"
@@ -93,17 +91,17 @@
       (:div :class "space-y-2"
             (:label :class "block text-sm font-medium text-gray-700" :for (the airfoil-control id)
                     "Airfoil Type")
-            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
 		  (str (the airfoil-control form-control))))
       (:div :class "space-y-2"
             (:label :class "block text-sm font-medium text-gray-700" :for (the n-points-control id)
                     "Number of Points")
-            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
 		  (str (the n-points-control form-control))))
       (:div :class "space-y-2"
             (:label :class "block text-sm font-medium text-gray-700" :for (the approx-tolerance-control id)
                     "Tolerance")
-            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
 		  (str (the approx-tolerance-control form-control))))
       (:div :class "flex items-end"
             (:button :type "submit"

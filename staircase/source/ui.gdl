@@ -1,8 +1,8 @@
 ;;;; -*- Mode: Lisp; Package: staircase-demo -*-
 ;;;;
 ;;;; Web UI: base-html-page + viewport-html-div with x3dom, Tailwind
-;;;; utility classes riding the default gwl-graphics-style.css build
-;;;; (see the tailwind pipeline notes in org).  session-control-mixin
+;;;; utility classes compiled into the shared /demo/css/demos-style.css
+;;;; (build:demos in /projects/apps/tailwind).  session-control-mixin
 ;;;; keeps public instances mortal: without it every visit and every
 ;;;; crawler hit mints an immortal instance.
 
@@ -35,7 +35,10 @@ parts."
    (additional-header-content
     (string-append
      (with-lhtml-string () (:script (str (the viewport-renderers-js-baseline))))
-     (call-next-method)))
+     (call-next-method)
+     (with-lhtml-string ()
+       (:link :href "/demo/css/demos-style.css"
+              :rel "stylesheet" :type "text/css"))))
 
    (body
     (with-lhtml-string ()
@@ -49,12 +52,12 @@ parts."
           (:h2 :class "text-xl font-semibold text-gray-800 mb-4" "Parameters")
           (str (the control-form)))
         (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
-          (:div :class "px-6 py-4 bg-gray-50 border-b"
+          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
             (:h3 :class "text-lg font-medium text-gray-900" "3D View"))
           (:div :class "p-6 relative" :style "height: 600px;"
             (str (the viewport-area div))))
         (:div :class "bg-white rounded-lg shadow-lg overflow-hidden"
-          (:div :class "px-6 py-4 bg-gray-50 border-b"
+          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
             (:h3 :class "text-lg font-medium text-gray-900" "Cut List"))
           (:div :class "p-6"
             (:pre :class "text-sm font-mono text-gray-800 overflow-x-auto"
@@ -65,37 +68,37 @@ parts."
       (:div :class "space-y-2"
             (:label :class "block text-sm font-medium text-gray-700" :for (the total-rise-control id)
                     "Total Rise (in)")
-            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
                   (str (the total-rise-control form-control))))
       (:div :class "space-y-2"
             (:label :class "block text-sm font-medium text-gray-700" :for (the total-run-control id)
                     "Total Run (in)")
-            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
                   (str (the total-run-control form-control))))
       (:div :class "space-y-2"
             (:label :class "block text-sm font-medium text-gray-700" :for (the number-of-steps-control id)
                     "Number of Steps")
-            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
                   (str (the number-of-steps-control form-control))))
       (:div :class "space-y-2"
             (:label :class "block text-sm font-medium text-gray-700" :for (the stairs-width-control id)
                     "Width (in)")
-            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
                   (str (the stairs-width-control form-control))))
       (:div :class "space-y-2"
             (:label :class "block text-sm font-medium text-gray-700" :for (the handrail-control id)
                     "Handrail")
-            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
                   (str (the handrail-control form-control))))
       (:div :class "space-y-2"
             (:label :class "block text-sm font-medium text-gray-700" :for (the risers-control id)
                     "Risers")
-            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
                   (str (the risers-control form-control))))
       (:div :class "space-y-2"
             (:label :class "block text-sm font-medium text-gray-700" :for (the skirt-control id)
                     "Skirt / Fascia")
-            (:div :class "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
                   (str (the skirt-control form-control))))
       (:div :class "flex items-end"
             (:button :type "submit"
