@@ -77,7 +77,25 @@
         (:div :class "grid grid-cols-1 md:grid-cols-3 gap-6 mt-8"
           (str (the curve-stats-panel))
           (str (the quality-info-panel))
-          (str (the split-info-panel))))))
+          (str (the split-info-panel)))
+        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mt-8"
+          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
+            (:h3 :class "text-lg font-medium text-gray-900" "Source Code")
+            (:p :class "text-sm text-gray-600"
+                "The complete GDL source for this demo, reconstituted live from the in-memory object definitions serving this page."))
+          (str (the source-code-panes))))))
+
+   (source-code-panes
+    (apply (function string-append)
+           (mapcar
+            (lambda (sym)
+              (with-lhtml-string ()
+                (:details :class "border-b border-gray-100"
+                  (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
+                    (fmt "(define-object ~(~a~) ...)" sym))
+                  (:div :class "src-pane"
+                    (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
+            (list (quote naca-nurbs-curves) (quote quality-reports-mixin) (quote ui)))))
 
    (control-form
     (with-form-string (:class "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6")

@@ -69,7 +69,13 @@ parts."
                      (float (the total-run-control value))
                      (the model slope-angle))))
           (:div :class "overflow-x-auto"
-            (str (the bom-table)))))))
+            (str (the bom-table))))
+        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mt-8"
+          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
+            (:h3 :class "text-lg font-medium text-gray-900" "Source Code")
+            (:p :class "text-sm text-gray-600"
+                "The complete Gendl source for this demo, reconstituted live from the in-memory object definitions serving this page."))
+          (str (the source-code-panes))))))
 
    (bom-table
     (with-lhtml-string ()
@@ -99,6 +105,18 @@ parts."
                        (str (let ((buy (getf line :buy-length)))
                               (if buy (format nil "~d" (floor buy 12)) "special")))))))
             (the model bill-of-materials))))
+
+   (source-code-panes
+    (apply (function string-append)
+           (mapcar
+            (lambda (sym)
+              (with-lhtml-string ()
+                (:details :class "border-b border-gray-100"
+                  (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
+                    (fmt "(define-object ~(~a~) ...)" sym))
+                  (:div :class "src-pane"
+                    (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
+            (list (quote staircase) (quote tread) (quote stringer) (quote staircase-ui)))))
 
    (control-form
     (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
