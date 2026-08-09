@@ -1,0 +1,161 @@
+;;;; -*- Mode: Lisp; Package: brick-wall-demo -*-
+;;
+;; Copyright 2026 Genworks International
+;;
+;; This source file is part of the General-purpose Declarative
+;; Language project (Gendl).
+;;
+;; This source file contains free software: you can redistribute it
+;; and/or modify it under the terms of the GNU Affero General Public
+;; License as published by the Free Software Foundation, either
+;; version 3 of the License, or (at your option) any later version.
+;;
+;; This source file is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;; Affero General Public License for more details.
+;;
+;; You should have received a copy of the GNU Affero General Public
+;; License along with this source file.  If not, see
+;; <http://www.gnu.org/licenses/>.
+;;
+
+(in-package :brick-wall-demo)
+
+(define-object brick-wall (base-object)
+
+  :documentation
+  (:description "Procedural brick wall: courses and bricks are Gendl
+quantified sequences whose sizes derive from the wall and brick
+dimensions.  Running bond staggers alternate courses by half a module
+and closes each end with a cut half-brick; the quantity takeoff
+(courses, full and half bricks, mortar volume) falls out of the same
+rules that place the geometry."
+   :author "Genworks International")
+
+  :input-slots
+  ((wall-length 96 :settable)
+   (wall-height 48 :settable)
+   (brick-length 8 :settable)
+   (brick-height 5/2 :settable)
+   (brick-depth 4 :settable)
+   (mortar-joint 3/8 :settable)
+   ("Keyword symbol, :running or :stack.  The bond pattern."
+    bond :running :settable))
+
+  :computed-slots
+  ((module (+ (the brick-length) (the mortar-joint)))
+   (course-module (+ (the brick-height) (the mortar-joint)))
+
+   (bricks-per-course (max 1 (floor (+ (the wall-length) (the mortar-joint))
+                                    (the module))))
+   (number-of-courses (max 1 (floor (+ (the wall-height) (the mortar-joint))
+                                    (the course-module))))
+
+   ;; wall dimensions snapped to whole modules
+   (effective-length (- (* (the bricks-per-course) (the module))
+                        (the mortar-joint)))
+   (effective-height (- (* (the number-of-courses) (the course-module))
+                        (the mortar-joint)))
+
+   (half-brick-length (half (- (the brick-length) (the mortar-joint))))
+
+   ;; quantity takeoff
+   (offset-course-count (ecase (the bond)
+                          (:stack 0)
+                          (:running (floor (the number-of-courses) 2))))
+   (aligned-course-count (- (the number-of-courses)
+                            (the offset-course-count)))
+   (full-brick-count (+ (* (the aligned-course-count) (the bricks-per-course))
+                        (* (the offset-course-count)
+                           (max 0 (1- (the bricks-per-course))))))
+   (half-brick-count (* 2 (the offset-course-count)))
+   (wall-area-square-feet (/ (* (the effective-length) (the effective-height))
+                             144.0))
+   (mortar-volume-cubic-feet
+    (let ((wall-volume (* (the effective-length) (the effective-height)
+                          (the brick-depth)))
+          (brick-volume (+ (* (the full-brick-count)
+                              (* (the brick-length) (the brick-height)
+                                 (the brick-depth)))
+                           (* (the half-brick-count)
+                              (* (the half-brick-length) (the brick-height)
+                                 (the brick-depth))))))
+      (/ (- wall-volume brick-volume) 1728.0))))
+
+  :objects
+  ((courses :type 'wall-course
+            :sequence (:size (the number-of-courses))
+            :offset? (and (eq (the bond) :running)
+                          (oddp (the-child index)))
+            :center (translate (the center) :up
+                               (+ (* (the-child index) (the course-module))
+                                  (- (half (the effective-height)))
+                                  (half (the brick-height))))
+            :pass-down (brick-length brick-height brick-depth mortar-joint
+                        module bricks-per-course half-brick-length
+                        effective-length))
+
+   ;; A recessed panel behind the brick faces: the visible gaps between
+   ;; bricks read as mortar joints against it.
+   (mortar-backing :type 'box
+                   :display-controls (list :color :grey-light)
+                   :width (the effective-length)
+                   :height (the effective-height)
+                   :length (- (the brick-depth) 1/2)
+                   :center (translate (the center) :rear 1/2))))
+
+
+(define-object wall-course (base-object)
+
+  :documentation
+  (:description "One course of bricks.  An offset (running-bond) course
+starts and ends with a cut half-brick and holds one fewer full brick
+than an aligned course."
+   :author "Genworks International")
+
+  :input-slots
+  (offset?
+   brick-length brick-height brick-depth mortar-joint
+   module bricks-per-course half-brick-length effective-length)
+
+  :computed-slots
+  ((full-brick-count (if (the offset?)
+                         (max 0 (1- (the bricks-per-course)))
+                         (the bricks-per-course)))
+   (start-x (- (half (the effective-length))))
+   (brick-shades (list :firebrick :brown :salmon)))
+
+  :objects
+  ((bricks :type 'box
+           :sequence (:size (the full-brick-count))
+           :width (the brick-length)
+           :height (the brick-height)
+           :length (the brick-depth)
+           :display-controls
+           (list :color (nth (mod (+ (the-child index) (the index) (if (the offset?) 2 0))
+                                  (length (the brick-shades)))
+                             (the brick-shades)))
+           :center (translate (the center) :right
+                              (+ (the start-x)
+                                 (if (the offset?)
+                                     (+ (the half-brick-length) (the mortar-joint))
+                                     0)
+                                 (* (the-child index) (the module))
+                                 (half (the brick-length)))))
+
+   (half-bricks :type 'box
+                :sequence (:size (if (the offset?) 2 0))
+                :width (the half-brick-length)
+                :height (the brick-height)
+                :length (the brick-depth)
+                :display-controls
+                (list :color (nth (mod (+ (the-child index) (the index))
+                                       (length (the brick-shades)))
+                                  (the brick-shades)))
+                :center (translate (the center) :right
+                                   (if (zerop (the-child index))
+                                       (+ (the start-x)
+                                          (half (the half-brick-length)))
+                                       (- (- (the start-x))
+                                          (half (the half-brick-length))))))))

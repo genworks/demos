@@ -1,0 +1,189 @@
+;;;; -*- Mode: Lisp; Package: brick-wall-demo -*-
+;;;;
+;;;; Web UI: base-html-page + viewport-html-div with x3dom, Tailwind
+;;;; utility classes compiled into the shared /demo/css/demos-style.css
+;;;; (build:demos in /projects/apps/tailwind).  session-control-mixin
+;;;; keeps public instances mortal: without it every visit and every
+;;;; crawler hit mints an immortal instance.
+
+(in-package :brick-wall-demo)
+
+(define-object brick-wall-ui (session-control-mixin base-html-page)
+
+  :documentation
+  (:description "Interactive brick-wall demo page: bond pattern and
+dimensions drive quantified sequences of courses and bricks, with the
+quantity takeoff computed from the same declarative rules."
+   :author "Genworks International")
+
+  :input-slots
+  ((title "Brick Wall Demo")
+   (objects (list (the model)))
+
+   (wall-length 96 :settable)
+   (wall-height 48 :settable)
+   (brick-length 8 :settable)
+   (brick-height 2.5 :settable)
+   (mortar-joint 0.375 :settable))
+
+  :computed-slots
+  ((use-svgpanzoom? t)
+   (use-x3dom? t)
+
+   (additional-header-content
+    (string-append
+     (with-lhtml-string () (:script (str (the viewport-renderers-js-baseline))))
+     (call-next-method)
+     (with-lhtml-string ()
+       (:link :href "/demo/css/demos-style.css"
+              :rel "stylesheet" :type "text/css"))))
+
+   (body
+    (with-lhtml-string ()
+      (:div :class "max-w-5xl mx-auto p-8"
+        (:div :class "mb-4"
+          ((:a :href "/demos/index.html" :class "text-sm font-medium text-indigo-600 hover:text-indigo-500")
+           "&larr; All demos"))
+        (:div :class "text-center mb-8"
+          (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
+               "Brick Wall Pattern")
+          (:p :class "text-lg text-gray-600"
+              "Quantified sequences and pattern repetition: bond rules place every brick, and the quantity takeoff falls out for free."))
+        (:div :class "bg-white rounded-lg shadow-lg p-6 mb-8"
+          (:h2 :class "text-xl font-semibold text-gray-800 mb-4" "Parameters")
+          (str (the control-form)))
+        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
+          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
+            (:h3 :class "text-lg font-medium text-gray-900" "3D View"))
+          (:div :class "p-6 relative" :style "height: 520px;"
+            (str (the viewport-area div))))
+        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
+          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
+            (:h3 :class "text-lg font-medium text-gray-900" "Quantity Takeoff")
+            (:p :class "text-sm text-gray-600"
+                (fmt "Snapped to whole modules: ~,1f in long, ~,1f in tall."
+                     (float (the model effective-length))
+                     (float (the model effective-height)))))
+          (:div :class "overflow-x-auto"
+            (str (the quantities-table))))
+        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden"
+          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
+            (:h3 :class "text-lg font-medium text-gray-900" "Source Code")
+            (:p :class "text-sm text-gray-600"
+                "The complete Gendl source for this demo, reconstituted live from the in-memory object definitions serving this page."))
+          (str (the source-code-panes))))))
+
+   (quantities-table
+    (let ((model (the model)))
+      (with-lhtml-string ()
+        (:table :class "min-w-full table-fixed divide-y divide-gray-200"
+          (:tbody :class "divide-y divide-gray-100"
+            (dolist (row (list
+                          (list "Courses" (format nil "~d" (the-object model number-of-courses)))
+                          (list "Bricks per course" (format nil "~d" (the-object model bricks-per-course)))
+                          (list "Full bricks" (format nil "~d" (the-object model full-brick-count)))
+                          (list "Cut half-bricks" (format nil "~d" (the-object model half-brick-count)))
+                          (list "Wall area" (format nil "~,1f sq ft" (the-object model wall-area-square-feet)))
+                          (list "Mortar volume (est.)" (format nil "~,2f cu ft" (the-object model mortar-volume-cubic-feet)))))
+              (htm
+               (:tr :class "hover:bg-gray-50"
+                 (:td :class "px-6 py-3 text-sm font-medium text-gray-900"
+                      (str (first row)))
+                 (:td :class "px-6 py-3 w-40 text-sm text-right tabular-nums text-gray-700"
+                      (str (second row)))))))))))
+
+   (source-code-panes
+    (apply (function string-append)
+           (mapcar
+            (lambda (sym)
+              (with-lhtml-string ()
+                (:details :class "border-b border-gray-100"
+                  (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
+                    (fmt "(define-object ~(~a~) ...)" sym))
+                  (:div :class "src-pane"
+                    (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
+            (list (quote brick-wall) (quote wall-course) (quote brick-wall-ui)))))
+
+   (control-form
+    (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the wall-length-control id)
+                    "Wall Length (in)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the wall-length-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the wall-height-control id)
+                    "Wall Height (in)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the wall-height-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the brick-length-control id)
+                    "Brick Length (in)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the brick-length-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the brick-height-control id)
+                    "Brick Height (in)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the brick-height-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the mortar-joint-control id)
+                    "Mortar Joint (in)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the mortar-joint-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the bond-control id)
+                    "Bond Pattern")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the bond-control form-control))))
+      (:div :class "flex items-end col-span-2"
+            (:button :type "submit"
+                     :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                     "Rebuild")))))
+
+  :objects
+  ((wall-length-control :type 'number-form-control
+                        :default (the wall-length)
+                        :domain :number :min 24 :max 240 :step 8)
+
+   (wall-height-control :type 'number-form-control
+                        :default (the wall-height)
+                        :domain :number :min 12 :max 96 :step 4)
+
+   (brick-length-control :type 'number-form-control
+                         :default (the brick-length)
+                         :domain :number :min 6 :max 16 :step 1)
+
+   (brick-height-control :type 'number-form-control
+                         :default (the brick-height)
+                         :domain :number :min 2 :max 5 :step 0.25)
+
+   (mortar-joint-control :type 'number-form-control
+                         :default (the mortar-joint)
+                         :domain :number :min 0.25 :max 1 :step 0.125)
+
+   (bond-control :type 'menu-form-control
+                 :default :running
+                 :size 1
+                 :ajax-submit-on-change? t
+                 :choice-plist '(:running "Running" :stack "Stack"))
+
+   (model :type 'brick-wall
+          :wall-length (the wall-length-control value)
+          :wall-height (the wall-height-control value)
+          :brick-length (the brick-length-control value)
+          :brick-height (the brick-height-control value)
+          :mortar-joint (the mortar-joint-control value)
+          :bond (the bond-control value))
+
+   (viewport-area :type 'base-html-div
+                  :div-class "absolute inset-0"
+                  :js-to-eval (the view-x3dom js-to-eval)
+                  :inner-html (the view-x3dom inner-html))
+
+   (view-x3dom :type 'viewport-html-div
+               :dom-id (the viewport-area dom-id)
+               :image-format :x3dom
+               :projection-key :wall-view
+               :projection-vector (unitize-vector (make-vector 0.45 -1 0.3))
+               :display-list-object-roots (the objects))))

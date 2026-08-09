@@ -1,0 +1,238 @@
+;;;; -*- Mode: Lisp; Package: genworks.demos.bus -*-
+;;;;
+;;;; Web UI: base-html-page + viewport-html-div with x3dom, Tailwind
+;;;; utility classes compiled into the shared /demo/css/demos-style.css
+;;;; (build:demos in /projects/apps/tailwind).  session-control-mixin
+;;;; keeps public instances mortal: without it every visit and every
+;;;; crawler hit mints an immortal instance.
+
+(in-package :genworks.demos.bus)
+
+(define-object bus-ui (session-control-mixin base-html-page)
+
+  :documentation
+  (:description "Interactive school-bus demo page: the classic GDL bus
+example hosted in the 2026 demo framework.  Steering follows the
+Ackermann rule and the interior layout is governed by live design
+checks -- both surfaced on the page."
+   :author "Genworks International")
+
+  :input-slots
+  ((title "School Bus Demo")
+   (objects (list (the model)))
+
+   (wheelbase 300 :settable)
+   (track 96 :settable)
+   (bus-height 80 :settable)
+   (turn-angle 0 :settable)
+   (number-of-rows 10 :settable)
+   (minimum-legroom 7 :settable))
+
+  :computed-slots
+  ((use-svgpanzoom? t)
+   (use-x3dom? t)
+
+   (additional-header-content
+    (string-append
+     (with-lhtml-string () (:script (str (the viewport-renderers-js-baseline))))
+     (call-next-method)
+     (with-lhtml-string ()
+       (:link :href "/demo/css/demos-style.css"
+              :rel "stylesheet" :type "text/css"))))
+
+   (body
+    (with-lhtml-string ()
+      (:div :class "max-w-5xl mx-auto p-8"
+        (:div :class "mb-4"
+          ((:a :href "/demos/index.html" :class "text-sm font-medium text-indigo-600 hover:text-indigo-500")
+           "&larr; All demos"))
+        (:div :class "text-center mb-8"
+          (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
+               "School Bus")
+          (:p :class "text-lg text-gray-600"
+              "The classic GDL wireframe bus -- steer it, stretch it, and watch the design rules respond."))
+        (:div :class "bg-white rounded-lg shadow-lg p-6 mb-8"
+          (:h2 :class "text-xl font-semibold text-gray-800 mb-4" "Parameters")
+          (str (the control-form)))
+        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
+          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
+            (:h3 :class "text-lg font-medium text-gray-900" "3D View"))
+          (:div :class "p-6 relative" :style "height: 600px;"
+            (str (the viewport-area div))))
+        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
+          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
+            (:h3 :class "text-lg font-medium text-gray-900" "Design Rules")
+            (:p :class "text-sm text-gray-600"
+                "Live KBE checks evaluated against the current parameters."))
+          (:div :class "px-6 py-4 grid grid-cols-1 md:grid-cols-2 gap-6"
+            (str (the legroom-panel))
+            (str (the overhang-panel)))
+          (:div :class "px-6 pb-6"
+            (str (the ackermann-panel))))
+        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden"
+          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
+            (:h3 :class "text-lg font-medium text-gray-900" "Source Code")
+            (:p :class "text-sm text-gray-600"
+                "The complete Gendl source for this demo, reconstituted live from the in-memory object definitions serving this page."))
+          (str (the source-code-panes))))))
+
+   (legroom-panel
+    (let ((check (the model interior sections inter-seat-clearance-check)))
+      (with-lhtml-string ()
+        (:div :class "rounded-md border border-gray-200 p-4"
+          (:div :class "flex items-center justify-between mb-2"
+            (:h4 :class "text-sm font-semibold text-gray-900" "Legroom")
+            (str (if (the-object check violated?)
+                     (with-lhtml-string ()
+                       (:span :class "inline-flex items-center rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-800"
+                              "VIOLATED"))
+                     (with-lhtml-string ()
+                       (:span :class "inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-800"
+                              "PASS")))))
+          (:p :class "text-sm text-gray-700 tabular-nums"
+              (fmt "Clear distance between seats: ~a in (minimum ~a in)"
+                   (the-object check rule-result)
+                   (the-object check value)))
+          (:p :class "text-xs text-gray-500 mt-1"
+              (str (the-object check rule-description)))))))
+
+   (overhang-panel
+    (let ((rule (the model body-frame-overhang)))
+      (with-lhtml-string ()
+        (:div :class "rounded-md border border-gray-200 p-4"
+          (:div :class "flex items-center justify-between mb-2"
+            (:h4 :class "text-sm font-semibold text-gray-900" "Body / Frame Overhang")
+            (:span :class "inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700"
+                   "COMPUTED"))
+          (:p :class "text-sm text-gray-700 tabular-nums"
+              (fmt "Body front overhang exceeds chassis overhang by ~,1f in (target ~,1f in)"
+                   (the-object rule result)
+                   (the-object rule target-value)))
+          (:p :class "text-xs text-gray-500 mt-1"
+              (str (the-object rule rule-result-help)))))))
+
+   (ackermann-panel
+    (let* ((data (the model chassis ackermann-data))
+           (lefts (getf data :left))
+           (rights (getf data :right))
+           (ideals (getf data :ideal-right)))
+      (with-lhtml-string ()
+        (:div :class "rounded-md border border-gray-200 p-4"
+          (:h4 :class "text-sm font-semibold text-gray-900 mb-2" "Ackermann Steering")
+          (:p :class "text-xs text-gray-500 mb-3"
+              "Right-wheel turn angle for a given left-wheel angle: the actual linkage geometry vs. the Ackermann ideal.  Steer with the Turn Angle parameter and watch the front knuckles in the 3D view.")
+          (:div :class "overflow-x-auto"
+            (:table :class "min-w-full table-fixed divide-y divide-gray-200"
+              (:thead :class "bg-gray-50"
+                (:tr
+                  (:th :class "px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" "Left (deg)")
+                  (:th :class "px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" "Actual Right (deg)")
+                  (:th :class "px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" "Ideal Right (deg)")))
+              (:tbody :class "divide-y divide-gray-100"
+                (dolist (left (list 5 10 15 20 25 30 35))
+                  (let ((pos (position left lefts)))
+                    (when pos
+                      (htm
+                       (:tr :class "hover:bg-gray-50"
+                         (:td :class "px-4 py-2 text-sm text-right tabular-nums text-gray-900"
+                              (fmt "~d" left))
+                         (:td :class "px-4 py-2 text-sm text-right tabular-nums text-gray-700"
+                              (fmt "~,2f" (nth pos rights)))
+                         (:td :class "px-4 py-2 text-sm text-right tabular-nums text-gray-700"
+                              (fmt "~,2f" (nth pos ideals)))))))))))))))
+
+   (source-code-panes
+    (apply (function string-append)
+           (mapcar
+            (lambda (sym)
+              (with-lhtml-string ()
+                (:details :class "border-b border-gray-100"
+                  (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
+                    (fmt "(define-object ~(~a~) ...)" sym))
+                  (:div :class "src-pane"
+                    (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
+            (list (quote assembly) (quote chassis) (quote rule-ackermann)
+                  (quote interior) (quote seating-section)
+                  (quote inter-seat-clearance-check) (quote bus-ui)))))
+
+   (control-form
+    (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the wheelbase-control id)
+                    "Wheelbase (in)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the wheelbase-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the track-control id)
+                    "Track (in)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the track-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the height-control id)
+                    "Body Height (in)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the height-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the turn-angle-control id)
+                    "Turn Angle (deg)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the turn-angle-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the rows-control id)
+                    "Seat Rows")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the rows-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the legroom-control id)
+                    "Min Legroom (in)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the legroom-control form-control))))
+      (:div :class "flex items-end col-span-2"
+            (:button :type "submit"
+                     :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                     "Rebuild")))))
+
+  :objects
+  ((wheelbase-control :type 'number-form-control
+                      :default (the wheelbase)
+                      :domain :number :min 220 :max 380 :step 10)
+
+   (track-control :type 'number-form-control
+                  :default (the track)
+                  :domain :number :min 80 :max 110 :step 2)
+
+   (height-control :type 'number-form-control
+                   :default (the bus-height)
+                   :domain :number :min 60 :max 100 :step 4)
+
+   (turn-angle-control :type 'number-form-control
+                       :default (the turn-angle)
+                       :domain :number :min -35 :max 35 :step 5)
+
+   (rows-control :type 'number-form-control
+                 :default (the number-of-rows)
+                 :domain :number :min 4 :max 14 :step 1)
+
+   (legroom-control :type 'number-form-control
+                    :default (the minimum-legroom)
+                    :domain :number :min 4 :max 14 :step 1)
+
+   (model :type 'assembly
+          :wheelbase (the wheelbase-control value)
+          :track (the track-control value)
+          :height (the height-control value)
+          :turn-angle (the turn-angle-control value)
+          :number-of-rows (the rows-control value)
+          :minimum-inter-seat-clearance (the legroom-control value))
+
+   (viewport-area :type 'base-html-div
+                  :div-class "absolute inset-0"
+                  :js-to-eval (the view-x3dom js-to-eval)
+                  :inner-html (the view-x3dom inner-html))
+
+   (view-x3dom :type 'viewport-html-div
+               :dom-id (the viewport-area dom-id)
+               :image-format :x3dom
+               :projection-key :bus-view
+               :projection-vector (unitize-vector (make-vector 1 0.7 0.8))
+               :display-list-object-roots (the objects))))

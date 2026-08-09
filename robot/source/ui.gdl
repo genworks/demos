@@ -1,0 +1,220 @@
+;;;; -*- Mode: Lisp; Package: robot-demo -*-
+;;;;
+;;;; Web UI: base-html-page + viewport-html-div with x3dom, Tailwind
+;;;; utility classes compiled into the shared /demo/css/demos-style.css
+;;;; (build:demos in /projects/apps/tailwind).  session-control-mixin
+;;;; keeps public instances mortal: without it every visit and every
+;;;; crawler hit mints an immortal instance.
+
+(in-package :robot-demo)
+
+(define-object robot-ui (session-control-mixin base-html-page)
+
+  :documentation
+  (:description "Interactive robot demo page: the classic GDL robot
+example (2002) hosted in the 2026 demo framework -- pose the robot
+live with form controls."
+   :author "Genworks International")
+
+  :input-slots
+  ((title "Robot Assembly Demo")
+   (objects (list (the model)))
+
+   (robot-height 10 :settable)
+   (robot-width 5 :settable)
+   (robot-length 2 :settable)
+   (head-angle 0 :settable)
+   (body-angle 20 :settable)
+   (arm-angle-left 0 :settable)
+   (arm-angle-right 0 :settable)
+   (pincer-distance-left 0.45 :settable)
+   (pincer-distance-right 0.45 :settable))
+
+  :computed-slots
+  ((use-svgpanzoom? t)
+   (use-x3dom? t)
+
+   (additional-header-content
+    (string-append
+     (with-lhtml-string () (:script (str (the viewport-renderers-js-baseline))))
+     (call-next-method)
+     (with-lhtml-string ()
+       (:link :href "/demo/css/demos-style.css"
+              :rel "stylesheet" :type "text/css"))))
+
+   (body
+    (with-lhtml-string ()
+      (:div :class "max-w-5xl mx-auto p-8"
+        (:div :class "mb-4"
+          ((:a :href "/demos/index.html" :class "text-sm font-medium text-indigo-600 hover:text-indigo-500")
+           "&larr; All demos"))
+        (:div :class "text-center mb-8"
+          (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
+               "Robot Assembly")
+          (:p :class "text-lg text-gray-600"
+              "The classic GDL robot example, reborn in the 2026 demo framework -- pose it live."))
+        (:div :class "bg-white rounded-lg shadow-lg p-6 mb-8"
+          (:h2 :class "text-xl font-semibold text-gray-800 mb-4" "Parameters")
+          (str (the control-form)))
+        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
+          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
+            (:h3 :class "text-lg font-medium text-gray-900" "3D View"))
+          (:div :class "p-6 relative" :style "height: 600px;"
+            (str (the viewport-area div))))
+        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
+          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
+            (:h3 :class "text-lg font-medium text-gray-900" "About This Demo"))
+          (:div :class "px-6 py-4 text-sm text-gray-700 space-y-2"
+            (:p "This robot first appeared in 2002 as the introductory GDL
+training example: a handful of box primitives composed with declarative
+positioning and orientation rules.")
+            (:p "The geometry definitions below are essentially the 2002
+originals.  Only the user interface is new -- form-control objects, an
+x3dom viewport, and session-controlled instances replace the old
+html-format lens.")))
+        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden"
+          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
+            (:h3 :class "text-lg font-medium text-gray-900" "Source Code")
+            (:p :class "text-sm text-gray-600"
+                "The complete Gendl source for this demo, reconstituted live from the in-memory object definitions serving this page."))
+          (str (the source-code-panes))))))
+
+   (source-code-panes
+    (apply (function string-append)
+           (mapcar
+            (lambda (sym)
+              (with-lhtml-string ()
+                (:details :class "border-b border-gray-100"
+                  (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
+                    (fmt "(define-object ~(~a~) ...)" sym))
+                  (:div :class "src-pane"
+                    (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
+            (list (quote robot) (quote robot-body) (quote robot-arm)
+                  (quote robot-base) (quote robot-ui)))))
+
+   (control-form
+    (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the height-control id)
+                    "Height")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the height-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the width-control id)
+                    "Width")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the width-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the length-control id)
+                    "Length")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the length-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the torso-control id)
+                    "Torso")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the torso-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the head-angle-control id)
+                    "Head Angle (deg)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the head-angle-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the body-angle-control id)
+                    "Body Angle (deg)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the body-angle-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the arm-angle-left-control id)
+                    "Left Arm (deg)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the arm-angle-left-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the arm-angle-right-control id)
+                    "Right Arm (deg)")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the arm-angle-right-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the pincer-left-control id)
+                    "Left Grip")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the pincer-left-control form-control))))
+      (:div :class "space-y-2"
+            (:label :class "block text-sm font-medium text-gray-700" :for (the pincer-right-control id)
+                    "Right Grip")
+            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+                  (str (the pincer-right-control form-control))))
+      (:div :class "flex items-end col-span-2"
+            (:button :type "submit"
+                     :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                     "Rebuild")))))
+
+  :objects
+  ((height-control :type 'number-form-control
+                   :default (the robot-height)
+                   :domain :number :min 4 :max 20 :step 1)
+
+   (width-control :type 'number-form-control
+                  :default (the robot-width)
+                  :domain :number :min 3 :max 10 :step 1/2)
+
+   (length-control :type 'number-form-control
+                   :default (the robot-length)
+                   :domain :number :min 1 :max 4 :step 1/2)
+
+   (torso-control :type 'menu-form-control
+                  :default :box
+                  :size 1
+                  :ajax-submit-on-change? t
+                  :choice-plist '(:box "Box" :cylinder "Cylinder"))
+
+   (head-angle-control :type 'number-form-control
+                       :default (the head-angle)
+                       :domain :number :min -90 :max 90 :step 5)
+
+   (body-angle-control :type 'number-form-control
+                       :default (the body-angle)
+                       :domain :number :min -90 :max 90 :step 5)
+
+   (arm-angle-left-control :type 'number-form-control
+                           :default (the arm-angle-left)
+                           :domain :number :min -180 :max 180 :step 5)
+
+   (arm-angle-right-control :type 'number-form-control
+                            :default (the arm-angle-right)
+                            :domain :number :min -180 :max 180 :step 5)
+
+   (pincer-left-control :type 'number-form-control
+                        :default (the pincer-distance-left)
+                        :domain :number :min 0 :max 1 :step 0.05)
+
+   (pincer-right-control :type 'number-form-control
+                         :default (the pincer-distance-right)
+                         :domain :number :min 0 :max 1 :step 0.05)
+
+   (model :type 'robot
+          :height (the height-control value)
+          :width (the width-control value)
+          :length (the length-control value)
+          :torso-type (ecase (the torso-control value)
+                        (:box 'box) (:cylinder 'cylinder))
+          :head-angle (the head-angle-control value)
+          :body-angle (the body-angle-control value)
+          :arm-angle-left (the arm-angle-left-control value)
+          :arm-angle-right (the arm-angle-right-control value)
+          :pincer-distance-left (the pincer-left-control value)
+          :pincer-distance-right (the pincer-right-control value)
+          :transparency 0
+          :shininess 0.8)
+
+   (viewport-area :type 'base-html-div
+                  :div-class "absolute inset-0"
+                  :js-to-eval (the view-x3dom js-to-eval)
+                  :inner-html (the view-x3dom inner-html))
+
+   (view-x3dom :type 'viewport-html-div
+               :dom-id (the viewport-area dom-id)
+               :image-format :x3dom
+               :projection-key :robot-view
+               :projection-vector (unitize-vector (make-vector 0.7 -1 0.45))
+               :display-list-object-roots (the objects))))

@@ -32,6 +32,7 @@
    (height 80 :settable) (length 0) (width 0)
    (turn-angle 0 :settable)
    (number-of-rows 10 :settable)
+   (minimum-inter-seat-clearance 7 :settable)
    
    
    (display-controls (list :vrml-navigation-info (list "speed" 5)
@@ -79,7 +80,8 @@
              :width (- (the body width) (the body cab-width))
              :length (the body length)
              :height (the body height)
-             :number-of-rows (the number-of-rows)))
+             :number-of-rows (the number-of-rows)
+             :minimum-inter-seat-clearance (the minimum-inter-seat-clearance)))
   
   
   :hidden-objects

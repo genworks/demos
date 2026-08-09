@@ -29,7 +29,8 @@
    width
    height
    
-   (number-of-rows 10 :settable))
+   (number-of-rows 10 :settable)
+   (minimum-inter-seat-clearance 7 :settable))
 
   
   :computed-slots
@@ -37,7 +38,6 @@
    
    (reclined-angle 20 :settable)
    (max-reclined-angle 30 :settable)
-   (minimum-inter-seat-clearance 7 :settable)
    (use-local-box? nil))
 
   :objects
