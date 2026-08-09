@@ -46,7 +46,10 @@ parts."
    (body
     (with-lhtml-string ()
       (:div :class "max-w-5xl mx-auto p-8"
-        (:div :class "text-center mb-8"
+                (:div :class "mb-4"
+          ((:a :href "/demos/index.html" :class "text-sm font-medium text-indigo-600 hover:text-indigo-500")
+           "&larr; All demos"))
+(:div :class "text-center mb-8"
           (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
                "Parametric Staircase")
           (:p :class "text-lg text-gray-600"
@@ -79,13 +82,13 @@ parts."
 
    (bom-table
     (with-lhtml-string ()
-      (:table :class "min-w-full divide-y divide-gray-200"
+      (:table :class "min-w-full table-fixed divide-y divide-gray-200"
         (:thead :class "bg-gray-50"
           (:tr
-            (:th :class "px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" "Qty")
+            (:th :class "px-6 py-3 w-24 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" "Qty")
             (:th :class "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" "Stock")
-            (:th :class "px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" "Cut (in)")
-            (:th :class "px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" "Buy (ft)")))
+            (:th :class "px-6 py-3 w-40 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" "Cut (in)")
+            (:th :class "px-6 py-3 w-40 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" "Buy (ft)")))
         (:tbody :class "divide-y divide-gray-100"
           (str (the bom-table-rows))))))
 
@@ -242,5 +245,6 @@ parts."
    (view-x3dom :type 'viewport-html-div
               :dom-id (the viewport-area dom-id)
               :image-format :x3dom
-              :projection-key :trimetric
+              :projection-key :staircase-view
+              :projection-vector (unitize-vector (make-vector 1 -0.6 0.35))
               :display-list-object-roots (the objects))))

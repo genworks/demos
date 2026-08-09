@@ -44,7 +44,10 @@
    (body
     (with-lhtml-string ()
       (:div :class "max-w-7xl mx-auto p-8"
-        (:div :class "text-center mb-8"
+                (:div :class "mb-4"
+          ((:a :href "/demos/index.html" :class "text-sm font-medium text-indigo-600 hover:text-indigo-500")
+           "&larr; All demos"))
+(:div :class "text-center mb-8"
           (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
                "NACA NURBS Playground")
           (:p :class "text-lg text-gray-600"
@@ -60,7 +63,7 @@
                    "Left Viewport")
               (:p :class "text-sm text-gray-600"
                   "Interactive view"))
-            (:div :class "p-6 overflow-auto relative" :style "height: 600px;"
+            (:div :class "p-6 overflow-auto relative" :style "height: 440px;"
               (:div :class "param-field absolute top-2 left-2 z-20 bg-white/90 backdrop-blur px-2 py-1 rounded-md border border-gray-200 shadow-sm"
                 (str (the left-format-selector form-control)))
               (str (the left-viewport-area div))))
@@ -70,7 +73,7 @@
                    "Right Viewport")
               (:p :class "text-sm text-gray-600"
                   "Interactive view"))
-            (:div :class "p-6 overflow-auto relative" :style "height: 600px;"
+            (:div :class "p-6 overflow-auto relative" :style "height: 440px;"
               (:div :class "param-field absolute top-2 left-2 z-20 bg-white/90 backdrop-blur px-2 py-1 rounded-md border border-gray-200 shadow-sm"
                 (str (the right-format-selector form-control)))
               (str (the right-viewport-area div)))))
@@ -245,6 +248,7 @@
    (left-view-svg :type 'viewport-html-div
                   :dom-id (the left-viewport-area dom-id)
                   :image-format :svg
+                  :page-width-pt 760 :page-length-pt 480
                   :projection-key :top
                   :display-list-objects (the objects))
 
@@ -257,6 +261,7 @@
    (right-view-svg :type 'viewport-html-div
                    :dom-id (the right-viewport-area dom-id)
                    :image-format :svg
+                   :page-width-pt 760 :page-length-pt 480
                    :projection-key :top
                    :display-list-objects (the objects))
 
