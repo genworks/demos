@@ -86,20 +86,20 @@
           (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
             (:h3 :class "text-lg font-medium text-gray-900" "Source Code")
             (:p :class "text-sm text-gray-600"
-                "The complete GDL source for this demo, reconstituted live from the in-memory object definitions serving this page."))
+                "The complete GDL source for this demo: object definitions reconstituted live from the in-memory definitions serving this page, supporting functions via the Lisp's own source records."))
           (str (the source-code-panes))))))
 
    (source-code-panes
     (apply #'string-append
-           (mapcar
-            (lambda (sym)
-              (with-lhtml-string ()
-                (:details :class "border-b border-gray-100"
-                  (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
-                    (fmt "(define-object ~(~a~) ...)" sym))
-                  (:div :class "src-pane"
-                    (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
-            '(naca-nurbs-curves quality-reports-mixin ui))))
+           (append
+            (mapcar (lambda (sym) (the (object-source-pane sym)))
+                    '(naca-nurbs-curves quality-reports-mixin ui))
+            (mapcar (lambda (sym) (the (defun-source-pane sym)))
+                    '(generate-naca-samples get-airfoil-spec
+                      analytical-tangent-parametric
+                      analytical-curvature-parametric
+                      x->t t->x lower-bound
+                      ternary-search-maximum find-max-gradient-region)))))
 
    (control-form
     (with-form-string (:class "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6")
@@ -175,7 +175,32 @@
         (:label :class "block text-sm font-medium text-gray-700"
                 :for (the-object control id) (str label))
         (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-          (str (the-object control form-control)))))))
+          (str (the-object control form-control))))))
+
+   ;; One collapsible pane showing a define-object, reconstituted live
+   ;; from the in-memory definition.
+   (object-source-pane
+    (sym)
+    (with-lhtml-string ()
+      (:details :class "border-b border-gray-100"
+        (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
+          (fmt "(define-object ~(~a~) ...)" sym))
+        (:div :class "src-pane"
+          (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
+
+   ;; Same, for a supporting plain function, via function-source-string
+   ;; (see utilities.lisp).  Renders nothing when no source is recorded.
+   (defun-source-pane
+    (sym)
+    (let ((source (function-source-string sym)))
+      (if source
+          (with-lhtml-string ()
+            (:details :class "border-b border-gray-100"
+              (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
+                (fmt "(defun ~(~a~) ...)" sym))
+              (:div :class "src-pane"
+                (wmd (format nil "```lisp~%~a```" source)))))
+          ""))))
 
   :objects
   ((airfoil-control :type 'menu-form-control

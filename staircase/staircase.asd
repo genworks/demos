@@ -5,5 +5,5 @@
  :license "Affero Gnu Public License (http://www.gnu.org/licenses/)"
  :serial t :version "20260805" :depends-on (:lumber)
  :defsystem-depends-on nil :components
- ((:file "source/package") (:gdl "source/assembly")
+ ((:file "source/package") (:file "source/patches") (:gdl "source/assembly")
   (:gdl "source/ui") (:file "source/publish")))

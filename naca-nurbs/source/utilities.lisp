@@ -253,8 +253,8 @@
          (d2c (d2camber airfoil x m p))          ; d2yc/dx2
          (d3c (d3camber  airfoil x m p))         ; d3yc/dx3
          (den (+ 1d0 (* dc dc)))
-	 (den2 (* den den))
-	 (d2c2 (* d2c d2c)))
+         (den2 (* den den))
+         (d2c2 (* d2c d2c)))
     (/ (- (* d3c den) (* 2d0 dc d2c2)) den2)))
 
 
@@ -399,17 +399,6 @@
 ;; Search helpers (binary lower-bound, ternary search, gradient window)
 ;; ----------------------------------------
 
-#+nil
-(defun lower-bound (vec val)
-  "Smallest i with vec[i] >= val; returns (length vec) if none. vec is a vector."
-  (let ((lo 0) (hi (length vec)))
-    (loop while (< lo hi) do
-         (let ((mid (floor (+ lo hi) 2)))
-           (if (>= (aref vec mid) val)
-               (setf hi mid)
-               (setf lo (1+ mid)))))
-    lo))
-
 (defun lower-bound (vec val)
   "Smallest i with vec[i] >= val; returns (length vec) if none. vec is a vector."
   (let ((lo 0)
@@ -438,24 +427,6 @@
                (ternary-search-maximum :func func :curve curve
                                        :min-x m1 :max-x max-x
                                        :tolerance tolerance :depth (1+ depth)))))))
-#+nil
-(defun find-max-gradient-region (pairs &key (window-size 3))
-  "Given list of (s val) pairs, return (s-low s-high) with steepest gradient window."
-  (when (< (length pairs) window-size)
-    (return-from find-max-gradient-region nil))
-  (let ((maxg 0d0) (best nil))
-    (dotimes (i (1+ (- (length pairs) window-size)))
-      (let* ((w (subseq pairs i (+ i window-size)))
-             (s-low (first (first w)))
-             (s-high (first (car (last w))))
-             (v-low (second (first w)))
-             (v-high (second (car (last w))))
-             (g (abs (- v-high v-low))))
-        (when (> g maxg)
-          (setf maxg g best (list s-low s-high)))))
-    best))
-
-
 (defun find-max-gradient-region (pairs &key (window-size 3))
   "Return (s-low s-high) spanning WINDOW-SIZE over PAIRS = list of (s val),
    maximizing |Δval| = |val_high - val_low|. Single pass, O(n) time, O(1) space."
@@ -488,3 +459,77 @@
                 head (cdr head)))
     (and best-low (list best-low best-high))))
 
+;; ----------------------------------------
+;; PATCH -- candidate for elevation into gendl proper, alongside
+;; gdl:definition-source-string (which handles define-objects only).
+;; Duplicated for now in demos that show supporting defun source (see
+;; also staircase/source/patches.lisp).  Once elevated, delete this
+;; section and call the gendl version.
+;; Source-pane support: verbatim defun source via the Lisp's own
+;; source recording -- no wrapper macros, no advice.  CCL records the
+;; definition text itself (source notes); Allegro records the source
+;; file, from which we extract the form's text.
+;; ----------------------------------------
+
+#+allegro
+(defun %extract-toplevel-form-text (file marker)
+  "Verbatim text of the top-level form starting with MARKER in FILE."
+  (with-open-file (in file :direction :input :external-format :utf-8)
+    (let* ((buf (make-string (file-length in)))
+           (len (read-sequence buf in))
+           (text (subseq buf 0 len))
+           (mlen (length marker))
+           (start (do ((pos (search marker text)
+                            (search marker text :start2 (1+ pos))))
+                      ((or (null pos)
+                           (and (or (zerop pos)
+                                    (eql (char text (1- pos)) #\Newline))
+                                (or (>= (+ pos mlen) (length text))
+                                    (member (char text (+ pos mlen))
+                                            '(#\Space #\Newline #\Tab #\()))))
+                       pos))))
+      (when start
+        (let ((depth 0) (i start) (n (length text)) (state :normal))
+          (loop while (< i n) do
+            (let ((ch (char text i)))
+              (ecase state
+                (:normal
+                 (case ch
+                   (#\( (incf depth))
+                   (#\) (decf depth)
+                        (when (zerop depth)
+                          (return-from %extract-toplevel-form-text
+                            (subseq text start (1+ i)))))
+                   (#\" (setq state :string))
+                   (#\; (setq state :line-comment))
+                   (#\# (when (< (1+ i) n)
+                          (case (char text (1+ i))
+                            (#\\ (incf i 2))
+                            (#\| (setq state :block-comment) (incf i)))))))
+                (:string
+                 (case ch
+                   (#\\ (incf i))
+                   (#\" (setq state :normal))))
+                (:line-comment
+                 (when (eql ch #\Newline) (setq state :normal)))
+                (:block-comment
+                 (when (and (eql ch #\|) (< (1+ i) n)
+                            (eql (char text (1+ i)) #\#))
+                   (setq state :normal) (incf i)))))
+            (incf i))
+          nil)))))
+
+(defun function-source-string (symbol)
+  "Verbatim source text of SYMBOL's defun, from the implementation's
+built-in source recording.  Nil when nothing is recorded."
+  (ignore-errors
+    #+ccl
+    (let ((note (ccl:function-source-note (fdefinition symbol))))
+      (and note (ccl:source-note-text note)))
+    #+allegro
+    (let ((file (excl:source-file symbol :operator)))
+      (and file
+           (%extract-toplevel-form-text
+            file (format nil "(defun ~a"
+                         (string-downcase (symbol-name symbol))))))
+    #-(or ccl allegro) nil))
