@@ -44,8 +44,9 @@ checks -- both surfaced on the page."
     (with-lhtml-string ()
       (:div :class "max-w-5xl mx-auto p-8"
         (:div :class "mb-4"
-          ((:a :href "/demos/index.html" :class "text-sm font-medium text-indigo-600 hover:text-indigo-500")
-           "&larr; All demos"))
+          (:a :href "/demos/index.html"
+              :class "text-sm font-medium text-indigo-600 hover:text-indigo-500"
+              "&larr; All demos"))
         (:div :class "text-center mb-8"
           (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
                "School Bus")
@@ -142,7 +143,7 @@ checks -- both surfaced on the page."
                               (fmt "~,2f" (nth pos ideals)))))))))))))))
 
    (source-code-panes
-    (apply (function string-append)
+    (apply #'string-append
            (mapcar
             (lambda (sym)
               (with-lhtml-string ()
@@ -151,46 +152,33 @@ checks -- both surfaced on the page."
                     (fmt "(define-object ~(~a~) ...)" sym))
                   (:div :class "src-pane"
                     (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
-            (list (quote assembly) (quote chassis) (quote rule-ackermann)
-                  (quote interior) (quote seating-section)
-                  (quote inter-seat-clearance-check) (quote bus-ui)))))
+            '(assembly chassis rule-ackermann interior seating-section
+              inter-seat-clearance-check bus-ui))))
 
    (control-form
     (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the wheelbase-control id)
-                    "Wheelbase (in)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the wheelbase-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the track-control id)
-                    "Track (in)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the track-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the height-control id)
-                    "Body Height (in)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the height-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the turn-angle-control id)
-                    "Turn Angle (deg)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the turn-angle-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the rows-control id)
-                    "Seat Rows")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the rows-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the legroom-control id)
-                    "Min Legroom (in)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the legroom-control form-control))))
+      (str (the (param-field "Wheelbase (in)"   (the wheelbase-control))))
+      (str (the (param-field "Track (in)"       (the track-control))))
+      (str (the (param-field "Body Height (in)" (the height-control))))
+      (str (the (param-field "Turn Angle (deg)" (the turn-angle-control))))
+      (str (the (param-field "Seat Rows"        (the rows-control))))
+      (str (the (param-field "Min Legroom (in)" (the legroom-control))))
       (:div :class "flex items-end col-span-2"
-            (:button :type "submit"
-                     :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
-                     "Rebuild")))))
+        (:button :type "submit"
+                 :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                 "Rebuild")))))
+
+  :functions
+  (;; One labeled parameter field: a form-control wrapped in the
+   ;; shared label + bordered-box styling used by every parameter.
+   (param-field
+    (label control)
+    (with-lhtml-string ()
+      (:div :class "space-y-2"
+        (:label :class "block text-sm font-medium text-gray-700"
+                :for (the-object control id) (str label))
+        (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+          (str (the-object control form-control)))))))
 
   :objects
   ((wheelbase-control :type 'number-form-control

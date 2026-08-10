@@ -46,10 +46,11 @@ parts."
    (body
     (with-lhtml-string ()
       (:div :class "max-w-5xl mx-auto p-8"
-                (:div :class "mb-4"
-          ((:a :href "/demos/index.html" :class "text-sm font-medium text-indigo-600 hover:text-indigo-500")
-           "&larr; All demos"))
-(:div :class "text-center mb-8"
+        (:div :class "mb-4"
+          (:a :href "/demos/index.html"
+              :class "text-sm font-medium text-indigo-600 hover:text-indigo-500"
+              "&larr; All demos"))
+        (:div :class "text-center mb-8"
           (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
                "Parametric Staircase")
           (:p :class "text-lg text-gray-600"
@@ -110,7 +111,7 @@ parts."
             (the model bill-of-materials))))
 
    (source-code-panes
-    (apply (function string-append)
+    (apply #'string-append
            (mapcar
             (lambda (sym)
               (with-lhtml-string ()
@@ -119,64 +120,36 @@ parts."
                     (fmt "(define-object ~(~a~) ...)" sym))
                   (:div :class "src-pane"
                     (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
-            (list (quote staircase) (quote tread) (quote stringer) (quote staircase-ui)))))
+            '(staircase tread stringer staircase-ui))))
 
    (control-form
     (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the total-rise-control id)
-                    "Total Rise (in)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the total-rise-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the total-run-control id)
-                    "Total Run (in)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the total-run-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the number-of-steps-control id)
-                    "Number of Steps")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the number-of-steps-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the stairs-width-control id)
-                    "Width (in)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the stairs-width-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the nosing-control id)
-                    "Nosing (in)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the nosing-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the post-every-control id)
-                    "Post Every (treads)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the post-every-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the handrail-height-control id)
-                    "Rail Height (in)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the handrail-height-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the handrail-control id)
-                    "Handrail")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the handrail-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the risers-control id)
-                    "Risers")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the risers-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the skirt-control id)
-                    "Skirt / Fascia")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the skirt-control form-control))))
+      (str (the (param-field "Total Rise (in)"     (the total-rise-control))))
+      (str (the (param-field "Total Run (in)"      (the total-run-control))))
+      (str (the (param-field "Number of Steps"     (the number-of-steps-control))))
+      (str (the (param-field "Width (in)"          (the stairs-width-control))))
+      (str (the (param-field "Nosing (in)"         (the nosing-control))))
+      (str (the (param-field "Post Every (treads)" (the post-every-control))))
+      (str (the (param-field "Rail Height (in)"    (the handrail-height-control))))
+      (str (the (param-field "Handrail"            (the handrail-control))))
+      (str (the (param-field "Risers"              (the risers-control))))
+      (str (the (param-field "Skirt / Fascia"      (the skirt-control))))
       (:div :class "flex items-end col-span-2"
-            (:button :type "submit"
-                     :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
-                     "Rebuild")))))
+        (:button :type "submit"
+                 :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                 "Rebuild")))))
+
+  :functions
+  (;; One labeled parameter field: a form-control wrapped in the
+   ;; shared label + bordered-box styling used by every parameter.
+   (param-field
+    (label control)
+    (with-lhtml-string ()
+      (:div :class "space-y-2"
+        (:label :class "block text-sm font-medium text-gray-700"
+                :for (the-object control id) (str label))
+        (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+          (str (the-object control form-control)))))))
 
   :objects
   ((total-rise-control :type 'number-form-control
@@ -197,7 +170,7 @@ parts."
 
    (nosing-control :type 'number-form-control
                    :default (the nosing)
-                   :domain :number :min 0 :max 2 :step 1/4)
+                   :domain :number :min 0 :max 2 :step 0.25)
 
    (post-every-control :type 'number-form-control
                        :default (the post-every)

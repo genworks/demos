@@ -42,8 +42,9 @@ quantity takeoff computed from the same declarative rules."
     (with-lhtml-string ()
       (:div :class "max-w-5xl mx-auto p-8"
         (:div :class "mb-4"
-          ((:a :href "/demos/index.html" :class "text-sm font-medium text-indigo-600 hover:text-indigo-500")
-           "&larr; All demos"))
+          (:a :href "/demos/index.html"
+              :class "text-sm font-medium text-indigo-600 hover:text-indigo-500"
+              "&larr; All demos"))
         (:div :class "text-center mb-8"
           (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
                "Brick Wall Pattern")
@@ -93,7 +94,7 @@ quantity takeoff computed from the same declarative rules."
                       (str (second row)))))))))))
 
    (source-code-panes
-    (apply (function string-append)
+    (apply #'string-append
            (mapcar
             (lambda (sym)
               (with-lhtml-string ()
@@ -102,44 +103,32 @@ quantity takeoff computed from the same declarative rules."
                     (fmt "(define-object ~(~a~) ...)" sym))
                   (:div :class "src-pane"
                     (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
-            (list (quote brick-wall) (quote wall-course) (quote brick-wall-ui)))))
+            '(brick-wall wall-course brick-wall-ui))))
 
    (control-form
     (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the wall-length-control id)
-                    "Wall Length (in)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the wall-length-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the wall-height-control id)
-                    "Wall Height (in)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the wall-height-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the brick-length-control id)
-                    "Brick Length (in)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the brick-length-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the brick-height-control id)
-                    "Brick Height (in)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the brick-height-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the mortar-joint-control id)
-                    "Mortar Joint (in)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the mortar-joint-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the bond-control id)
-                    "Bond Pattern")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the bond-control form-control))))
+      (str (the (param-field "Wall Length (in)"   (the wall-length-control))))
+      (str (the (param-field "Wall Height (in)"   (the wall-height-control))))
+      (str (the (param-field "Brick Length (in)"  (the brick-length-control))))
+      (str (the (param-field "Brick Height (in)"  (the brick-height-control))))
+      (str (the (param-field "Mortar Joint (in)"  (the mortar-joint-control))))
+      (str (the (param-field "Bond Pattern"       (the bond-control))))
       (:div :class "flex items-end col-span-2"
-            (:button :type "submit"
-                     :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
-                     "Rebuild")))))
+        (:button :type "submit"
+                 :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                 "Rebuild")))))
+
+  :functions
+  (;; One labeled parameter field: a form-control wrapped in the
+   ;; shared label + bordered-box styling used by every parameter.
+   (param-field
+    (label control)
+    (with-lhtml-string ()
+      (:div :class "space-y-2"
+        (:label :class "block text-sm font-medium text-gray-700"
+                :for (the-object control id) (str label))
+        (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+          (str (the-object control form-control)))))))
 
   :objects
   ((wall-length-control :type 'number-form-control

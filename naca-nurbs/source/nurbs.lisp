@@ -14,13 +14,9 @@
 (define-object naca-nurbs-curves (base-object quality-reports-mixin)
 
   :input-slots
-  (;; (airfoil :2412)
-   ;;(airfoil :0012 :settable)
-   ;;(airfoil :23012 :settable)
-   (airfoil :0021 :settable)
+  ((airfoil :0021 :settable)
    (n-points 216 :settable)
    (cosine? t :settable)
-   ;;(closed? nil :settable)
    (closed? t :settable)
    (adaptive-split? t :settable)
    (split-x-default 0.15 :settable)
@@ -103,26 +99,20 @@
         (the naca-tangents-analytical)
         (the naca-tangents-numeric)))
 
-
    (child-keys '(:full-upper-fitted :full-lower-fitted
-		 :main-upper-fitted :main-lower-fitted
-		 :nose-upper-fitted :nose-lower-fitted
-		 :main-upper-approx :main-lower-approx
-		 :nose-upper-approx :nose-lower-approx
+                 :main-upper-fitted :main-lower-fitted
+                 :nose-upper-fitted :nose-lower-fitted
+                 :main-upper-approx :main-lower-approx
+                 :nose-upper-approx :nose-lower-approx
 
-		 :upper-composed :lower-composed
+                 :upper-composed :lower-composed
 
-		 :upper-elevated :lower-elevated
+                 :upper-elevated :lower-elevated
 
-		 :imported-0021-lower :imported-0021-upper
-		 
-		 )))
-
-
+                 :imported-0021-lower :imported-0021-upper)))
 
   :computed-slots
-  (
-   ;; --------------------------------------------------------
+  (;; --------------------------------------------------------
    ;; Split into sections using a t-domain curvature search
    ;; --------------------------------------------------------
    (sectioned-indices
@@ -161,27 +151,26 @@
                            out))
                    (nreverse out)))
 
+               (%segment-tangents (pts)
+                 "Returns list of unit tangents for each consecutive segment (k-1 items)."
+                 (let ((out nil))
+                   (mapc (lambda (a b) (push (unitize-vector (subtract-vectors b a)) out))
+                         pts (rest pts))
+                   (nreverse out)))
 
-	       (%segment-tangents (pts)
-		 "Returns list of unit tangents for each consecutive segment (k-1 items)."
-		 (let ((out nil))
-		   (mapc (lambda (a b) (push (unitize-vector (subtract-vectors b a)) out))
-			 pts (rest pts))
-		   (nreverse out)))
-
-	       (%k-tangents (pts first-tan)
-		 "Given k points and a proposed first tangent, return k tangents by
+               (%k-tangents (pts first-tan)
+                 "Given k points and a proposed first tangent, return k tangents by
    using segment tangents for interior and duplicating the last one at the end."
-		 (let* ((segs (%segment-tangents pts))            ; length k-1
-			(head (or first-tan (first segs)))
-			(tail (car (last segs))))
-		   (append (list head)
-			   (butlast segs) ; k-2
-			   (list tail)))) ; total k
+                 (let* ((segs (%segment-tangents pts))            ; length k-1
+                        (head (or first-tan (first segs)))
+                        (tail (car (last segs))))
+                   (append (list head)
+                           (butlast segs) ; k-2
+                           (list tail)))) ; total k
 
                (mk-numeric (points &key nose? surface)
-		 (let ((first (and nose? (the (compute-zero-tangent surface)))))
-		   (%k-tangents points first))))
+                 (let ((first (and nose? (the (compute-zero-tangent surface)))))
+                   (%k-tangents points first))))
 
         (let* ((nu (getf (the sectioned-indices) :nose-upper-indices))
                (mu (getf (the sectioned-indices) :main-upper-indices))
@@ -215,13 +204,7 @@
            (mu (getf (the sectioned-indices) :main-upper-indices))
            (ml (getf (the sectioned-indices) :main-lower-indices)))
       (list :upper (aref xs (first mu))
-            :lower (aref xs (first ml)))))
-
-
-
-   
-
-   )
+            :lower (aref xs (first ml))))))
 
   :objects
   ((full-upper-fitted :type 'fitted-curve
@@ -234,7 +217,7 @@
                       :vectors (getf (the naca-tangents) :lower)
                       :vector-type :tangents
                       :points (getf (the naca-points) :lower))
-   
+
    (main-upper-fitted :type 'fitted-curve
                       :points (getf (the sectioned-points) :main-upper)
                       :vectors (getf (the sectioned-tangents) :main-upper)
@@ -260,14 +243,14 @@
                       :parameterization :chord-length)
 
    (main-upper-approx :type 'approximated-curve
-		      :match-parameterization? t
+                      :match-parameterization? t
                       :tolerance (if (the use-section-tolerances?)
                                      (the main-upper-tolerance)
                                      (the approx-tolerance))
                       :curve-in (the main-upper-fitted))
 
    (main-lower-approx :type 'approximated-curve
-		      :match-parameterization? t
+                      :match-parameterization? t
                       :tolerance (if (the use-section-tolerances?)
                                      (the main-lower-tolerance)
                                      (the approx-tolerance))
@@ -275,7 +258,7 @@
 
    (nose-upper-approx :type 'approximated-curve
                       :match-parameterization? t
-		      :display-controls (list :color :red :line-thickness 2)
+                      :display-controls (list :color :red :line-thickness 2)
                       :tolerance (if (the use-section-tolerances?)
                                      (the nose-upper-tolerance)
                                      (the approx-tolerance))
@@ -283,22 +266,21 @@
 
    (nose-lower-approx :type 'approximated-curve
                       :match-parameterization? t
-		      :display-controls (list :color :green :line-thickness 2)
+                      :display-controls (list :color :green :line-thickness 2)
                       :tolerance (if (the use-section-tolerances?)
                                      (the nose-lower-tolerance)
                                      (the approx-tolerance))
                       :curve-in (the nose-lower-fitted))
 
-
    (upper-composed :type 'composed-curve
-		   :display-controls (list :color :blue)
-		   :curves (list (the nose-upper-approx)
-				 (the main-upper-approx)))
+                   :display-controls (list :color :blue)
+                   :curves (list (the nose-upper-approx)
+                                 (the main-upper-approx)))
 
    (lower-composed :type 'composed-curve
-		   :display-controls (list :color :green)
-		   :curves (list (the nose-lower-approx)
-				 (the main-lower-approx)))
+                   :display-controls (list :color :green)
+                   :curves (list (the nose-lower-approx)
+                                 (the main-lower-approx)))
 
    (upper-elevated :type 'degree-elevated-curve
                    :target-degree 4
@@ -310,33 +292,26 @@
 
    (imported-0021 :type 'import-step)
 
-
    (imported-0021-lower :type 'boxed-curve
-			:scale 1/65
-			:orientation (alignment :rear (the (face-normal-vector :top))
-						:right (the (face-normal-vector :right)))
-			:center (translate (the center)
-					   :left -0.06153862572593498)
-			:display-controls
-			(list :color :cyan
-			      ;;:line-thickness 2
-			      )
-			:curve-in
-			(the imported-0021 (brep-1-edges 0)))
-   
+                        :scale 1/65
+                        :orientation (alignment :rear (the (face-normal-vector :top))
+                                                :right (the (face-normal-vector :right)))
+                        :center (translate (the center)
+                                           :left -0.06153862572593498)
+                        :display-controls
+                        (list :color :cyan)
+                        :curve-in
+                        (the imported-0021 (brep-1-edges 0)))
+
    (imported-0021-upper :type 'boxed-curve
-			:scale 1/65
-			:orientation (the imported-0021-lower orientation)
-			:center (translate (the center)
-					   :left -0.06153862572593498)
-			:display-controls
-			(list :color :cyan ;;:line-thickness 2
-			      )
-			:curve-in
-			(the imported-0021 (brep-1-edges 4)))
-
-   )
-
+                        :scale 1/65
+                        :orientation (the imported-0021-lower orientation)
+                        :center (translate (the center)
+                                           :left -0.06153862572593498)
+                        :display-controls
+                        (list :color :cyan)
+                        :curve-in
+                        (the imported-0021 (brep-1-edges 4))))
 
   :functions
   ((split-airfoil-sections
@@ -380,7 +355,7 @@
                      (/ (+ t-min t-max) 2.0d0))))
            (split-index (tt)
              (let* ((x* (t->x tt (the cosine?)))
-		    (i (lower-bound xs x*)))
+                    (i (lower-bound xs x*)))
                (min i (1- (length xs)))))
 
            (make-ranges (idx n)
@@ -458,18 +433,18 @@
     (let ((high tolerance-max))
       (the (set-slot! :approx-tolerance high))
       (labels ((okp ()
-		 (and (<= (length (the nose-upper-approx  control-points)) max-nose-points)
+                 (and (<= (length (the nose-upper-approx  control-points)) max-nose-points)
                       (<= (length (the nose-lower-approx  control-points)) max-nose-points)
                       (<= (length (the main-upper-approx  control-points)) max-main-points)
                       (<= (length (the main-lower-approx  control-points)) max-main-points))))
-	(the (set-slot! :approx-tolerance tolerance-max))
-	(let ((low tolerance-min) (high tolerance-max) (best nil))
-	  (dotimes (_ max-iterations (or best high))
-	    (let ((mid (/ (+ low high) 2d0)))
+        (the (set-slot! :approx-tolerance tolerance-max))
+        (let ((low tolerance-min) (high tolerance-max) (best nil))
+          (dotimes (_ max-iterations (or best high))
+            (let ((mid (/ (+ low high) 2d0)))
               (the (set-slot! :approx-tolerance mid))
               (if (okp) (setf best mid high mid) (setf low mid))
               (when (<= (abs (- high low)) (* tolerance-min 1d-3))
-		(return (or best mid)))))))))
+                (return (or best mid)))))))))
 
    (compute-optimized-tolerances
     (&key (efficiency-target 0.7d0) (safety-margin 1.2d0))

@@ -46,8 +46,9 @@ live with form controls."
     (with-lhtml-string ()
       (:div :class "max-w-5xl mx-auto p-8"
         (:div :class "mb-4"
-          ((:a :href "/demos/index.html" :class "text-sm font-medium text-indigo-600 hover:text-indigo-500")
-           "&larr; All demos"))
+          (:a :href "/demos/index.html"
+              :class "text-sm font-medium text-indigo-600 hover:text-indigo-500"
+              "&larr; All demos"))
         (:div :class "text-center mb-8"
           (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
                "Robot Assembly")
@@ -80,7 +81,7 @@ html-format lens.")))
           (str (the source-code-panes))))))
 
    (source-code-panes
-    (apply (function string-append)
+    (apply #'string-append
            (mapcar
             (lambda (sym)
               (with-lhtml-string ()
@@ -89,65 +90,36 @@ html-format lens.")))
                     (fmt "(define-object ~(~a~) ...)" sym))
                   (:div :class "src-pane"
                     (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
-            (list (quote robot) (quote robot-body) (quote robot-arm)
-                  (quote robot-base) (quote robot-ui)))))
+            '(robot robot-body robot-arm robot-base robot-ui))))
 
    (control-form
     (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the height-control id)
-                    "Height")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the height-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the width-control id)
-                    "Width")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the width-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the length-control id)
-                    "Length")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the length-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the torso-control id)
-                    "Torso")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the torso-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the head-angle-control id)
-                    "Head Angle (deg)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the head-angle-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the body-angle-control id)
-                    "Body Angle (deg)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the body-angle-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the arm-angle-left-control id)
-                    "Left Arm (deg)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the arm-angle-left-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the arm-angle-right-control id)
-                    "Right Arm (deg)")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the arm-angle-right-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the pincer-left-control id)
-                    "Left Grip")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the pincer-left-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the pincer-right-control id)
-                    "Right Grip")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-                  (str (the pincer-right-control form-control))))
+      (str (the (param-field "Height"           (the height-control))))
+      (str (the (param-field "Width"            (the width-control))))
+      (str (the (param-field "Length"           (the length-control))))
+      (str (the (param-field "Torso"            (the torso-control))))
+      (str (the (param-field "Head Angle (deg)" (the head-angle-control))))
+      (str (the (param-field "Body Angle (deg)" (the body-angle-control))))
+      (str (the (param-field "Left Arm (deg)"   (the arm-angle-left-control))))
+      (str (the (param-field "Right Arm (deg)"  (the arm-angle-right-control))))
+      (str (the (param-field "Left Grip"        (the pincer-left-control))))
+      (str (the (param-field "Right Grip"       (the pincer-right-control))))
       (:div :class "flex items-end col-span-2"
-            (:button :type "submit"
-                     :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
-                     "Rebuild")))))
+        (:button :type "submit"
+                 :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                 "Rebuild")))))
+
+  :functions
+  (;; One labeled parameter field: a form-control wrapped in the
+   ;; shared label + bordered-box styling used by every parameter.
+   (param-field
+    (label control)
+    (with-lhtml-string ()
+      (:div :class "space-y-2"
+        (:label :class "block text-sm font-medium text-gray-700"
+                :for (the-object control id) (str label))
+        (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+          (str (the-object control form-control)))))))
 
   :objects
   ((height-control :type 'number-form-control
@@ -156,11 +128,11 @@ html-format lens.")))
 
    (width-control :type 'number-form-control
                   :default (the robot-width)
-                  :domain :number :min 3 :max 10 :step 1/2)
+                  :domain :number :min 3 :max 10 :step 0.5)
 
    (length-control :type 'number-form-control
                    :default (the robot-length)
-                   :domain :number :min 1 :max 4 :step 1/2)
+                   :domain :number :min 1 :max 4 :step 0.5)
 
    (torso-control :type 'menu-form-control
                   :default :box

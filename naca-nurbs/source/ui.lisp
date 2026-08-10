@@ -44,10 +44,11 @@
    (body
     (with-lhtml-string ()
       (:div :class "max-w-7xl mx-auto p-8"
-                (:div :class "mb-4"
-          ((:a :href "/demos/index.html" :class "text-sm font-medium text-indigo-600 hover:text-indigo-500")
-           "&larr; All demos"))
-(:div :class "text-center mb-8"
+        (:div :class "mb-4"
+          (:a :href "/demos/index.html"
+              :class "text-sm font-medium text-indigo-600 hover:text-indigo-500"
+              "&larr; All demos"))
+        (:div :class "text-center mb-8"
           (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
                "NACA NURBS Playground")
           (:p :class "text-lg text-gray-600"
@@ -62,7 +63,7 @@
               (:h3 :class "text-lg font-medium text-gray-900"
                    "Left Viewport")
               (:p :class "text-sm text-gray-600"
-                  "Interactive view"))
+                  "Switch between 2D vector and 3D interactive rendering"))
             (:div :class "p-6 overflow-auto relative" :style "height: 440px;"
               (:div :class "param-field absolute top-2 left-2 z-20 bg-white/90 backdrop-blur px-2 py-1 rounded-md border border-gray-200 shadow-sm"
                 (str (the left-format-selector form-control)))
@@ -72,7 +73,7 @@
               (:h3 :class "text-lg font-medium text-gray-900"
                    "Right Viewport")
               (:p :class "text-sm text-gray-600"
-                  "Interactive view"))
+                  "Switch between 2D vector and 3D interactive rendering"))
             (:div :class "p-6 overflow-auto relative" :style "height: 440px;"
               (:div :class "param-field absolute top-2 left-2 z-20 bg-white/90 backdrop-blur px-2 py-1 rounded-md border border-gray-200 shadow-sm"
                 (str (the right-format-selector form-control)))
@@ -89,7 +90,7 @@
           (str (the source-code-panes))))))
 
    (source-code-panes
-    (apply (function string-append)
+    (apply #'string-append
            (mapcar
             (lambda (sym)
               (with-lhtml-string ()
@@ -98,29 +99,17 @@
                     (fmt "(define-object ~(~a~) ...)" sym))
                   (:div :class "src-pane"
                     (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
-            (list (quote naca-nurbs-curves) (quote quality-reports-mixin) (quote ui)))))
+            '(naca-nurbs-curves quality-reports-mixin ui))))
 
    (control-form
     (with-form-string (:class "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6")
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the airfoil-control id)
-                    "Airfoil Type")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-		  (str (the airfoil-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the n-points-control id)
-                    "Number of Points")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-		  (str (the n-points-control form-control))))
-      (:div :class "space-y-2"
-            (:label :class "block text-sm font-medium text-gray-700" :for (the approx-tolerance-control id)
-                    "Tolerance")
-            (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-		  (str (the approx-tolerance-control form-control))))
+      (str (the (param-field "Airfoil Type"      (the airfoil-control))))
+      (str (the (param-field "Number of Points"  (the n-points-control))))
+      (str (the (param-field "Tolerance"         (the approx-tolerance-control))))
       (:div :class "flex items-end"
-            (:button :type "submit"
-                     :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
-                     "Update"))))
+        (:button :type "submit"
+                 :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                 "Update"))))
 
    (curve-stats-panel
     (with-lhtml-string ()
@@ -176,6 +165,18 @@
             (:span :class "text-gray-600" "Analytical Tangents:")
             (:span :class "font-medium" (str (if (the nurbs use-analytical-tangents?) "Yes" "No")))))))))
 
+  :functions
+  (;; One labeled parameter field: a form-control wrapped in the
+   ;; shared label + bordered-box styling used by every parameter.
+   (param-field
+    (label control)
+    (with-lhtml-string ()
+      (:div :class "space-y-2"
+        (:label :class "block text-sm font-medium text-gray-700"
+                :for (the-object control id) (str label))
+        (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+          (str (the-object control form-control)))))))
+
   :objects
   ((airfoil-control :type 'menu-form-control
                     :default (the airfoil)
@@ -217,15 +218,15 @@
                          :default :svg
                          :size 1
                          :ajax-submit-on-change? t
-                         :choice-plist '(:svg "Wireframe"
-                                        :x3dom "Shaded"))
+                         :choice-plist '(:svg "2D Vector"
+                                        :x3dom "3D Interactive"))
 
    (right-format-selector :type 'menu-form-control
                           :default :x3dom
                           :size 1
                           :ajax-submit-on-change? t
-                          :choice-plist '(:svg "Wireframe"
-                                         :x3dom "Shaded"))
+                          :choice-plist '(:svg "2D Vector"
+                                         :x3dom "3D Interactive"))
 
    (left-viewport-area :type 'base-html-div
                        :div-class "absolute inset-0"
