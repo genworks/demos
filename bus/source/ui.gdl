@@ -49,17 +49,23 @@ checks -- both surfaced on the page."
                         :content (with-lhtml-string ()
                                    (:div :class "p-6 relative" :style "height: 600px;"
                                      (str (the viewport-area div)))))))
-        (str (the (card :title "Design Rules"
-                        :subtitle "Live KBE checks evaluated against the current parameters."
-                        :content (with-lhtml-string ()
-                                   (:div :class "px-6 py-4 grid grid-cols-1 md:grid-cols-2 gap-6"
-                                     (str (the legroom-panel))
-                                     (str (the overhang-panel)))
-                                   (:div :class "px-6 pb-6"
-                                     (str (the ackermann-panel)))))))
+        (str (the design-rules-section div))
         (str (the (card :title "Source Code"
                         :subtitle "The complete Gendl source for this demo, reconstituted live from the in-memory object definitions serving this page."
                         :content (the source-code-panes)))))))
+
+   ;; Ajax-refreshable section: with live-on-change parameters, the
+   ;; design checks re-render on every model rebuild (see
+   ;; design-rules-section).
+   (design-rules-card
+    (the (card :title "Design Rules"
+               :subtitle "Live KBE checks evaluated against the current parameters."
+               :content (with-lhtml-string ()
+                          (:div :class "px-6 py-4 grid grid-cols-1 md:grid-cols-2 gap-6"
+                            (str (the legroom-panel))
+                            (str (the overhang-panel)))
+                          (:div :class "px-6 pb-6"
+                            (str (the ackermann-panel)))))))
 
    (legroom-panel
     (let ((check (the model interior sections inter-seat-clearance-check)))
@@ -133,32 +139,37 @@ checks -- both surfaced on the page."
       (str (the (param-field "Body Height (in)" (the height-control))))
       (str (the (param-field "Turn Angle (deg)" (the turn-angle-control))))
       (str (the (param-field "Seat Rows"        (the rows-control))))
-      (str (the (param-field "Min Legroom (in)" (the legroom-control))))
-      (str (the (submit-button))))))
+      (str (the (param-field "Min Legroom (in)" (the legroom-control)))))))
 
   :objects
   ((wheelbase-control :type 'number-form-control
                       :default (the wheelbase)
+                      :ajax-submit-on-change? t
                       :domain :number :min 220 :max 380 :step 10)
 
    (track-control :type 'number-form-control
                   :default (the track)
+                  :ajax-submit-on-change? t
                   :domain :number :min 80 :max 110 :step 2)
 
    (height-control :type 'number-form-control
                    :default (the bus-height)
+                   :ajax-submit-on-change? t
                    :domain :number :min 60 :max 100 :step 4)
 
    (turn-angle-control :type 'number-form-control
                        :default (the turn-angle)
+                       :ajax-submit-on-change? t
                        :domain :number :min -35 :max 35 :step 5)
 
    (rows-control :type 'number-form-control
                  :default (the number-of-rows)
+                 :ajax-submit-on-change? t
                  :domain :number :min 4 :max 14 :step 1)
 
    (legroom-control :type 'number-form-control
                     :default (the minimum-legroom)
+                    :ajax-submit-on-change? t
                     :domain :number :min 4 :max 14 :step 1)
 
    (model :type 'assembly
@@ -167,4 +178,7 @@ checks -- both surfaced on the page."
           :height (the height-control value)
           :turn-angle (the turn-angle-control value)
           :number-of-rows (the rows-control value)
-          :minimum-inter-seat-clearance (the legroom-control value))))
+          :minimum-inter-seat-clearance (the legroom-control value))
+
+   (design-rules-section :type 'base-html-div
+                         :inner-html (the design-rules-card))))

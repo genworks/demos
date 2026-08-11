@@ -46,16 +46,21 @@ quantity takeoff computed from the same declarative rules."
                         :content (with-lhtml-string ()
                                    (:div :class "p-6 relative" :style "height: 520px;"
                                      (str (the viewport-area div)))))))
-        (str (the (card :title "Quantity Takeoff"
-                        :subtitle (format nil "Snapped to whole modules: ~,1f in long, ~,1f in tall."
-                                          (float (the model effective-length))
-                                          (float (the model effective-height)))
-                        :content (with-lhtml-string ()
-                                   (:div :class "overflow-x-auto"
-                                     (str (the quantities-table)))))))
+        (str (the takeoff-section div))
         (str (the (card :title "Source Code"
                         :subtitle "The complete Gendl source for this demo, reconstituted live from the in-memory object definitions serving this page."
                         :content (the source-code-panes)))))))
+
+   ;; Ajax-refreshable section: with live-on-change parameters, this
+   ;; card re-renders on every model rebuild (see takeoff-section).
+   (takeoff-card
+    (the (card :title "Quantity Takeoff"
+               :subtitle (format nil "Snapped to whole modules: ~,1f in long, ~,1f in tall."
+                                 (float (the model effective-length))
+                                 (float (the model effective-height)))
+               :content (with-lhtml-string ()
+                          (:div :class "overflow-x-auto"
+                            (str (the quantities-table)))))))
 
    (quantities-table
     (let ((model (the model)))
@@ -83,28 +88,32 @@ quantity takeoff computed from the same declarative rules."
       (str (the (param-field "Brick Length (in)"  (the brick-length-control))))
       (str (the (param-field "Brick Height (in)"  (the brick-height-control))))
       (str (the (param-field "Mortar Joint (in)"  (the mortar-joint-control))))
-      (str (the (param-field "Bond Pattern"       (the bond-control))))
-      (str (the (submit-button))))))
+      (str (the (param-field "Bond Pattern"       (the bond-control)))))))
 
   :objects
   ((wall-length-control :type 'number-form-control
                         :default (the wall-length)
+                        :ajax-submit-on-change? t
                         :domain :number :min 24 :max 240 :step 8)
 
    (wall-height-control :type 'number-form-control
                         :default (the wall-height)
+                        :ajax-submit-on-change? t
                         :domain :number :min 12 :max 96 :step 4)
 
    (brick-length-control :type 'number-form-control
                          :default (the brick-length)
+                         :ajax-submit-on-change? t
                          :domain :number :min 6 :max 16 :step 1)
 
    (brick-height-control :type 'number-form-control
                          :default (the brick-height)
+                         :ajax-submit-on-change? t
                          :domain :number :min 2 :max 5 :step 0.25)
 
    (mortar-joint-control :type 'number-form-control
                          :default (the mortar-joint)
+                         :ajax-submit-on-change? t
                          :domain :number :min 0.25 :max 1 :step 0.125)
 
    (bond-control :type 'menu-form-control
@@ -119,4 +128,7 @@ quantity takeoff computed from the same declarative rules."
           :brick-length (the brick-length-control value)
           :brick-height (the brick-height-control value)
           :mortar-joint (the mortar-joint-control value)
-          :bond (the bond-control value))))
+          :bond (the bond-control value))
+
+   (takeoff-section :type 'base-html-div
+                    :inner-html (the takeoff-card))))

@@ -53,18 +53,23 @@ parts."
                         :content (with-lhtml-string ()
                                    (:div :class "p-6 relative" :style "height: 600px;"
                                      (str (the viewport-area div)))))))
-        (str (the (card :title "Cut List"
-                        :subtitle (format nil "~a steps, ~,1f in rise over ~,1f in run (~,1f deg)"
-                                          (the number-of-steps-control value)
-                                          (float (the total-rise-control value))
-                                          (float (the total-run-control value))
-                                          (the model slope-angle))
-                        :content (with-lhtml-string ()
-                                   (:div :class "overflow-x-auto"
-                                     (str (the bom-table)))))))
+        (str (the cut-list-section div))
         (str (the (card :title "Source Code"
                         :subtitle "The complete Gendl source for this demo: object definitions reconstituted live from the in-memory definitions serving this page, supporting lumber-system functions via the Lisp's own source records."
                         :content (the source-code-panes)))))))
+
+   ;; Ajax-refreshable section: with live-on-change parameters, this
+   ;; card re-renders on every model rebuild (see cut-list-section).
+   (cut-list-card
+    (the (card :title "Cut List"
+               :subtitle (format nil "~a steps, ~,1f in rise over ~,1f in run (~,1f deg)"
+                                 (the number-of-steps-control value)
+                                 (float (the total-rise-control value))
+                                 (float (the total-run-control value))
+                                 (the model slope-angle))
+               :content (with-lhtml-string ()
+                          (:div :class "overflow-x-auto"
+                            (str (the bom-table)))))))
 
    (bom-table
     (with-lhtml-string ()
@@ -100,36 +105,42 @@ parts."
       (str (the (param-field "Rail Height (in)"    (the handrail-height-control))))
       (str (the (param-field "Handrail"            (the handrail-control))))
       (str (the (param-field "Risers"              (the risers-control))))
-      (str (the (param-field "Skirt / Fascia"      (the skirt-control))))
-      (str (the (submit-button))))))
+      (str (the (param-field "Skirt / Fascia"      (the skirt-control)))))))
 
   :objects
   ((total-rise-control :type 'number-form-control
                        :default (the total-rise)
+                       :ajax-submit-on-change? t
                        :domain :number :min 48 :max 240 :step 6)
 
    (total-run-control :type 'number-form-control
                       :default (the total-run)
+                      :ajax-submit-on-change? t
                       :domain :number :min 60 :max 360 :step 6)
 
    (number-of-steps-control :type 'number-form-control
                             :default (the number-of-steps)
+                            :ajax-submit-on-change? t
                             :domain :number :min 3 :max 30 :step 1)
 
    (stairs-width-control :type 'number-form-control
                          :default (the stairs-width)
+                         :ajax-submit-on-change? t
                          :domain :number :min 24 :max 72 :step 2)
 
    (nosing-control :type 'number-form-control
                    :default (the nosing)
+                   :ajax-submit-on-change? t
                    :domain :number :min 0 :max 2 :step 0.25)
 
    (post-every-control :type 'number-form-control
                        :default (the post-every)
+                       :ajax-submit-on-change? t
                        :domain :number :min 2 :max 6 :step 1)
 
    (handrail-height-control :type 'number-form-control
                             :default (the handrail-height)
+                            :ajax-submit-on-change? t
                             :domain :number :min 30 :max 42 :step 2)
 
    (handrail-control :type 'menu-form-control
@@ -160,4 +171,7 @@ parts."
           :handrail-height (the handrail-height-control value)
           :handrail? (eq (the handrail-control value) :yes)
           :include-risers? (eq (the risers-control value) :yes)
-          :include-skirt? (eq (the skirt-control value) :yes))))
+          :include-skirt? (eq (the skirt-control value) :yes))
+
+   (cut-list-section :type 'base-html-div
+                     :inner-html (the cut-list-card))))

@@ -38,7 +38,74 @@ x3dom viewport pair driven by the demo's objects list."
      (call-next-method)
      (with-lhtml-string ()
        (:link :href "/demo/css/demos-style.css"
-              :rel "stylesheet" :type "text/css"))))
+              :rel "stylesheet" :type "text/css")
+       (:script (str (the busy-overlay-js))))))
+
+   ;; Live-on-change UX: while a section-replacing gdlAjax round-trip
+   ;; is in flight, shade the page behind a click-blocking overlay so
+   ;; the next edit waits until this one has propagated.  Quiet
+   ;; background syncs (camera state, container size) never shade.
+   ;; Mechanics: wrap window.gdlAjax to notice non-quiet calls, count
+   ;; in-flight /gdlAjax XHRs, hide when the count drains.
+   (busy-overlay-js "
+(function () {
+  var count = 0, overlay = null, nonQuiet = false;
+  function ensureOverlay () {
+    if (overlay) return overlay;
+    overlay = document.createElement('div');
+    overlay.id = 'demo-busy-overlay';
+    overlay.setAttribute('style',
+      'position:fixed;inset:0;z-index:9999;display:none;' +
+      'background:rgba(249,250,251,0.55);backdrop-filter:blur(1px);' +
+      'transition:opacity 100ms;opacity:0;');
+    var pill = document.createElement('div');
+    pill.setAttribute('style',
+      'position:absolute;top:1.25rem;left:50%;transform:translateX(-50%);' +
+      'background:#4f46e5;color:#fff;padding:0.4rem 1rem;' +
+      'border-radius:9999px;font:500 0.875rem system-ui,sans-serif;' +
+      'box-shadow:0 2px 8px rgba(0,0,0,0.25);');
+    pill.textContent = 'Rebuilding\\u2026';
+    overlay.appendChild(pill);
+    document.body.appendChild(overlay);
+    return overlay;
+  }
+  function show () {
+    var el = ensureOverlay();
+    if (document.activeElement && document.activeElement.blur)
+      document.activeElement.blur();
+    el.style.display = 'block';
+    requestAnimationFrame(function () { el.style.opacity = '1'; });
+  }
+  function hide () {
+    if (overlay) { overlay.style.opacity = '0'; overlay.style.display = 'none'; }
+  }
+  var origOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url) {
+    this._gdlAjax = typeof url === 'string' && url.indexOf('/gdlAjax') === 0;
+    return origOpen.apply(this, arguments);
+  };
+  var origSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function () {
+    if (this._gdlAjax) {
+      count++;
+      if (nonQuiet) { show(); nonQuiet = false; }
+      this.addEventListener('loadend', function () {
+        count--;
+        if (count <= 0) { count = 0; hide(); }
+      });
+    }
+    return origSend.apply(this, arguments);
+  };
+  window.addEventListener('DOMContentLoaded', function () {
+    var orig = window.gdlAjax;
+    if (!orig) return;
+    window.gdlAjax = function (evt, params, asynch, quiet) {
+      if (!quiet) nonQuiet = true;
+      return orig.apply(this, arguments);
+    };
+  });
+})();
+")
 
    (source-code-panes
     (apply #'string-append
@@ -84,15 +151,6 @@ x3dom viewport pair driven by the demo's objects list."
                 :for (the-object control id) (str label))
         (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
           (str (the-object control form-control))))))
-
-   ;; The form's submit button, sized to the parameter grid.
-   (submit-button
-    (&key (label "Rebuild") (wrapper-class "flex items-end col-span-2"))
-    (with-lhtml-string ()
-      (:div :class wrapper-class
-        (:button :type "submit"
-                 :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
-                 (str label)))))
 
    ;; One collapsible pane showing a define-object, reconstituted live
    ;; from the in-memory definition.

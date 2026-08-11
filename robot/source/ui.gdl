@@ -75,20 +75,22 @@ html-format lens."))))))
       (str (the (param-field "Left Arm (deg)"   (the arm-angle-left-control))))
       (str (the (param-field "Right Arm (deg)"  (the arm-angle-right-control))))
       (str (the (param-field "Left Grip"        (the pincer-left-control))))
-      (str (the (param-field "Right Grip"       (the pincer-right-control))))
-      (str (the (submit-button))))))
+      (str (the (param-field "Right Grip"       (the pincer-right-control)))))))
 
   :objects
   ((height-control :type 'number-form-control
                    :default (the robot-height)
+                   :ajax-submit-on-change? t
                    :domain :number :min 4 :max 20 :step 1)
 
    (width-control :type 'number-form-control
                   :default (the robot-width)
+                  :ajax-submit-on-change? t
                   :domain :number :min 3 :max 10 :step 0.5)
 
    (length-control :type 'number-form-control
                    :default (the robot-length)
+                   :ajax-submit-on-change? t
                    :domain :number :min 1 :max 4 :step 0.5)
 
    (torso-control :type 'menu-form-control
@@ -99,26 +101,32 @@ html-format lens."))))))
 
    (head-angle-control :type 'number-form-control
                        :default (the head-angle)
+                       :ajax-submit-on-change? t
                        :domain :number :min -90 :max 90 :step 5)
 
    (body-angle-control :type 'number-form-control
                        :default (the body-angle)
+                       :ajax-submit-on-change? t
                        :domain :number :min -90 :max 90 :step 5)
 
    (arm-angle-left-control :type 'number-form-control
                            :default (the arm-angle-left)
+                           :ajax-submit-on-change? t
                            :domain :number :min -180 :max 180 :step 5)
 
    (arm-angle-right-control :type 'number-form-control
                             :default (the arm-angle-right)
+                            :ajax-submit-on-change? t
                             :domain :number :min -180 :max 180 :step 5)
 
    (pincer-left-control :type 'number-form-control
                         :default (the pincer-distance-left)
+                        :ajax-submit-on-change? t
                         :domain :number :min 0 :max 1 :step 0.05)
 
    (pincer-right-control :type 'number-form-control
                          :default (the pincer-distance-right)
+                         :ajax-submit-on-change? t
                          :domain :number :min 0 :max 1 :step 0.05)
 
    (model :type 'robot

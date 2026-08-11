@@ -68,7 +68,17 @@ viewports with quality metrics below."
                  (:div :class "param-field absolute top-2 left-2 z-20 bg-white/90 backdrop-blur px-2 py-1 rounded-md border border-gray-200 shadow-sm"
                    (str (the-object viewport format-selector form-control)))
                  (str (the-object viewport area div)))))))
-        (:div :class "grid grid-cols-1 md:grid-cols-3 gap-6 mt-8"
+        (str (the stats-section div))
+        (:div :class "mt-8"
+          (str (the (card :title "Source Code"
+                          :subtitle "The complete GDL source for this demo: object definitions reconstituted live from the in-memory definitions serving this page, supporting functions via the Lisp's own source records."
+                          :content (the source-code-panes))))))))
+
+   ;; Ajax-refreshable section: with live-on-change parameters, the
+   ;; stats row re-renders on every model rebuild (see stats-section).
+   (stats-row
+    (with-lhtml-string ()
+      (:div :class "grid grid-cols-1 md:grid-cols-3 gap-6 mt-8"
           (str (the (stats-card "Curve Statistics"
                      (list (list "Upper Control Points:"
                                  (format nil "~a" (length (the nurbs upper-composed control-points))))
@@ -95,19 +105,13 @@ viewports with quality metrics below."
                            (list "Adaptive Split:"
                                  (if (the nurbs adaptive-split?) "Yes" "No"))
                            (list "Analytical Tangents:"
-                                 (if (the nurbs use-analytical-tangents?) "Yes" "No")))))))
-        (:div :class "mt-8"
-          (str (the (card :title "Source Code"
-                          :subtitle "The complete GDL source for this demo: object definitions reconstituted live from the in-memory definitions serving this page, supporting functions via the Lisp's own source records."
-                          :content (the source-code-panes))))))))
+                                 (if (the nurbs use-analytical-tangents?) "Yes" "No")))))))))
 
    (control-form
     (with-form-string (:class "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6")
       (str (the (param-field "Airfoil Type"      (the airfoil-control))))
       (str (the (param-field "Number of Points"  (the n-points-control))))
-      (str (the (param-field "Tolerance"         (the approx-tolerance-control))))
-      (str (the (submit-button :label "Update"
-                               :wrapper-class "flex items-end"))))))
+      (str (the (param-field "Tolerance"         (the approx-tolerance-control)))))))
 
   :functions
   (;; One small stat card: label/value rows under a heading.
@@ -126,6 +130,7 @@ viewports with quality metrics below."
   ((airfoil-control :type 'menu-form-control
                     :default (the airfoil)
                     :size 1
+                    :ajax-submit-on-change? t
                     :choice-plist '(:0012 "NACA 0012"
                                    :0021 "NACA 0021"
                                    :2412 "NACA 2412"
@@ -133,10 +138,12 @@ viewports with quality metrics below."
 
    (n-points-control :type 'number-form-control
                      :default (the n-points)
+                     :ajax-submit-on-change? t
                      :domain :number :min 50 :max 500 :step 1)
 
    (approx-tolerance-control :type 'number-form-control
                              :default (the approx-tolerance)
+                             :ajax-submit-on-change? t
                              :domain :number
                              :min 0.0001 :max 0.01 :step 0.0001)
 
@@ -144,6 +151,9 @@ viewports with quality metrics below."
           :airfoil (the selected-airfoil)
           :n-points (the n-points-control value)
           :approx-tolerance (the approx-tolerance-control value))
+
+   (stats-section :type 'base-html-div
+                  :inner-html (the stats-row))
 
    ;; The selectors live here (not inside airfoil-viewport) because
    ;; form-controls need an ajax-sheet ancestor to wire their events.
@@ -163,7 +173,10 @@ viewports with quality metrics below."
               :display-list-objects (the objects))))
 
 
-(define-object airfoil-viewport (base-object)
+;; sheet-section (not plain base-object): gdlAjax's section discovery
+;; only descends into sheet-sections, so the nested area divs would
+;; otherwise never be replaced on ajax updates.
+(define-object airfoil-viewport (sheet-section)
 
   :documentation
   (:description "One switchable viewport: the parent's menu
