@@ -123,7 +123,7 @@ viewports with quality metrics below."
    (download-buttons
     (flet ((link (label format extension)
              (with-lhtml-string ()
-               (:a :href (format nil "~a?iid=~a&format=~a"
+               (:a :href (format nil "~a?sid=~a&format=~a"
                                  *cad-download-path* (the instance-id) format)
                    :download (format nil "naca-~a.~a"
                                      (remove-if-not #'digit-char-p
