@@ -29,7 +29,21 @@
    datum
    height
    (turn-angle 0 :settable)
-   )
+
+   ;; Optional inputs (settable, with defaults) rather than settable
+   ;; computed-slots, so the ackermann steering-samples below can
+   ;; receive them as plain inputs -- no set-slot! bashing required.
+   (front-overhang 25 :settable)
+   (rear-overhang 72 :settable)
+   (frame-rail-height 6 :settable)
+   (frame-rail-thickness 2.5 :settable)
+   (turn-type :left :settable)
+   (toe-in-angle 0.5 :settable)
+   (camber-angle 1.0 :settable)
+   (caster-angle -1.0 :settable)
+   (kingpin-inclination-angle 7 :settable)
+   (tie-rod-arm-length :medium :settable)
+   (tie-rod-arm-setting :medium :settable))
 
   :computed-slots
   ((respondent self)
@@ -83,61 +97,36 @@
                                            (getf sphere :center)
                                            (getf sphere :radius) t)))
 
-   (front-overhang 25 :settable)
-   (rear-overhang 72 :settable)
-   (frame-rail-height 6 :settable)
-   (frame-rail-thickness 2.5 :settable)
-   (turn-type :left :settable)
+   ;; Ackermann ideal for this steering position: both front wheels'
+   ;; axes should intersect on the rear axle line.  Project the left
+   ;; knuckle's wheel axis onto the rear axle and measure the right
+   ;; wheel's angle to that intersection.
+   (ideal-right-rotation
+    (let ((rear-axle-intersect (inter-line-plane (the (axles 1) center)
+                                                 (the (face-normal-vector :rear))
+                                                 (the (knuckles 0) center)
+                                                 (the (knuckles 0)
+                                                   (face-normal-vector :right)))))
+      (angle-between-vectors-d (the (face-normal-vector :rear))
+                               (subtract-vectors (the (knuckles 1) center)
+                                                 rear-axle-intersect))))
 
-   (toe-in-angle 0.5 :settable)
-   (camber-angle 1.0 :settable)
-   (caster-angle -1.0 :settable)
-   (kingpin-inclination-angle 7 :settable)
-   (tie-rod-arm-length :medium :settable)
-   (tie-rod-arm-setting :medium :settable)
-
+   ;; Actual and ideal right-wheel angles across the steering range,
+   ;; read from the quantified steering-samples below -- one immutable
+   ;; chassis instance per left-wheel angle, instead of bashing a
+   ;; throwaway instance through 35 set-slot! calls.  Demand-driven
+   ;; evaluation means each sample computes only its linkage geometry.
    (ackermann-data
-    (let ((chassis (make-object 'chassis
-                                :wheelbase (the wheelbase)
-                                :track (the track)
-                                :datum (the datum)
-                                :height (the height)))
-          (left-angles (list-of-numbers 1 35)) right-angles)
-      (the-object chassis (set-slots!
-                           (list :front-overhang (the front-overhang)
-                                 :rear-overhang (the rear-overhang)
-                                 :frame-rail-height (the frame-rail-height)
-                                 :frame-rail-thickness (the frame-rail-thickness)
-                                 :toe-in-angle 0
-                                 :camber-angle (the camber-angle)
-                                 :caster-angle (the caster-angle)
-                                 :kingpin-inclination-angle (the kingpin-inclination-angle)
-                                 :tie-rod-arm-length (the tie-rod-arm-length)
-                                 :tie-rod-arm-setting (the tie-rod-arm-setting)
-                                 :turn-type :left)))
-      (setq right-angles
-        (let (result ideal-result)
-          (dolist (left-angle left-angles (list (nreverse result) (nreverse ideal-result)))
-            (the-object chassis (set-slot! :turn-angle left-angle))
-            (push (the-object chassis right-rotation) result)
-
-            (let ((rear-axle-intersect (inter-line-plane (the (axles 1) center)
-                                                         (the (face-normal-vector :rear))
-                                                         (the-object chassis (knuckles 0) center)
-                                                         (the-object chassis (knuckles 0)
-                                                                     (face-normal-vector :right)))))
-
-              (push (angle-between-vectors-d (the (face-normal-vector :rear))
-                                             (subtract-vectors (the (knuckles 1) center)
-                                                               rear-axle-intersect))
-                    ideal-result)))))
-
-      (list :left (cons 0 left-angles)
-            :right (cons 0 (first right-angles))
-            :ideal-right (cons 0 (second right-angles)))))
-
-
-   )
+    (let ((samples (list-elements (the steering-samples))))
+      (list :left (cons 0 (mapcar #'(lambda (sample)
+                                      (the-object sample turn-angle))
+                                  samples))
+            :right (cons 0 (mapcar #'(lambda (sample)
+                                       (the-object sample right-rotation))
+                                   samples))
+            :ideal-right (cons 0 (mapcar #'(lambda (sample)
+                                             (the-object sample ideal-right-rotation))
+                                         samples))))))
 
 
   :objects
@@ -260,7 +249,17 @@
    )
 
   :hidden-objects
-  (
+  ((steering-samples :type 'chassis
+                     :sequence (:size 35)
+                     :turn-angle (1+ (the-child index))
+                     :turn-type :left
+                     :toe-in-angle 0
+                     :pass-down (wheelbase track datum height
+                                 front-overhang rear-overhang
+                                 frame-rail-height frame-rail-thickness
+                                 camber-angle caster-angle
+                                 kingpin-inclination-angle
+                                 tie-rod-arm-length tie-rod-arm-setting))
 
    (knuckles-straight
     :type 'knuckle
