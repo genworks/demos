@@ -35,7 +35,8 @@ viewports with quality metrics below."
                             analytical-tangent-parametric
                             analytical-curvature-parametric
                             x->t t->x lower-bound
-                            ternary-search-maximum find-max-gradient-region))
+                            ternary-search-maximum find-max-gradient-region
+                            respond-with-cad-download))
 
    ;; The menu control round-trips its keyword through the form as a
    ;; string; normalize back to the catalog keyword.
@@ -54,7 +55,8 @@ viewports with quality metrics below."
         (str (the (card :title "Parameters"
                         :content (with-lhtml-string ()
                                    (:div :class "p-6"
-                                     (str (the control-form)))))))
+                                     (str (the control-form))
+                                     (str (the download-buttons)))))))
         (:div :class "flex flex-col lg:flex-row gap-8"
           (dolist (viewport (list-elements (the viewports)))
             (htm
@@ -111,7 +113,28 @@ viewports with quality metrics below."
     (with-form-string (:class "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6")
       (str (the (param-field "Airfoil Type"      (the airfoil-control))))
       (str (the (param-field "Number of Points"  (the n-points-control))))
-      (str (the (param-field "Tolerance"         (the approx-tolerance-control)))))))
+      (str (the (param-field "Tolerance"         (the approx-tolerance-control))))))
+
+   ;; CAD export of the current session's curves; the server side is
+   ;; respond-with-cad-download in publish.lisp (shown in the Source
+   ;; Code panes) -- one with-format call per format.  The download
+   ;; attribute carries the filename client-side (the proxy strips
+   ;; content-disposition).
+   (download-buttons
+    (flet ((link (label format extension)
+             (with-lhtml-string ()
+               (:a :href (format nil "~a?iid=~a&format=~a"
+                                 *cad-download-path* (the instance-id) format)
+                   :download (format nil "naca-~a.~a"
+                                     (remove-if-not #'digit-char-p
+                                                    (string (the selected-airfoil)))
+                                     extension)
+                   :class "inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                   (str label)))))
+      (with-lhtml-string ()
+        (:div :class "flex flex-wrap gap-6 mt-6 pt-6 border-t border-gray-200"
+          (str (link "Download IGES" "iges" "igs"))
+          (str (link "Download STEP" "step" "stp")))))))
 
   :functions
   (;; One small stat card: label/value rows under a heading.
