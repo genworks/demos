@@ -1,0 +1,144 @@
+;;;; -*- Mode: Lisp; Package: demos-common -*-
+;;;;
+;;;; Shared chrome for the public demo pages: the stylesheet hookup,
+;;;; Tailwind card/form helpers, the live source-code panes, and the
+;;;; standard x3dom viewport pair.  Each demo mixes this in ahead of
+;;;; session-control-mixin and base-html-page and keeps only its own
+;;;; page content, form controls, and model.
+
+(in-package :demos-common)
+
+(define-object demo-ui-mixin ()
+
+  :documentation
+  (:description "Chrome shared by every public demo page: Tailwind
+stylesheet hookup, card and parameter-field helpers, source-code panes
+reconstituted live from the in-memory definitions, and a standard
+x3dom viewport pair driven by the demo's objects list."
+   :author "Genworks International")
+
+  :input-slots
+  (("List of define-object symbols shown in the Source Code card."
+    source-pane-objects nil)
+   ("List of supporting defun symbols shown after the object panes."
+    source-pane-functions nil)
+
+   ;; Standard single-viewport setup; demos override the vector to
+   ;; pick their hero camera angle.
+   (view-projection-key :demo-view)
+   (view-projection-vector (unitize-vector (make-vector 1 -1 0.5))))
+
+  :computed-slots
+  ((use-svgpanzoom? t)
+   (use-x3dom? t)
+
+   (additional-header-content
+    (string-append
+     (with-lhtml-string () (:script (str (the viewport-renderers-js-baseline))))
+     (call-next-method)
+     (with-lhtml-string ()
+       (:link :href "/demo/css/demos-style.css"
+              :rel "stylesheet" :type "text/css"))))
+
+   (source-code-panes
+    (apply #'string-append
+           (append
+            (mapcar #'(lambda (sym) (the (object-source-pane sym)))
+                    (the source-pane-objects))
+            (mapcar #'(lambda (sym) (the (defun-source-pane sym)))
+                    (the source-pane-functions))))))
+
+  :functions
+  (;; The "All demos" back link and the page heading.
+   (page-intro
+    (heading blurb)
+    (with-lhtml-string ()
+      (:div :class "mb-4"
+        (:a :href "/demos/index.html"
+            :class "text-sm font-medium text-indigo-600 hover:text-indigo-500"
+            "&larr; All demos"))
+      (:div :class "text-center mb-8"
+        (:h1 :class "text-4xl font-bold text-gray-900 mb-2" (str heading))
+        (:p :class "text-lg text-gray-600" (str blurb)))))
+
+   ;; One white card with the standard gray header band.  CONTENT is a
+   ;; pre-rendered html string; wrap it yourself when it needs padding
+   ;; or scrolling (e.g. "p-6", "overflow-x-auto").
+   (card
+    (&key title subtitle content)
+    (with-lhtml-string ()
+      (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
+        (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
+          (:h3 :class "text-lg font-medium text-gray-900" (str title))
+          (when subtitle
+            (htm (:p :class "text-sm text-gray-600" (str subtitle)))))
+        (str content))))
+
+   ;; One labeled parameter field: a form-control wrapped in the
+   ;; shared label + bordered-box styling used by every parameter.
+   (param-field
+    (label control)
+    (with-lhtml-string ()
+      (:div :class "space-y-2"
+        (:label :class "block text-sm font-medium text-gray-700"
+                :for (the-object control id) (str label))
+        (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
+          (str (the-object control form-control))))))
+
+   ;; The form's submit button, sized to the parameter grid.
+   (submit-button
+    (&key (label "Rebuild") (wrapper-class "flex items-end col-span-2"))
+    (with-lhtml-string ()
+      (:div :class wrapper-class
+        (:button :type "submit"
+                 :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                 (str label)))))
+
+   ;; One collapsible pane showing a define-object, reconstituted live
+   ;; from the in-memory definition.
+   (object-source-pane
+    (sym)
+    (with-lhtml-string ()
+      (:details :class "border-b border-gray-100"
+        (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
+          (fmt "(define-object ~a ...)" (the (pane-label sym))))
+        (:div :class "src-pane"
+          (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
+
+   ;; Same, for a supporting plain function, via function-source-string
+   ;; (see source-strings.lisp).  Renders nothing when no source is
+   ;; recorded.
+   (defun-source-pane
+    (sym)
+    (let ((source (function-source-string sym)))
+      (if source
+          (with-lhtml-string ()
+            (:details :class "border-b border-gray-100"
+              (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
+                (fmt "(defun ~a ...)" (the (pane-label sym))))
+              (:div :class "src-pane"
+                (wmd (format nil "```lisp~%~a```" source)))))
+          "")))
+
+   ;; Package-qualify the label only when the symbol lives outside the
+   ;; demo's own package.
+   (pane-label
+    (sym)
+    (string-downcase
+     (if (eq (symbol-package sym) (symbol-package (the type)))
+         (symbol-name sym)
+         (format nil "~a:~a"
+                 (package-name (symbol-package sym)) (symbol-name sym))))))
+
+  :objects
+  ((viewport-area :type 'base-html-div
+                  :div-class "absolute inset-0"
+                  :js-to-eval (the view-x3dom js-to-eval)
+                  :inner-html (the view-x3dom inner-html))
+
+   (view-x3dom :type 'viewport-html-div
+               :dom-id (the viewport-area dom-id)
+               :image-format :x3dom
+               :projection-key (the view-projection-key)
+               :projection-vector (the view-projection-vector)
+               :display-list-object-roots (the objects))))

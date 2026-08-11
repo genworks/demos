@@ -1,14 +1,15 @@
 ;;;; -*- Mode: Lisp; Package: brick-wall-demo -*-
 ;;;;
-;;;; Web UI: base-html-page + viewport-html-div with x3dom, Tailwind
-;;;; utility classes compiled into the shared /demo/css/demos-style.css
-;;;; (build:demos in /projects/apps/tailwind).  session-control-mixin
-;;;; keeps public instances mortal: without it every visit and every
-;;;; crawler hit mints an immortal instance.
+;;;; Web UI on the shared demo chrome (demos-common:demo-ui-mixin):
+;;;; this file keeps only the brick-wall-specific page content, form
+;;;; controls, and model hookup.  session-control-mixin keeps public
+;;;; instances mortal: without it every visit and every crawler hit
+;;;; mints an immortal instance.
 
 (in-package :brick-wall-demo)
 
-(define-object brick-wall-ui (session-control-mixin base-html-page)
+(define-object brick-wall-ui (demos-common:demo-ui-mixin
+                              session-control-mixin base-html-page)
 
   :documentation
   (:description "Interactive brick-wall demo page: bond pattern and
@@ -19,6 +20,8 @@ quantity takeoff computed from the same declarative rules."
   :input-slots
   ((title "Brick Wall Demo")
    (objects (list (the model)))
+   (view-projection-key :wall-view)
+   (view-projection-vector (unitize-vector (make-vector 0.45 -1 0.3)))
 
    (wall-length 96 :settable)
    (wall-height 48 :settable)
@@ -27,52 +30,32 @@ quantity takeoff computed from the same declarative rules."
    (mortar-joint 0.375 :settable))
 
   :computed-slots
-  ((use-svgpanzoom? t)
-   (use-x3dom? t)
-
-   (additional-header-content
-    (string-append
-     (with-lhtml-string () (:script (str (the viewport-renderers-js-baseline))))
-     (call-next-method)
-     (with-lhtml-string ()
-       (:link :href "/demo/css/demos-style.css"
-              :rel "stylesheet" :type "text/css"))))
+  ((source-pane-objects '(brick-wall wall-course brick-wall-ui
+                          demos-common:demo-ui-mixin))
 
    (body
     (with-lhtml-string ()
       (:div :class "max-w-5xl mx-auto p-8"
-        (:div :class "mb-4"
-          (:a :href "/demos/index.html"
-              :class "text-sm font-medium text-indigo-600 hover:text-indigo-500"
-              "&larr; All demos"))
-        (:div :class "text-center mb-8"
-          (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
-               "Brick Wall Pattern")
-          (:p :class "text-lg text-gray-600"
-              "Quantified sequences and pattern repetition: bond rules place every brick, and the quantity takeoff falls out for free."))
-        (:div :class "bg-white rounded-lg shadow-lg p-6 mb-8"
-          (:h2 :class "text-xl font-semibold text-gray-800 mb-4" "Parameters")
-          (str (the control-form)))
-        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
-          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
-            (:h3 :class "text-lg font-medium text-gray-900" "3D View"))
-          (:div :class "p-6 relative" :style "height: 520px;"
-            (str (the viewport-area div))))
-        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
-          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
-            (:h3 :class "text-lg font-medium text-gray-900" "Quantity Takeoff")
-            (:p :class "text-sm text-gray-600"
-                (fmt "Snapped to whole modules: ~,1f in long, ~,1f in tall."
-                     (float (the model effective-length))
-                     (float (the model effective-height)))))
-          (:div :class "overflow-x-auto"
-            (str (the quantities-table))))
-        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden"
-          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
-            (:h3 :class "text-lg font-medium text-gray-900" "Source Code")
-            (:p :class "text-sm text-gray-600"
-                "The complete Gendl source for this demo, reconstituted live from the in-memory object definitions serving this page."))
-          (str (the source-code-panes))))))
+        (str (the (page-intro "Brick Wall Pattern"
+                              "Quantified sequences and pattern repetition: bond rules place every brick, and the quantity takeoff falls out for free.")))
+        (str (the (card :title "Parameters"
+                        :content (with-lhtml-string ()
+                                   (:div :class "p-6"
+                                     (str (the control-form)))))))
+        (str (the (card :title "3D View"
+                        :content (with-lhtml-string ()
+                                   (:div :class "p-6 relative" :style "height: 520px;"
+                                     (str (the viewport-area div)))))))
+        (str (the (card :title "Quantity Takeoff"
+                        :subtitle (format nil "Snapped to whole modules: ~,1f in long, ~,1f in tall."
+                                          (float (the model effective-length))
+                                          (float (the model effective-height)))
+                        :content (with-lhtml-string ()
+                                   (:div :class "overflow-x-auto"
+                                     (str (the quantities-table)))))))
+        (str (the (card :title "Source Code"
+                        :subtitle "The complete Gendl source for this demo, reconstituted live from the in-memory object definitions serving this page."
+                        :content (the source-code-panes)))))))
 
    (quantities-table
     (let ((model (the model)))
@@ -93,18 +76,6 @@ quantity takeoff computed from the same declarative rules."
                  (:td :class "px-6 py-3 w-40 text-sm text-right tabular-nums text-gray-700"
                       (str (second row)))))))))))
 
-   (source-code-panes
-    (apply #'string-append
-           (mapcar
-            (lambda (sym)
-              (with-lhtml-string ()
-                (:details :class "border-b border-gray-100"
-                  (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
-                    (fmt "(define-object ~(~a~) ...)" sym))
-                  (:div :class "src-pane"
-                    (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
-            '(brick-wall wall-course brick-wall-ui))))
-
    (control-form
     (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
       (str (the (param-field "Wall Length (in)"   (the wall-length-control))))
@@ -113,22 +84,7 @@ quantity takeoff computed from the same declarative rules."
       (str (the (param-field "Brick Height (in)"  (the brick-height-control))))
       (str (the (param-field "Mortar Joint (in)"  (the mortar-joint-control))))
       (str (the (param-field "Bond Pattern"       (the bond-control))))
-      (:div :class "flex items-end col-span-2"
-        (:button :type "submit"
-                 :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
-                 "Rebuild")))))
-
-  :functions
-  (;; One labeled parameter field: a form-control wrapped in the
-   ;; shared label + bordered-box styling used by every parameter.
-   (param-field
-    (label control)
-    (with-lhtml-string ()
-      (:div :class "space-y-2"
-        (:label :class "block text-sm font-medium text-gray-700"
-                :for (the-object control id) (str label))
-        (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-          (str (the-object control form-control)))))))
+      (str (the (submit-button))))))
 
   :objects
   ((wall-length-control :type 'number-form-control
@@ -163,16 +119,4 @@ quantity takeoff computed from the same declarative rules."
           :brick-length (the brick-length-control value)
           :brick-height (the brick-height-control value)
           :mortar-joint (the mortar-joint-control value)
-          :bond (the bond-control value))
-
-   (viewport-area :type 'base-html-div
-                  :div-class "absolute inset-0"
-                  :js-to-eval (the view-x3dom js-to-eval)
-                  :inner-html (the view-x3dom inner-html))
-
-   (view-x3dom :type 'viewport-html-div
-               :dom-id (the viewport-area dom-id)
-               :image-format :x3dom
-               :projection-key :wall-view
-               :projection-vector (unitize-vector (make-vector 0.45 -1 0.3))
-               :display-list-object-roots (the objects))))
+          :bond (the bond-control value))))

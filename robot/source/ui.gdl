@@ -1,14 +1,15 @@
 ;;;; -*- Mode: Lisp; Package: robot-demo -*-
 ;;;;
-;;;; Web UI: base-html-page + viewport-html-div with x3dom, Tailwind
-;;;; utility classes compiled into the shared /demo/css/demos-style.css
-;;;; (build:demos in /projects/apps/tailwind).  session-control-mixin
-;;;; keeps public instances mortal: without it every visit and every
-;;;; crawler hit mints an immortal instance.
+;;;; Web UI on the shared demo chrome (demos-common:demo-ui-mixin):
+;;;; this file keeps only the robot-specific page content, form
+;;;; controls, and model hookup.  session-control-mixin keeps public
+;;;; instances mortal: without it every visit and every crawler hit
+;;;; mints an immortal instance.
 
 (in-package :robot-demo)
 
-(define-object robot-ui (session-control-mixin base-html-page)
+(define-object robot-ui (demos-common:demo-ui-mixin
+                         session-control-mixin base-html-page)
 
   :documentation
   (:description "Interactive robot demo page: the classic GDL robot
@@ -19,6 +20,8 @@ live with form controls."
   :input-slots
   ((title "Robot Assembly Demo")
    (objects (list (the model)))
+   (view-projection-key :robot-view)
+   (view-projection-vector (unitize-vector (make-vector 0.7 -1 0.45)))
 
    (robot-height 10 :settable)
    (robot-width 5 :settable)
@@ -31,66 +34,35 @@ live with form controls."
    (pincer-distance-right 0.45 :settable))
 
   :computed-slots
-  ((use-svgpanzoom? t)
-   (use-x3dom? t)
-
-   (additional-header-content
-    (string-append
-     (with-lhtml-string () (:script (str (the viewport-renderers-js-baseline))))
-     (call-next-method)
-     (with-lhtml-string ()
-       (:link :href "/demo/css/demos-style.css"
-              :rel "stylesheet" :type "text/css"))))
+  ((source-pane-objects '(robot robot-body robot-arm robot-base robot-ui
+                          demos-common:demo-ui-mixin))
 
    (body
     (with-lhtml-string ()
       (:div :class "max-w-5xl mx-auto p-8"
-        (:div :class "mb-4"
-          (:a :href "/demos/index.html"
-              :class "text-sm font-medium text-indigo-600 hover:text-indigo-500"
-              "&larr; All demos"))
-        (:div :class "text-center mb-8"
-          (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
-               "Robot Assembly")
-          (:p :class "text-lg text-gray-600"
-              "The classic GDL robot example, reborn in the 2026 demo framework -- pose it live."))
-        (:div :class "bg-white rounded-lg shadow-lg p-6 mb-8"
-          (:h2 :class "text-xl font-semibold text-gray-800 mb-4" "Parameters")
-          (str (the control-form)))
-        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
-          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
-            (:h3 :class "text-lg font-medium text-gray-900" "3D View"))
-          (:div :class "p-6 relative" :style "height: 600px;"
-            (str (the viewport-area div))))
-        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
-          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
-            (:h3 :class "text-lg font-medium text-gray-900" "About This Demo"))
-          (:div :class "px-6 py-4 text-sm text-gray-700 space-y-2"
-            (:p "This robot first appeared in 2002 as the introductory GDL
+        (str (the (page-intro "Robot Assembly"
+                              "The classic GDL robot example, reborn in the 2026 demo framework -- pose it live.")))
+        (str (the (card :title "Parameters"
+                        :content (with-lhtml-string ()
+                                   (:div :class "p-6"
+                                     (str (the control-form)))))))
+        (str (the (card :title "3D View"
+                        :content (with-lhtml-string ()
+                                   (:div :class "p-6 relative" :style "height: 600px;"
+                                     (str (the viewport-area div)))))))
+        (str (the (card :title "About This Demo"
+                        :content (with-lhtml-string ()
+                                   (:div :class "px-6 py-4 text-sm text-gray-700 space-y-2"
+                                     (:p "This robot first appeared in 2002 as the introductory GDL
 training example: a handful of box primitives composed with declarative
 positioning and orientation rules.")
-            (:p "The geometry definitions below are essentially the 2002
+                                     (:p "The geometry definitions below are essentially the 2002
 originals.  Only the user interface is new -- form-control objects, an
 x3dom viewport, and session-controlled instances replace the old
-html-format lens.")))
-        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden"
-          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
-            (:h3 :class "text-lg font-medium text-gray-900" "Source Code")
-            (:p :class "text-sm text-gray-600"
-                "The complete Gendl source for this demo, reconstituted live from the in-memory object definitions serving this page."))
-          (str (the source-code-panes))))))
-
-   (source-code-panes
-    (apply #'string-append
-           (mapcar
-            (lambda (sym)
-              (with-lhtml-string ()
-                (:details :class "border-b border-gray-100"
-                  (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
-                    (fmt "(define-object ~(~a~) ...)" sym))
-                  (:div :class "src-pane"
-                    (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
-            '(robot robot-body robot-arm robot-base robot-ui))))
+html-format lens."))))))
+        (str (the (card :title "Source Code"
+                        :subtitle "The complete Gendl source for this demo, reconstituted live from the in-memory object definitions serving this page."
+                        :content (the source-code-panes)))))))
 
    (control-form
     (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
@@ -104,22 +76,7 @@ html-format lens.")))
       (str (the (param-field "Right Arm (deg)"  (the arm-angle-right-control))))
       (str (the (param-field "Left Grip"        (the pincer-left-control))))
       (str (the (param-field "Right Grip"       (the pincer-right-control))))
-      (:div :class "flex items-end col-span-2"
-        (:button :type "submit"
-                 :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
-                 "Rebuild")))))
-
-  :functions
-  (;; One labeled parameter field: a form-control wrapped in the
-   ;; shared label + bordered-box styling used by every parameter.
-   (param-field
-    (label control)
-    (with-lhtml-string ()
-      (:div :class "space-y-2"
-        (:label :class "block text-sm font-medium text-gray-700"
-                :for (the-object control id) (str label))
-        (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-          (str (the-object control form-control)))))))
+      (str (the (submit-button))))))
 
   :objects
   ((height-control :type 'number-form-control
@@ -177,16 +134,4 @@ html-format lens.")))
           :pincer-distance-left (the pincer-left-control value)
           :pincer-distance-right (the pincer-right-control value)
           :transparency 0
-          :shininess 0.8)
-
-   (viewport-area :type 'base-html-div
-                  :div-class "absolute inset-0"
-                  :js-to-eval (the view-x3dom js-to-eval)
-                  :inner-html (the view-x3dom inner-html))
-
-   (view-x3dom :type 'viewport-html-div
-               :dom-id (the viewport-area dom-id)
-               :image-format :x3dom
-               :projection-key :robot-view
-               :projection-vector (unitize-vector (make-vector 0.7 -1 0.45))
-               :display-list-object-roots (the objects))))
+          :shininess 0.8)))

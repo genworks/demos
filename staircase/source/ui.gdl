@@ -1,14 +1,15 @@
 ;;;; -*- Mode: Lisp; Package: staircase-demo -*-
 ;;;;
-;;;; Web UI: base-html-page + viewport-html-div with x3dom, Tailwind
-;;;; utility classes compiled into the shared /demo/css/demos-style.css
-;;;; (build:demos in /projects/apps/tailwind).  session-control-mixin
-;;;; keeps public instances mortal: without it every visit and every
-;;;; crawler hit mints an immortal instance.
+;;;; Web UI on the shared demo chrome (demos-common:demo-ui-mixin):
+;;;; this file keeps only the staircase-specific page content, form
+;;;; controls, and model hookup.  session-control-mixin keeps public
+;;;; instances mortal: without it every visit and every crawler hit
+;;;; mints an immortal instance.
 
 (in-package :staircase-demo)
 
-(define-object staircase-ui (session-control-mixin base-html-page)
+(define-object staircase-ui (demos-common:demo-ui-mixin
+                             session-control-mixin base-html-page)
 
   :documentation
   (:description "Interactive staircase demo page: parameter form, live
@@ -19,6 +20,8 @@ parts."
   :input-slots
   ((title "Parametric Staircase Demo")
    (objects (list (the model)))
+   (view-projection-key :staircase-view)
+   (view-projection-vector (unitize-vector (make-vector 1 -0.6 0.35)))
 
    (total-rise 96 :settable)
    (total-run 144 :settable)
@@ -32,54 +35,36 @@ parts."
    (include-skirt? nil :settable))
 
   :computed-slots
-  ((use-svgpanzoom? t)
-   (use-x3dom? t)
-
-   (additional-header-content
-    (string-append
-     (with-lhtml-string () (:script (str (the viewport-renderers-js-baseline))))
-     (call-next-method)
-     (with-lhtml-string ()
-       (:link :href "/demo/css/demos-style.css"
-              :rel "stylesheet" :type "text/css"))))
+  ((source-pane-objects '(staircase tread stringer staircase-ui
+                          demos-common:demo-ui-mixin))
+   (source-pane-functions '(lumber:nominal-section lumber:lumber-type
+                            lumber:bill-of-materials))
 
    (body
     (with-lhtml-string ()
       (:div :class "max-w-5xl mx-auto p-8"
-        (:div :class "mb-4"
-          (:a :href "/demos/index.html"
-              :class "text-sm font-medium text-indigo-600 hover:text-indigo-500"
-              "&larr; All demos"))
-        (:div :class "text-center mb-8"
-          (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
-               "Parametric Staircase")
-          (:p :class "text-lg text-gray-600"
-              "An outdoor staircase built entirely from parametric Gendl code -- adjust the parameters and rebuild live."))
-        (:div :class "bg-white rounded-lg shadow-lg p-6 mb-8"
-          (:h2 :class "text-xl font-semibold text-gray-800 mb-4" "Parameters")
-          (str (the control-form)))
-        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
-          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
-            (:h3 :class "text-lg font-medium text-gray-900" "3D View"))
-          (:div :class "p-6 relative" :style "height: 600px;"
-            (str (the viewport-area div))))
-        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden"
-          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
-            (:h3 :class "text-lg font-medium text-gray-900" "Cut List")
-            (:p :class "text-sm text-gray-600"
-                (fmt "~a steps, ~,1f in rise over ~,1f in run (~,1f deg)"
-                     (the number-of-steps-control value)
-                     (float (the total-rise-control value))
-                     (float (the total-run-control value))
-                     (the model slope-angle))))
-          (:div :class "overflow-x-auto"
-            (str (the bom-table))))
-        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mt-8"
-          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
-            (:h3 :class "text-lg font-medium text-gray-900" "Source Code")
-            (:p :class "text-sm text-gray-600"
-                "The complete Gendl source for this demo: object definitions reconstituted live from the in-memory definitions serving this page, supporting lumber-system functions via the Lisp's own source records."))
-          (str (the source-code-panes))))))
+        (str (the (page-intro "Parametric Staircase"
+                              "An outdoor staircase built entirely from parametric Gendl code -- adjust the parameters and rebuild live.")))
+        (str (the (card :title "Parameters"
+                        :content (with-lhtml-string ()
+                                   (:div :class "p-6"
+                                     (str (the control-form)))))))
+        (str (the (card :title "3D View"
+                        :content (with-lhtml-string ()
+                                   (:div :class "p-6 relative" :style "height: 600px;"
+                                     (str (the viewport-area div)))))))
+        (str (the (card :title "Cut List"
+                        :subtitle (format nil "~a steps, ~,1f in rise over ~,1f in run (~,1f deg)"
+                                          (the number-of-steps-control value)
+                                          (float (the total-rise-control value))
+                                          (float (the total-run-control value))
+                                          (the model slope-angle))
+                        :content (with-lhtml-string ()
+                                   (:div :class "overflow-x-auto"
+                                     (str (the bom-table)))))))
+        (str (the (card :title "Source Code"
+                        :subtitle "The complete Gendl source for this demo: object definitions reconstituted live from the in-memory definitions serving this page, supporting lumber-system functions via the Lisp's own source records."
+                        :content (the source-code-panes)))))))
 
    (bom-table
     (with-lhtml-string ()
@@ -91,33 +76,18 @@ parts."
             (:th :class "px-6 py-3 w-40 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" "Cut (in)")
             (:th :class "px-6 py-3 w-40 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" "Buy (ft)")))
         (:tbody :class "divide-y divide-gray-100"
-          (str (the bom-table-rows))))))
-
-   (bom-table-rows
-    (apply #'string-append
-           (mapcar
-            (lambda (line)
-              (with-lhtml-string ()
-                (:tr :class "hover:bg-gray-50"
-                  (:td :class "px-6 py-3 text-sm text-right tabular-nums text-gray-900"
-                       (fmt "~d" (getf line :count)))
-                  (:td :class "px-6 py-3 text-sm font-medium text-gray-900"
-                       (str (getf line :stock)))
-                  (:td :class "px-6 py-3 text-sm text-right tabular-nums text-gray-700"
-                       (fmt "~,2f" (float (getf line :cut-length))))
-                  (:td :class "px-6 py-3 text-sm text-right tabular-nums text-gray-700"
-                       (str (let ((buy (getf line :buy-length)))
-                              (if buy (format nil "~d" (floor buy 12)) "special")))))))
-            (the model bill-of-materials))))
-
-   (source-code-panes
-    (apply #'string-append
-           (append
-            (mapcar (lambda (sym) (the (object-source-pane sym)))
-                    '(staircase tread stringer staircase-ui))
-            (mapcar (lambda (sym) (the (defun-source-pane sym)))
-                    '(lumber:nominal-section lumber:lumber-type
-                      lumber:bill-of-materials lumber:bom-text)))))
+          (dolist (line (the model bill-of-materials))
+            (htm
+             (:tr :class "hover:bg-gray-50"
+               (:td :class "px-6 py-3 text-sm text-right tabular-nums text-gray-900"
+                    (fmt "~d" (getf line :count)))
+               (:td :class "px-6 py-3 text-sm font-medium text-gray-900"
+                    (str (getf line :stock)))
+               (:td :class "px-6 py-3 text-sm text-right tabular-nums text-gray-700"
+                    (fmt "~,2f" (float (getf line :cut-length))))
+               (:td :class "px-6 py-3 text-sm text-right tabular-nums text-gray-700"
+                    (str (let ((buy (getf line :buy-length)))
+                           (if buy (format nil "~d" (floor buy 12)) "special")))))))))))
 
    (control-form
     (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
@@ -131,54 +101,7 @@ parts."
       (str (the (param-field "Handrail"            (the handrail-control))))
       (str (the (param-field "Risers"              (the risers-control))))
       (str (the (param-field "Skirt / Fascia"      (the skirt-control))))
-      (:div :class "flex items-end col-span-2"
-        (:button :type "submit"
-                 :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
-                 "Rebuild")))))
-
-  :functions
-  (;; One labeled parameter field: a form-control wrapped in the
-   ;; shared label + bordered-box styling used by every parameter.
-   (param-field
-    (label control)
-    (with-lhtml-string ()
-      (:div :class "space-y-2"
-        (:label :class "block text-sm font-medium text-gray-700"
-                :for (the-object control id) (str label))
-        (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-          (str (the-object control form-control))))))
-
-   ;; One collapsible pane showing a define-object, reconstituted live
-   ;; from the in-memory definition.
-   (object-source-pane
-    (sym)
-    (with-lhtml-string ()
-      (:details :class "border-b border-gray-100"
-        (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
-          (fmt "(define-object ~(~a~) ...)" sym))
-        (:div :class "src-pane"
-          (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
-
-   ;; Same, for a supporting plain function, via function-source-string
-   ;; (see patches.lisp).  Renders nothing when no source is recorded.
-   (defun-source-pane
-    (sym)
-    (let ((source (function-source-string sym)))
-      (if source
-          (with-lhtml-string ()
-            (:details :class "border-b border-gray-100"
-              (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
-                (fmt "(defun ~a ...)"
-                     (string-downcase
-                      (if (eq (symbol-package sym)
-                              (find-package :staircase-demo))
-                          (symbol-name sym)
-                          (format nil "~a:~a"
-                                  (package-name (symbol-package sym))
-                                  (symbol-name sym))))))
-              (:div :class "src-pane"
-                (wmd (format nil "```lisp~%~a```" source)))))
-          ""))))
+      (str (the (submit-button))))))
 
   :objects
   ((total-rise-control :type 'number-form-control
@@ -237,16 +160,4 @@ parts."
           :handrail-height (the handrail-height-control value)
           :handrail? (eq (the handrail-control value) :yes)
           :include-risers? (eq (the risers-control value) :yes)
-          :include-skirt? (eq (the skirt-control value) :yes))
-
-   (viewport-area :type 'base-html-div
-                 :div-class "absolute inset-0"
-                 :js-to-eval (the view-x3dom js-to-eval)
-                 :inner-html (the view-x3dom inner-html))
-
-   (view-x3dom :type 'viewport-html-div
-              :dom-id (the viewport-area dom-id)
-              :image-format :x3dom
-              :projection-key :staircase-view
-              :projection-vector (unitize-vector (make-vector 1 -0.6 0.35))
-              :display-list-object-roots (the objects))))
+          :include-skirt? (eq (the skirt-control value) :yes))))

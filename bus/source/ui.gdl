@@ -1,14 +1,15 @@
 ;;;; -*- Mode: Lisp; Package: genworks.demos.bus -*-
 ;;;;
-;;;; Web UI: base-html-page + viewport-html-div with x3dom, Tailwind
-;;;; utility classes compiled into the shared /demo/css/demos-style.css
-;;;; (build:demos in /projects/apps/tailwind).  session-control-mixin
-;;;; keeps public instances mortal: without it every visit and every
-;;;; crawler hit mints an immortal instance.
+;;;; Web UI on the shared demo chrome (demos-common:demo-ui-mixin):
+;;;; this file keeps only the bus-specific page content, form
+;;;; controls, and model hookup.  session-control-mixin keeps public
+;;;; instances mortal: without it every visit and every crawler hit
+;;;; mints an immortal instance.
 
 (in-package :genworks.demos.bus)
 
-(define-object bus-ui (session-control-mixin base-html-page)
+(define-object bus-ui (demos-common:demo-ui-mixin
+                       session-control-mixin base-html-page)
 
   :documentation
   (:description "Interactive school-bus demo page: the classic GDL bus
@@ -20,6 +21,8 @@ checks -- both surfaced on the page."
   :input-slots
   ((title "School Bus Demo")
    (objects (list (the model)))
+   (view-projection-key :bus-view)
+   (view-projection-vector (unitize-vector (make-vector 1 0.7 0.8)))
 
    (wheelbase 300 :settable)
    (track 96 :settable)
@@ -29,53 +32,34 @@ checks -- both surfaced on the page."
    (minimum-legroom 7 :settable))
 
   :computed-slots
-  ((use-svgpanzoom? t)
-   (use-x3dom? t)
-
-   (additional-header-content
-    (string-append
-     (with-lhtml-string () (:script (str (the viewport-renderers-js-baseline))))
-     (call-next-method)
-     (with-lhtml-string ()
-       (:link :href "/demo/css/demos-style.css"
-              :rel "stylesheet" :type "text/css"))))
+  ((source-pane-objects '(assembly chassis rule-ackermann interior
+                          seating-section inter-seat-clearance-check
+                          bus-ui demos-common:demo-ui-mixin))
 
    (body
     (with-lhtml-string ()
       (:div :class "max-w-5xl mx-auto p-8"
-        (:div :class "mb-4"
-          (:a :href "/demos/index.html"
-              :class "text-sm font-medium text-indigo-600 hover:text-indigo-500"
-              "&larr; All demos"))
-        (:div :class "text-center mb-8"
-          (:h1 :class "text-4xl font-bold text-gray-900 mb-2"
-               "School Bus")
-          (:p :class "text-lg text-gray-600"
-              "The classic GDL wireframe bus -- steer it, stretch it, and watch the design rules respond."))
-        (:div :class "bg-white rounded-lg shadow-lg p-6 mb-8"
-          (:h2 :class "text-xl font-semibold text-gray-800 mb-4" "Parameters")
-          (str (the control-form)))
-        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
-          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
-            (:h3 :class "text-lg font-medium text-gray-900" "3D View"))
-          (:div :class "p-6 relative" :style "height: 600px;"
-            (str (the viewport-area div))))
-        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden mb-8"
-          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
-            (:h3 :class "text-lg font-medium text-gray-900" "Design Rules")
-            (:p :class "text-sm text-gray-600"
-                "Live KBE checks evaluated against the current parameters."))
-          (:div :class "px-6 py-4 grid grid-cols-1 md:grid-cols-2 gap-6"
-            (str (the legroom-panel))
-            (str (the overhang-panel)))
-          (:div :class "px-6 pb-6"
-            (str (the ackermann-panel))))
-        (:div :class "bg-white rounded-lg shadow-lg overflow-hidden"
-          (:div :class "px-6 py-4 bg-gray-50 border-b border-gray-200"
-            (:h3 :class "text-lg font-medium text-gray-900" "Source Code")
-            (:p :class "text-sm text-gray-600"
-                "The complete Gendl source for this demo, reconstituted live from the in-memory object definitions serving this page."))
-          (str (the source-code-panes))))))
+        (str (the (page-intro "School Bus"
+                              "The classic GDL wireframe bus -- steer it, stretch it, and watch the design rules respond.")))
+        (str (the (card :title "Parameters"
+                        :content (with-lhtml-string ()
+                                   (:div :class "p-6"
+                                     (str (the control-form)))))))
+        (str (the (card :title "3D View"
+                        :content (with-lhtml-string ()
+                                   (:div :class "p-6 relative" :style "height: 600px;"
+                                     (str (the viewport-area div)))))))
+        (str (the (card :title "Design Rules"
+                        :subtitle "Live KBE checks evaluated against the current parameters."
+                        :content (with-lhtml-string ()
+                                   (:div :class "px-6 py-4 grid grid-cols-1 md:grid-cols-2 gap-6"
+                                     (str (the legroom-panel))
+                                     (str (the overhang-panel)))
+                                   (:div :class "px-6 pb-6"
+                                     (str (the ackermann-panel)))))))
+        (str (the (card :title "Source Code"
+                        :subtitle "The complete Gendl source for this demo, reconstituted live from the in-memory object definitions serving this page."
+                        :content (the source-code-panes)))))))
 
    (legroom-panel
     (let ((check (the model interior sections inter-seat-clearance-check)))
@@ -142,19 +126,6 @@ checks -- both surfaced on the page."
                          (:td :class "px-4 py-2 text-sm text-right tabular-nums text-gray-700"
                               (fmt "~,2f" (nth pos ideals)))))))))))))))
 
-   (source-code-panes
-    (apply #'string-append
-           (mapcar
-            (lambda (sym)
-              (with-lhtml-string ()
-                (:details :class "border-b border-gray-100"
-                  (:summary :class "px-6 py-3 cursor-pointer select-none font-mono text-sm font-medium text-indigo-700 hover:bg-gray-50"
-                    (fmt "(define-object ~(~a~) ...)" sym))
-                  (:div :class "src-pane"
-                    (wmd (format nil "```lisp~%~a```" (gdl:definition-source-string sym)))))))
-            '(assembly chassis rule-ackermann interior seating-section
-              inter-seat-clearance-check bus-ui))))
-
    (control-form
     (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
       (str (the (param-field "Wheelbase (in)"   (the wheelbase-control))))
@@ -163,22 +134,7 @@ checks -- both surfaced on the page."
       (str (the (param-field "Turn Angle (deg)" (the turn-angle-control))))
       (str (the (param-field "Seat Rows"        (the rows-control))))
       (str (the (param-field "Min Legroom (in)" (the legroom-control))))
-      (:div :class "flex items-end col-span-2"
-        (:button :type "submit"
-                 :class "w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
-                 "Rebuild")))))
-
-  :functions
-  (;; One labeled parameter field: a form-control wrapped in the
-   ;; shared label + bordered-box styling used by every parameter.
-   (param-field
-    (label control)
-    (with-lhtml-string ()
-      (:div :class "space-y-2"
-        (:label :class "block text-sm font-medium text-gray-700"
-                :for (the-object control id) (str label))
-        (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
-          (str (the-object control form-control)))))))
+      (str (the (submit-button))))))
 
   :objects
   ((wheelbase-control :type 'number-form-control
@@ -211,16 +167,4 @@ checks -- both surfaced on the page."
           :height (the height-control value)
           :turn-angle (the turn-angle-control value)
           :number-of-rows (the rows-control value)
-          :minimum-inter-seat-clearance (the legroom-control value))
-
-   (viewport-area :type 'base-html-div
-                  :div-class "absolute inset-0"
-                  :js-to-eval (the view-x3dom js-to-eval)
-                  :inner-html (the view-x3dom inner-html))
-
-   (view-x3dom :type 'viewport-html-div
-               :dom-id (the viewport-area dom-id)
-               :image-format :x3dom
-               :projection-key :bus-view
-               :projection-vector (unitize-vector (make-vector 1 0.7 0.8))
-               :display-list-object-roots (the objects))))
+          :minimum-inter-seat-clearance (the legroom-control value))))

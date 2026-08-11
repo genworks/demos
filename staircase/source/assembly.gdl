@@ -67,17 +67,6 @@ from the same lumber part objects."
    ;; the slope
    (slope-factor (/ (the slope-length) (the total-run)))
 
-   ;; Shared tilt for anything running the length of the slope
-   ;; (stringers, skirts, rail): rotate the object's own rear and top
-   ;; axes about its right axis by the slope angle.
-   (sloped-orientation
-    (alignment :rear (rotate-vector-d (the (face-normal-vector :rear))
-                                      (the slope-angle)
-                                      (the (face-normal-vector :right)))
-               :top  (rotate-vector-d (the (face-normal-vector :top))
-                                      (the slope-angle)
-                                      (the (face-normal-vector :right)))))
-
    ;; Section dimensions from the lumber tables.
    (tread-board-width (second (lumber:nominal-section (the tread-nominal))))
    (tread-thickness   (first (lumber:nominal-section (the tread-nominal))))
@@ -107,24 +96,8 @@ from the same lumber part objects."
                        (push i result)))
                    (nreverse result)))
 
-   ;; The rail spans bottom post to top post plus a little overhang,
-   ;; its underside riding the post tops.
-   (rail-span-y  (+ (* (1- (the number-of-steps)) (the run-per-step))
-                    (the post-size)
-                    (* 2 (the rail-overhang))))
-   (rail-length  (* (the rail-span-y) (the slope-factor)))
-   (rail-center-y (* (1- (the number-of-steps)) (/ (the run-per-step) 2)))
-   (rail-center-z (+ (the (post-top-z (/ (1- (the number-of-steps)) 2)))
-                     (/ (the rail-depth) 2)))
-
    ;; Aggregated from the lumber parts in the tree; see demos/lumber.
    (bill-of-materials (lumber:bill-of-materials self))
-
-   (bom-text (lumber:bom-text
-              self
-              :title (format nil "Cut list: ~a steps, ~,1f in rise over ~,1f in run (~,1f deg)"
-                             (the number-of-steps) (float (the total-rise))
-                             (float (the total-run)) (the slope-angle))))
 
    (display-controls (list :color :wood-light)))
 
@@ -244,11 +217,16 @@ from the same lumber part objects."
 
    ;; The rail rides the post tops on edge, plumb-cut at both ends:
    ;; angle-cut-lumber's miter runs across the wide face, and with
-   ;; that face standing vertical the cuts come out plumb.
+   ;; that face standing vertical the cuts come out plumb.  It spans
+   ;; bottom post to top post plus a little overhang, measured along
+   ;; the slope, centered over the mid-tread at post-top height.
    (rail :type (lumber:lumber-type :cut? t :solids? (the solids?))
          :hidden? (not (the handrail?))
          :nominal (the rail-nominal)
-         :length (the rail-length)
+         :length (* (+ (* (1- (the number-of-steps)) (the run-per-step))
+                       (the post-size)
+                       (* 2 (the rail-overhang)))
+                    (the slope-factor))
          :front-angle-degrees (the slope-angle)
          :rear-angle-degrees (- (the slope-angle))
          :display-controls (list :color :wood-dark)
@@ -261,8 +239,10 @@ from the same lumber part objects."
                                          (the slope-angle)
                                          (the (face-normal-vector :right))))
          :center (translate (the center)
-                            :rear  (the rail-center-y)
-                            :up    (the rail-center-z)
+                            :rear  (* (1- (the number-of-steps))
+                                      (/ (the run-per-step) 2))
+                            :up    (+ (the (post-top-z (/ (1- (the number-of-steps)) 2)))
+                                      (/ (the rail-depth) 2))
                             :right (the rail-side-offset)))))
 
 

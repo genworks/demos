@@ -3,7 +3,7 @@
 (asdf:defsystem #:staircase :description
  "The Gendl® staircase demo" :author "Genworks International"
  :license "Affero Gnu Public License (http://www.gnu.org/licenses/)"
- :serial t :version "20260805" :depends-on (:lumber)
+ :serial t :version "20260811" :depends-on (:demos-common :lumber)
  :defsystem-depends-on nil :components
- ((:file "source/package") (:file "source/patches") (:gdl "source/assembly")
+ ((:file "source/package") (:gdl "source/assembly")
   (:gdl "source/ui") (:file "source/publish")))

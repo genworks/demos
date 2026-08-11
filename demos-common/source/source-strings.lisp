@@ -1,10 +1,8 @@
-;;;; -*- Mode: Lisp; Package: staircase-demo -*-
+;;;; -*- Mode: Lisp; Package: demos-common -*-
 ;;;;
 ;;;; PATCH -- candidate for elevation into gendl proper, alongside
 ;;;; gdl:definition-source-string (which handles define-objects only).
-;;;; Duplicated for now in demos that show supporting defun source
-;;;; (see also naca-nurbs/source/utilities.lisp).  Once elevated,
-;;;; delete this file and call the gendl version.
+;;;; Once elevated, delete this file and call the gendl version.
 ;;;;
 ;;;; Verbatim defun source via the Lisp's own source recording -- no
 ;;;; wrapper macros, no advice.  CCL records the definition text
@@ -13,7 +11,7 @@
 ;;;; we extract the form's text.  Other implementations: nil for now
 ;;;; (SBCL via sb-introspect is future work).
 
-(in-package :staircase-demo)
+(in-package :demos-common)
 
 #+allegro
 (defun %extract-toplevel-form-text (file marker)

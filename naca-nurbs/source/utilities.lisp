@@ -385,15 +385,9 @@
 
 (defun generate-naca-points (airfoil n-points &key (cosine? t) (closed? nil))
   "Compatibility shim returning two lists of points."
-  (destructuring-bind (&key upper lower)
+  (destructuring-bind (&key upper lower &allow-other-keys)
       (generate-naca-samples airfoil n-points :cosine? cosine? :closed? closed?)
-    (let ((upper-points nil)
-          (lower-points nil))
-      (dolist (i (loop for x from 0 below (length upper) collect x))
-        (push (aref upper i) upper-points))
-      (dolist (i (loop for x from 0 below (length lower) collect x))
-        (push (aref lower i) lower-points))
-      (values (nreverse upper-points) (nreverse lower-points)))))
+    (values (coerce upper 'list) (coerce lower 'list))))
 
 ;; ----------------------------------------
 ;; Search helpers (binary lower-bound, ternary search, gradient window)
@@ -459,77 +453,5 @@
                 head (cdr head)))
     (and best-low (list best-low best-high))))
 
-;; ----------------------------------------
-;; PATCH -- candidate for elevation into gendl proper, alongside
-;; gdl:definition-source-string (which handles define-objects only).
-;; Duplicated for now in demos that show supporting defun source (see
-;; also staircase/source/patches.lisp).  Once elevated, delete this
-;; section and call the gendl version.
-;; Source-pane support: verbatim defun source via the Lisp's own
-;; source recording -- no wrapper macros, no advice.  CCL records the
-;; definition text itself (source notes); Allegro records the source
-;; file, from which we extract the form's text.
-;; ----------------------------------------
-
-#+allegro
-(defun %extract-toplevel-form-text (file marker)
-  "Verbatim text of the top-level form starting with MARKER in FILE."
-  (with-open-file (in file :direction :input :external-format :utf-8)
-    (let* ((buf (make-string (file-length in)))
-           (len (read-sequence buf in))
-           (text (subseq buf 0 len))
-           (mlen (length marker))
-           (start (do ((pos (search marker text)
-                            (search marker text :start2 (1+ pos))))
-                      ((or (null pos)
-                           (and (or (zerop pos)
-                                    (eql (char text (1- pos)) #\Newline))
-                                (or (>= (+ pos mlen) (length text))
-                                    (member (char text (+ pos mlen))
-                                            '(#\Space #\Newline #\Tab #\()))))
-                       pos))))
-      (when start
-        (let ((depth 0) (i start) (n (length text)) (state :normal))
-          (loop while (< i n) do
-            (let ((ch (char text i)))
-              (ecase state
-                (:normal
-                 (case ch
-                   (#\( (incf depth))
-                   (#\) (decf depth)
-                        (when (zerop depth)
-                          (return-from %extract-toplevel-form-text
-                            (subseq text start (1+ i)))))
-                   (#\" (setq state :string))
-                   (#\; (setq state :line-comment))
-                   (#\# (when (< (1+ i) n)
-                          (case (char text (1+ i))
-                            (#\\ (incf i 2))
-                            (#\| (setq state :block-comment) (incf i)))))))
-                (:string
-                 (case ch
-                   (#\\ (incf i))
-                   (#\" (setq state :normal))))
-                (:line-comment
-                 (when (eql ch #\Newline) (setq state :normal)))
-                (:block-comment
-                 (when (and (eql ch #\|) (< (1+ i) n)
-                            (eql (char text (1+ i)) #\#))
-                   (setq state :normal) (incf i)))))
-            (incf i))
-          nil)))))
-
-(defun function-source-string (symbol)
-  "Verbatim source text of SYMBOL's defun, from the implementation's
-built-in source recording.  Nil when nothing is recorded."
-  (ignore-errors
-    #+ccl
-    (let ((note (ccl:function-source-note (fdefinition symbol))))
-      (and note (ccl:source-note-text note)))
-    #+allegro
-    (let ((file (excl:source-file symbol :operator)))
-      (and file
-           (%extract-toplevel-form-text
-            file (format nil "(defun ~a"
-                         (string-downcase (symbol-name symbol))))))
-    #-(or ccl allegro) nil))
+;; Source-pane support (function-source-string) now lives in
+;; demos-common/source/source-strings.lisp, shared by all demos.

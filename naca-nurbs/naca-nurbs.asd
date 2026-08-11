@@ -5,7 +5,7 @@
 (asdf:defsystem #:naca-nurbs :description
  "The Gendl® naca-nurbs Subsystem" :author "Genworks International"
  :license "Affero Gnu Public License (http://www.gnu.org/licenses/)"
- :serial t :version "20260806" :depends-on nil :components
+ :serial t :version "20260811" :depends-on (:demos-common) :components
  ((:file "source/nurbs") (:file "source/utilities")
   (:file "source/quality-reports-mixin") (:file "source/ui")
   (:file "source/publish")))
