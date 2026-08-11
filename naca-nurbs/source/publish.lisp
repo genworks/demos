@@ -40,11 +40,8 @@
 The entire CAD conversion is the with-format call below: the same
 declarative curve objects the viewports display write themselves out
 through the requested format's lens."
-  ;; The session id travels as "sid", NOT "iid": the production
-  ;; cyclops chain misroutes requests carrying iid= in the query
-  ;; (affinity special-casing; captured in org 2026-08-11).
   (let* ((query (net.aserve:request-query req))
-         (iid (cdr (assoc "sid" query :test #'string-equal)))
+         (iid (cdr (assoc "iid" query :test #'string-equal)))
          (step? (equalp (cdr (assoc "format" query :test #'string-equal)) "step"))
          (self (and iid (first (gethash (gwl::make-keyword-sensitive iid)
                                         gwl:*instance-hash-table*)))))

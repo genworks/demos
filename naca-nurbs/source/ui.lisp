@@ -118,12 +118,12 @@ viewports with quality metrics below."
    ;; CAD export of the current session's curves; the server side is
    ;; respond-with-cad-download in publish.lisp (shown in the Source
    ;; Code panes) -- one with-format call per format.  The download
-   ;; attribute carries the filename client-side (the proxy strips
-   ;; content-disposition).
+   ;; attribute names the file client-side; the server sends
+   ;; content-disposition as well.
    (download-buttons
     (flet ((link (label format extension)
              (with-lhtml-string ()
-               (:a :href (format nil "~a?sid=~a&format=~a"
+               (:a :href (format nil "~a?iid=~a&format=~a"
                                  *cad-download-path* (the instance-id) format)
                    :download (format nil "naca-~a.~a"
                                      (remove-if-not #'digit-char-p
