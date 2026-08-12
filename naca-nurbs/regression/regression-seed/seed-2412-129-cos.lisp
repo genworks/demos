@@ -1,3 +1,11 @@
+;; Copyright (C) 2026 Gornskew Enterprises
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Affero General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.  Distributed WITHOUT
+;; ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+
 
 (:schema 1 :airfoil :|2412| :n-points 129 :cosine? t :roundtrip-max
  8.881784197001252e-16 :x-monotone? t :x-min 0.0 :x-max 1.0
