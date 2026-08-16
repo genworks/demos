@@ -1,10 +1,27 @@
 *.fasl
 *~
-#*#
+# Emacs autosave (#foo#) and lock (.#foo) files.  This was `#*#', which
+# git read as a COMMENT -- a pattern starting with # needs the `**/'
+# prefix (house form, also matches at any depth) or a backslash.
+# Audit 2026-08-16.
+**/#*#
+.#*
 *.dx64fsl
 *.lx64fsl
+# npm belongs to /projects/apps/tailwind, NOT to this repo.  The shared
+# build compiles css/demos-style.css from apps/tailwind/demos-input.css,
+# whose @source line already scans ../../demos/**, so every demo here --
+# naca-nurbs included -- is registered by existing, and none of them
+# needs a toolchain of its own.  Deploy hosts never run npm; the
+# compiled css is committed.
+#
+# node_modules/ stays as a guard in case someone runs npm in here by
+# habit.  `package-lock.json' was ALSO listed and has been removed: a
+# lockfile appearing under demos/ means a second, unregistered tailwind
+# setup is growing, which is exactly what happened in
+# naca-nurbs/tailwind/ (a 40KB lockfile with no package.json beside it,
+# deleted 2026-08-16).  Better that it shows up as untracked and gets
+# noticed than that it is silently ignored.
 node_modules/
-node_modules
-package-lock.json
 system-index.txt
 

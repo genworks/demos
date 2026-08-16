@@ -1,5 +1,15 @@
 *~
 *.fasl
 *.*x64fsl
-#*#
-tailwind/node_modules
+# Emacs autosave (#foo#) and lock (.#foo) files.  This was `#*#', which
+# git read as a COMMENT because of the leading #.  `**/' is the house
+# form -- no leading-# problem, and it matches at any depth.
+# Audit 2026-08-16.
+**/#*#
+.#*
+
+# `tailwind/node_modules' used to be here.  There is no tailwind/ in this
+# demo any more: it held a package-lock.json and nothing else -- no
+# package.json, no config, no css -- while the actual stylesheet came,
+# and still comes, from the shared build in /projects/apps/tailwind
+# (demos-input.css scans ../../demos/**).  Deleted 2026-08-16.
