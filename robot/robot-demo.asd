@@ -1,7 +1,7 @@
 ;;;; -*- coding: utf-8 -*-
 
 (asdf:defsystem #:robot-demo :description
- "The Gendl® robot demo -- the classic GDL example in the 2026 demo framework"
+ "The Gendl™ robot demo -- the classic GDL example in the 2026 demo framework"
  :author "Genworks International"
  :license "Affero Gnu Public License (http://www.gnu.org/licenses/)"
  :serial t :version "20260811" :depends-on (:demos-common)

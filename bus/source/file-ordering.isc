@@ -19,4 +19,12 @@
 ;; <http://www.gnu.org/licenses/>.
 ;; 
 
-("package" "assembly" "body" "chassis" "interior" "rule-ackermann")
+;; Full order, not just a prefix.  cl-lite appends anything unlisted
+;; alphabetically, which put "publish" in the middle -- it has to load
+;; LAST, after the ui it publishes.  Spelled out 2026-08-16, when
+;; regenerating this system revealed that the committed .asd carried a
+;; hand-maintained order this file never described.
+("package" "assembly" "body" "chassis" "interior" "rule-ackermann"
+ "axle" "frame-rail" "frame" "inter-seat-clearance-check"
+ "inter-seat-spacing" "knuckle" "rear-axle" "seat" "seating-section"
+ "seating-side" "wheel" "ui" "publish")
