@@ -17,6 +17,20 @@
 
 (in-package :demos-common)
 
+(defvar *hack-base* nil
+  "URL prefix of this host's holodeck console (e.g. \"/hack\"), or nil
+when the host has none.  The deploying stack's services-init sets it;
+every demo page that names its demo-slug then carries a Hack-this-demo
+link opening the demo's source in a live Emacs beside a private copy
+of the page.")
+
+(defvar *url-prefix* ""
+  "Prefix under which this backend's /demo/ tree is reached through the
+reverse proxy -- \"\" on a production host, \"/hack\" in the holodeck,
+whose copy of the demos sits at /hack/demo/<slug>.  Only the shared
+stylesheet link needs it: the pages themselves are reached by their
+minted /sessions/ URLs, which the proxy pins by backend.")
+
 (define-object demo-ui-mixin ()
 
   :documentation
@@ -31,6 +45,9 @@ x3dom viewport pair driven by the demo's objects list."
     source-pane-objects nil)
    ("List of supporting defun symbols shown after the object panes."
     source-pane-functions nil)
+   ("String or nil.  The demo's slug under /demo/ (e.g. \"staircase\"),
+which names it to the holodeck; nil renders no Hack-this-demo link."
+    demo-slug nil)
 
    ;; Standard single-viewport setup; demos override the vector to
    ;; pick their hero camera angle.
@@ -46,7 +63,7 @@ x3dom viewport pair driven by the demo's objects list."
      (with-lhtml-string () (:script (str (the viewport-renderers-js-baseline))))
      (call-next-method)
      (with-lhtml-string ()
-       (:link :href "/demo/css/demos-style.css"
+       (:link :href (format nil "~a/demo/css/demos-style.css" *url-prefix*)
               :rel "stylesheet" :type "text/css")
        (:script (str (the busy-overlay-js))))))
 
@@ -118,6 +135,7 @@ x3dom viewport pair driven by the demo's objects list."
 
    (source-code-panes
     (apply #'string-append
+           (the (hack-banner))
            (append
             (mapcar #'(lambda (sym) (the (object-source-pane sym)))
                     (the source-pane-objects))
@@ -160,6 +178,23 @@ x3dom viewport pair driven by the demo's objects list."
                 :for (the-object control id) (str label))
         (:div :class "param-field block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm"
           (str (the-object control form-control))))))
+
+   ;; The invitation to the holodeck, heading the Source Code card:
+   ;; opens this demo's source in a live Emacs (ttyd) with a private
+   ;; copy of the page.  Empty where no holodeck exists (*hack-base*)
+   ;; or the demo has not named itself (demo-slug).
+   (hack-banner
+    ()
+    (if (and *hack-base* (the demo-slug))
+        (with-lhtml-string ()
+          (:div :class "px-6 py-3 bg-indigo-50 border-b border-indigo-100 flex items-center justify-between gap-4"
+            (:p :class "text-sm text-indigo-900"
+                "Want to change it?  Open this source in a live Emacs and rebuild your own copy of the page.")
+            (:a :href (format nil "~a/?arg=~a" *hack-base* (the demo-slug))
+                :target "_blank" :rel "noopener"
+                :class "shrink-0 inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+                "Hack this demo &rarr;")))
+        ""))
 
    ;; One collapsible pane showing a define-object, reconstituted live
    ;; from the in-memory definition.

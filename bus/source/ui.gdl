@@ -29,6 +29,7 @@ checks -- both surfaced on the page."
 
   :input-slots
   ((title "School Bus Demo")
+   (demo-slug "bus")
    (objects (list (the model)))
    (view-projection-key :bus-view)
    (view-projection-vector (unitize-vector (make-vector 1 0.7 0.8)))

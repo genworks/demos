@@ -28,6 +28,7 @@ quantity takeoff computed from the same declarative rules."
 
   :input-slots
   ((title "Brick Wall Demo")
+   (demo-slug "brick-wall")
    (objects (list (the model)))
    (view-projection-key :wall-view)
    (view-projection-vector (unitize-vector (make-vector 0.45 -1 0.3)))

@@ -9,4 +9,4 @@
 (gwl:define-package :demos-common
   (:documentation "Shared UI chrome and source-pane support for the
 public Gendl demos under /demo/ on genworks.com.")
-  (:export #:demo-ui-mixin #:function-source-string))
+  (:export #:demo-ui-mixin #:function-source-string #:*hack-base* #:*url-prefix*))
