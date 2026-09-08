@@ -1,0 +1,135 @@
+;;;; -*- Mode: Lisp; Package: demos-common -*-
+;;
+;; Copyright © 2026 Gornskew Enterprises
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Affero General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.  Distributed WITHOUT
+;; ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+;;
+
+;;;; The workshop portal: one page that seats the browser terminal (a
+;;;; ttyd into a shared Emacs, opened on a demo's source) beside that
+;;;; demo's live page, plus an index of the demos a host serves.
+;;;; Plain aserve publishes with no session behind them: cheap, and
+;;;; nothing to reap.  The deploying stack's services-init registers
+;;;; each demo it managed to load, sets *console-base*, and calls
+;;;; publish-portal!.
+
+(in-package :demos-common)
+
+(defvar *console-base* "/console"
+  "URL prefix of this host's browser terminal (ttyd behind the reverse
+proxy), or nil when the host has none.  The portal's left pane is
+<*console-base*>/?arg=<slug>, which the terminal's door script turns into
+the demo's source file.")
+
+(defvar *portal-demos* nil
+  "Alist of (slug . title) for the demos this host serves, in
+registration order -- what the index lists and /on accepts.")
+
+(defun register-portal-demo! (slug title)
+  "Register a demo with the portal, replacing an earlier entry for SLUG."
+  (setf *portal-demos*
+        (append (remove slug *portal-demos* :key #'car :test #'string=)
+                (list (cons slug title))))
+  *portal-demos*)
+
+(defun portal-demo-title (slug)
+  (cdr (assoc slug *portal-demos* :test #'string=)))
+
+(defparameter *portal-style* "
+  html, body { height: 100%; margin: 0; }
+  body { font: 14px system-ui, sans-serif; color: #111827; background: #f3f4f6; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 1rem; padding: 0.4rem 1rem; background: #1f2937; color: #f9fafb; }
+  header a { color: #c7d2fe; text-decoration: none; }
+  header a:hover { text-decoration: underline; }
+  header select { font: inherit; }
+  main.split { flex: 1; display: flex; min-height: 0; }
+  main.split iframe { flex: 1; border: 0; min-width: 0; height: 100%; background: #fff; }
+  main.split iframe.console { background: #000; }
+  main.split .gutter { width: 6px; background: #d1d5db; }
+  main.index { padding: 2rem; max-width: 60rem; }
+  main.index h1 { margin-top: 0; }
+  ul.demos { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 1rem; }
+  ul.demos li { background: #fff; border-radius: 0.5rem; padding: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  ul.demos li strong { display: block; font-size: 1.1rem; margin-bottom: 0.5rem; }
+  ul.demos li a { display: inline-block; margin-right: 0.75rem; color: #4338ca; }
+  p.note { color: #4b5563; }
+")
+
+(defun portal-page (req ent)
+  "The index: every registered demo, with its three doors."
+  (net.aserve:with-http-response (req ent :content-type "text/html")
+    (net.aserve:with-http-body (req ent)
+      (cl-who:with-html-output (*html-stream* nil :prologue t)
+        (:html :lang "en"
+         (:head (:meta :charset "UTF-8")
+                (:meta :name "viewport" :content "width=device-width, initial-scale=1")
+                (:title "Gendl workshop")
+                (:style (cl-who:str *portal-style*)))
+         (:body
+          (:header (:strong "Gendl workshop")
+                   (:span "a shared Emacs, a shared Gendl, the demos' live source"))
+          (:main :class "index"
+           (:h1 "Pick a demo")
+           (:p :class "note"
+               "Each demo opens with its source in a live Emacs on the left and your own copy of its page on the right.
+                Change the source, compile with C-c C-c, reload the page.  Everyone here shares the same Emacs and the same Gendl;
+                nothing is saved, and the workshop resets itself to factory state now and then.")
+           (:ul :class "demos"
+            (dolist (entry *portal-demos*)
+              (let ((slug (car entry)) (title (cdr entry)))
+                (cl-who:htm
+                 (:li (:strong (cl-who:esc title))
+                      (:a :href (format nil "/on?demo=~a" slug) "Side by side")
+                      (:a :href (format nil "/demo/~a" slug) :target "_blank" :rel "noopener" "Live page")
+                      (when *console-base*
+                        (cl-who:htm (:a :href (format nil "~a/?arg=~a" *console-base* slug)
+                                        :target "_blank" :rel "noopener" "Source in Emacs"))))))))
+           (:p :class "note"
+               "Any Gendl object, not just a demo: "
+               (:a :href "/sluice-demo" :target "_blank" :rel "noopener" "sluice")
+               ", the object browser, with a headset button on its X_ITE pane."))))))))
+
+(defun portal-on-page (req ent)
+  "The split: the console on the demo's source, the demo's live page beside it."
+  (let* ((query (net.aserve:request-query req))
+         (asked (cdr (assoc "demo" query :test #'string=)))
+         (slug (if (and asked (portal-demo-title asked)) asked (car (first *portal-demos*))))
+         (title (or (portal-demo-title slug) slug)))
+    (net.aserve:with-http-response (req ent :content-type "text/html")
+      (net.aserve:with-http-body (req ent)
+        (cl-who:with-html-output (*html-stream* nil :prologue t)
+          (:html :lang "en"
+           (:head (:meta :charset "UTF-8")
+                  (:meta :name "viewport" :content "width=device-width, initial-scale=1")
+                  (:title (cl-who:fmt "~a -- Gendl workshop" title))
+                  (:style (cl-who:str *portal-style*)))
+           (:body
+            (:header
+             (:a :href "/" "Gendl workshop")
+             (:span (cl-who:esc title))
+             (:label "demo: "
+              (:select :onchange "location.href='/on?demo='+this.value"
+               (dolist (entry *portal-demos*)
+                 (cl-who:htm (:option :value (car entry)
+                                      :selected (when (string= (car entry) slug) "selected")
+                                      (cl-who:esc (cdr entry)))))))
+             (:a :href (format nil "/demo/~a" slug) :target "_blank" :rel "noopener" "live page in its own tab")
+             (when *console-base*
+               (cl-who:htm (:a :href (format nil "~a/?arg=~a" *console-base* slug)
+                               :target "_blank" :rel "noopener" "terminal in its own tab"))))
+            (:main :class "split"
+             (when *console-base*
+               (cl-who:htm (:iframe :class "console" :title "Emacs"
+                                    :src (format nil "~a/?arg=~a" *console-base* slug))
+                           (:div :class "gutter")))
+             (:iframe :title (cl-who:esc title) :src (format nil "/demo/~a" slug))))))))))
+
+(defun publish-portal! (&key host)
+  "Publish the portal index at / and the split page at /on."
+  (gwl:with-all-servers (server)
+    (net.aserve:publish :path "/" :server server :host host :function #'portal-page)
+    (net.aserve:publish :path "/on" :server server :host host :function #'portal-on-page)))

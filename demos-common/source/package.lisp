@@ -9,4 +9,6 @@
 (gwl:define-package :demos-common
   (:documentation "Shared UI chrome and source-pane support for the
 public Gendl demos under /demo/ on genworks.com.")
-  (:export #:demo-ui-mixin #:function-source-string #:*hack-base* #:*url-prefix*))
+  (:export #:demo-ui-mixin #:function-source-string #:*hack-base* #:*url-prefix*
+           ;; the workshop portal (portal.gdl)
+           #:*console-base* #:*portal-demos* #:register-portal-demo! #:publish-portal!))
