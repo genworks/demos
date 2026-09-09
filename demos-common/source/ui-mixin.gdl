@@ -11,9 +11,10 @@
 ;;;;
 ;;;; Shared chrome for the public demo pages: the stylesheet hookup,
 ;;;; Tailwind card/form helpers, the live source-code panes, and the
-;;;; standard x3dom viewport pair.  Each demo mixes this in ahead of
-;;;; session-control-mixin and base-html-page and keeps only its own
-;;;; page content, form controls, and model.
+;;;; standard viewport (one viewport-html-div, shaded or wireframe).
+;;;; Each demo mixes this in ahead of session-control-mixin and
+;;;; base-html-page and keeps only its own page content, form
+;;;; controls, and model.
 
 (in-package :demos-common)
 
@@ -37,7 +38,9 @@ minted /sessions/ URLs, which the proxy pins by backend.")
   (:description "Chrome shared by every public demo page: Tailwind
 stylesheet hookup, card and parameter-field helpers, source-code panes
 reconstituted live from the in-memory definitions, and a standard
-x3dom viewport pair driven by the demo's objects list."
+viewport driven by the demo's objects list -- one viewport-html-div
+whose renderer follows graphics-format: shaded (x3dom) or wireframe
+(svg), switched by the toggle the pane wears."
    :author "Genworks International")
 
   :input-slots
@@ -52,11 +55,33 @@ which names it to the holodeck; nil renders no Hack-this-demo link."
    ;; Standard single-viewport setup; demos override the vector to
    ;; pick their hero camera angle.
    (view-projection-key :demo-view)
-   (view-projection-vector (unitize-vector (make-vector 1 -1 0.5))))
+   (view-projection-vector (unitize-vector (make-vector 1 -1 0.5)))
+
+   ("Keyword, :x3dom or :svg.  The viewport's format when the page opens:
+shaded (x3dom) or wireframe (svg).  The toggle on the pane switches it."
+    graphics-format-default :x3dom))
 
   :computed-slots
   ((use-svgpanzoom? t)
    (use-x3dom? t)
+
+   (graphics-format (the graphics-format-default) :settable)
+
+   ;; The toggle the viewport wears, top-right: Shaded | Wireframe.
+   ;; Handed to the viewport-html-div as its header-html.
+   (viewport-toolbar-html
+    (with-lhtml-string ()
+      (:div :class "absolute right-1 top-1 z-10 flex overflow-hidden rounded bg-white/80 text-xs shadow backdrop-blur select-none"
+        (dolist (choice '((:x3dom "Shaded") (:svg "Wireframe")))
+          (let ((active? (eql (first choice) (the graphics-format))))
+            (htm (:span :class (if active?
+                                   "px-2 py-0.5 bg-indigo-600 text-white"
+                                   "px-2 py-0.5 cursor-pointer text-gray-600 hover:text-indigo-700")
+                        :title (if active? "The current graphics format" "Switch the graphics format")
+                        :onclick (unless active?
+                                   (the (gdl-ajax-call :function-key :set-graphics-format!
+                                                       :arguments (list (first choice)))))
+                        (str (second choice)))))))))
 
    (additional-header-content
     (string-append
@@ -143,14 +168,21 @@ which names it to the holodeck; nil renders no Hack-this-demo link."
                     (the source-pane-functions))))))
 
   :functions
-  (;; The "All demos" back link and the page heading.
+  ((set-graphics-format! (format) (the (set-slot! :graphics-format format)))
+
+   ;; The "All demos" back link and the page heading.  On a development
+   ;; host (gwl:*developing?*) the standard Update! links ride along, so
+   ;; a definition recompiled in Emacs can be pulled into the live page.
    (page-intro
     (heading blurb)
     (with-lhtml-string ()
-      (:div :class "mb-4"
+      (:div :class "mb-4 flex items-center justify-between"
         (:a :href "/demos/index.html"
             :class "text-sm font-medium text-indigo-600 hover:text-indigo-500"
-            "&larr; All demos"))
+            "&larr; All demos")
+        (when gwl:*developing?*
+          (htm (:div :class "text-xs text-gray-500 [&_a]:text-indigo-600 [&_a]:font-medium [&_p]:m-0"
+                 (str (the development-links))))))
       (:div :class "text-center mb-8"
         (:h1 :class "text-4xl font-bold text-gray-900 mb-2" (str heading))
         (:p :class "text-lg text-gray-600" (str blurb)))))
@@ -233,14 +265,12 @@ which names it to the holodeck; nil renders no Hack-this-demo link."
                  (package-name (symbol-package sym)) (symbol-name sym))))))
 
   :objects
-  ((viewport-area :type 'base-html-div
-                  :div-class "absolute inset-0"
-                  :js-to-eval (the view-x3dom js-to-eval)
-                  :inner-html (the view-x3dom inner-html))
-
-   (view-x3dom :type 'viewport-html-div
-               :dom-id (the viewport-area dom-id)
-               :image-format :x3dom
-               :projection-key (the view-projection-key)
-               :projection-vector (the view-projection-vector)
-               :display-list-object-roots (the objects))))
+  ;; The viewport is the section: its renderer child follows
+  ;; image-format, so switching the format re-renders this one div
+  ;; through gdlAjax (the same arrangement as sluice's panes).
+  ((viewport-area :type 'viewport-html-div
+                  :image-format (the graphics-format)
+                  :header-html (the viewport-toolbar-html)
+                  :projection-key (the view-projection-key)
+                  :projection-vector (the view-projection-vector)
+                  :display-list-object-roots (the objects))))
