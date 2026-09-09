@@ -39,8 +39,9 @@ minted /sessions/ URLs, which the proxy pins by backend.")
 stylesheet hookup, card and parameter-field helpers, source-code panes
 reconstituted live from the in-memory definitions, and a standard
 viewport driven by the demo's objects list -- one viewport-html-div
-whose renderer follows graphics-format: shaded (x3dom) or wireframe
-(svg), switched by the toggle the pane wears."
+whose renderer follows graphics-format: shaded (x3dom), wireframe
+(svg) or hidden-line (svg through base-view's hidden-line remover),
+switched by the toggle the pane wears."
    :author "Genworks International")
 
   :input-slots
@@ -57,8 +58,9 @@ which names it to the holodeck; nil renders no Hack-this-demo link."
    (view-projection-key :demo-view)
    (view-projection-vector (unitize-vector (make-vector 1 -1 0.5)))
 
-   ("Keyword, :x3dom or :svg.  The viewport's format when the page opens:
-shaded (x3dom) or wireframe (svg).  The toggle on the pane switches it."
+   ("Keyword, :x3dom, :svg or :hidden-line.  The viewport's format when the
+page opens: shaded (x3dom), wireframe (svg), or hidden-line (svg with the
+hidden edges removed).  The toggle on the pane switches it."
     graphics-format-default :x3dom))
 
   :computed-slots
@@ -67,12 +69,12 @@ shaded (x3dom) or wireframe (svg).  The toggle on the pane switches it."
 
    (graphics-format (the graphics-format-default) :settable)
 
-   ;; The toggle the viewport wears, top-right: Shaded | Wireframe.
-   ;; Handed to the viewport-html-div as its header-html.
+   ;; The toggle the viewport wears, top-right: Shaded | Wireframe |
+   ;; Hidden line.  Handed to the viewport-html-div as its header-html.
    (viewport-toolbar-html
     (with-lhtml-string ()
       (:div :class "absolute right-1 top-1 z-10 flex overflow-hidden rounded bg-white/80 text-xs shadow backdrop-blur select-none"
-        (dolist (choice '((:x3dom "Shaded") (:svg "Wireframe")))
+        (dolist (choice '((:x3dom "Shaded") (:svg "Wireframe") (:hidden-line "Hidden line")))
           (let ((active? (eql (first choice) (the graphics-format))))
             (htm (:span :class (if active?
                                    "px-2 py-0.5 bg-indigo-600 text-white"
@@ -269,7 +271,10 @@ shaded (x3dom) or wireframe (svg).  The toggle on the pane switches it."
   ;; image-format, so switching the format re-renders this one div
   ;; through gdlAjax (the same arrangement as sluice's panes).
   ((viewport-area :type 'viewport-html-div
-                  :image-format (the graphics-format)
+                  :image-format (if (eql (the graphics-format) :hidden-line)
+                                    :svg (the graphics-format))
+                  :hidden-lines (if (eql (the graphics-format) :hidden-line)
+                                    :remove :draw)
                   :header-html (the viewport-toolbar-html)
                   :projection-key (the view-projection-key)
                   :projection-vector (the view-projection-vector)
