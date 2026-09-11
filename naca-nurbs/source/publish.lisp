@@ -167,12 +167,21 @@ no instance table."
                           :description "Sample points per airfoil, 50 to 500; default 216")
                     (list "tolerance" :type :number :default 0.0005 :range '(0.0001 0.01) :example "0.0005"
                           :description "NURBS approximation tolerance, 0.0001 to 0.01; default 0.0005")
-                    (list "source" :type :string :default nil :example "1"
-                          :description "1 to be told where the code that built this file can be read (free, for verifying the result); omitted, nothing about code is included"))
+                    (list "trace" :type :string :default nil :example "1"
+                          :description "1 to be given the free verification record for this result (the contract, the standards, the checks); omitted, nothing extra is included"))
   :build #'airfoil-family
-  ;; the code behind the file, served free at /demo/naca-nurbs/cad/source
+  ;; the verification record (free at /demo/naca-nurbs/cad/trace);
+  ;; :open, so it appends the live source, as the page's panes show it
+  :open t
   :sources '(generate-naca-samples get-airfoil-spec analytical-tangent-parametric
              analytical-curvature-parametric naca-nurbs-curves
              parse-airfoil-digits export-airfoil-curves airfoil-family)
+  :standards '("NACA 4-digit series: camber line y_c(x) piecewise parabolic (m, p), thickness y_t(x) the NACA polynomial with the closed-trailing-edge a5 = -0.1036"
+               "NACA 5-digit series: the standard camber table (210, 220, 230, 240, 250 families)"
+               "Points on the surfaces perpendicular to the camber line, cosine-spaced in x; unit chord from the leading edge at the origin, scaled by chord"
+               "Each surface as two NURBS pieces (nose and main) fitted through the samples with analytical tangents, then approximated to the tolerance and composed")
+  :checks '("The composed curve starts at the leading edge (0, 0, 0) and ends at the trailing edge (chord, ~0, 0)"
+            "Each approximated piece reports its achieved tolerance against the fitted curve"
+            "The written STEP re-reads as the same two curves (verified to 1e-15 at the ends and mid-curve on the reference airfoil)")
   :filename (lambda (spec)
               (format nil "naca-~{~a~^-~}" (mapcar #'symbol-name (getf spec :digits)))))

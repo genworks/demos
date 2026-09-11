@@ -15,4 +15,5 @@ public Gendl demos under /demo/ on genworks.com.")
            ;; the export declaration (cad-export.lisp)
            #:register-cad-export! #:publish-cad-export! #:find-cad-export
            #:respond-with-cad-export #:cad-export-discovery #:cad-export-usage
-           #:parse-cad-export-request #:write-cad-export-file #:*cad-exports*))
+           #:parse-cad-export-request #:write-cad-export-file #:*cad-exports*
+           #:respond-with-cad-export-trace #:cad-export-open? #:*cad-export-license-line*))

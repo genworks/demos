@@ -82,10 +82,13 @@ viewports with quality metrics below."
                    (str (the-object viewport format-selector form-control)))
                  (str (the-object viewport area div)))))))
         (str (the stats-section div))
-        (:div :class "mt-8"
-          (str (the (card :title "Source Code"
-                          :subtitle "The complete GDL source for this demo: object definitions reconstituted live from the in-memory definitions serving this page, supporting functions via the Lisp's own source records."
-                          :content (the source-code-panes))))))))
+        ;; The Source Code card follows the export declaration's :open
+        ;; flag (publish.lisp): a closed application shows none.
+        (when (demos-common:cad-export-open? :naca-nurbs)
+          (htm (:div :class "mt-8"
+                 (str (the (card :title "Source Code"
+                                 :subtitle "The complete GDL source for this demo: object definitions reconstituted live from the in-memory definitions serving this page, supporting functions via the Lisp's own source records."
+                                 :content (the source-code-panes))))))))))
 
    ;; Ajax-refreshable section: with live-on-change parameters, the
    ;; stats row re-renders on every model rebuild (see stats-section).

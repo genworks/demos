@@ -45,18 +45,23 @@
 
 (defun register-cad-export! (name &key path description (mime-type "model/step")
                                      (formats '(:step :iges)) parameters build
-                                     (leaves #'identity) report filename sources)
+                                     (leaves #'identity) report filename
+                                     standards checks sources open)
   "Declare (or redeclare) the export NAME.  See the file header.
-SOURCES is a list of symbols -- define-object names and defuns --
-whose live source the free <path>/source endpoint serves: the code
-that built the file, for anyone who needs to trace it."
+STANDARDS and CHECKS are lists of strings the free <path>/trace
+record states -- what the geometry follows and what was verified --
+so a buyer can trace a result without the implementation.  SOURCES is
+a list of symbols (define-objects and defuns) whose live source the
+record includes ONLY when OPEN is true: the demos meant to spread; a
+hosted service's code stays internal (the user, 2026-09-11)."
   (let ((plist (list :name name :path path :description description
                      :mime-type mime-type
                      :formats (if (and report (not (member :json formats)))
                                   (append formats (list :json))
                                   formats)
                      :parameters parameters :build build :leaves leaves
-                     :report report :filename filename :sources sources)))
+                     :report report :filename filename
+                     :standards standards :checks checks :sources sources :open open)))
     (setf *cad-exports* (cons (cons name plist)
                               (remove name *cad-exports* :key #'car)))
     name))
@@ -74,34 +79,42 @@ that built the file, for anyone who needs to trace it."
           (net.aserve:publish :path (concatenate 'string (getf export :path) (car suffix))
                               :server server :host host
                               :function 'respond-with-cad-export)))
-      (when (getf export :sources)
-        (net.aserve:publish :path (concatenate 'string (getf export :path) "/source")
-                            :server server :host host
-                            :function 'respond-with-cad-export-source)))
+      (net.aserve:publish :path (concatenate 'string (getf export :path) "/trace")
+                          :server server :host host
+                          :function 'respond-with-cad-export-trace))
     name))
 
-;;; --- traceability: the source that built the file ------------------------
+;;; --- traceability: the record behind the file --------------------------------
 ;;;
-;;; The code behind a paid file can be read, on request: the free
-;;; <path>/source endpoint serves the live definitions (reconstituted
-;;; from the running image); with source=1 on the request the JSON
-;;; report carries that URL and a STEP file's header names it.  Every
+;;; A paid file can be traced, on request: the free <path>/trace
+;;; endpoint serves a verification RECORD -- the resource and its
+;;; contract (the parameters), the standards the geometry follows, the
+;;; checks the service makes, and for a given query the derived numbers
+;;; -- enough to verify a result without the implementation, which is
+;;; the hosted service's secret sauce and stays internal.  A demo
+;;; declared :open t (the ones meant to spread Gendl) appends its live
+;;; source to the record.  With trace=1 on a request the JSON report
+;;; carries the record's URL and a STEP file's header names it; every
 ;;; STEP header records the resource and the parameters regardless,
-;;; so a part found on a disk years later still says how it was made
-;;; -- that is the part's provenance, not the code's.  The served copy
-;;; is for verifying the result, under *cad-export-license-line* (a
-;;; proprietary notice) and it is opt-in, never volunteered: both the
-;;; user's rulings of 2026-09-11.
+;;; the part's provenance.  Opt-in, never volunteered.  The user's
+;;; rulings of 2026-09-11.
 
 (defparameter *cad-export-license-line*
-  "Copyright (c) 2026 Genworks International. Provided with a purchased result for verification of that result only; not licensed for any other use, reproduction or redistribution."
-  "The notice the served source carries (the user, 2026-09-11: the
-source is for their verification purposes only, proprietary headers
-unless we decide otherwise).  One line to change if that ruling
-changes.")
+  "Copyright (c) 2026 Genworks International. This record accompanies a purchased result for verification of that result only. The implementation is proprietary and not included."
+  "The notice a CLOSED export's trace record carries -- the course a
+closed-source application on Genworks GDL takes (not exercised today:
+the user, 2026-09-11, keeps the demos open).")
 
-(defparameter *cad-export-license-short* "verification-only source"
-  "The same ruling in the few characters a STEP header has room for.")
+(defparameter *cad-export-open-license-line*
+  "Copyright (c) 2026 Gornskew Enterprises. This record accompanies a result for verification; the source it includes is the demo's own, under the GNU Affero General Public License v3.0 (https://www.gnu.org/licenses/agpl-3.0.html)."
+  "The notice an OPEN export's trace record carries: the demos are
+AGPL, so the record says so.")
+
+(defun cad-export-notice (export)
+  (if (getf export :open) *cad-export-open-license-line* *cad-export-license-line*))
+
+(defparameter *cad-export-license-short* "verification record"
+  "The same in the few characters a STEP header has room for.")
 
 (defun cad-export-public-url (req path)
   "PATH as the client reached it: the client's scheme (X-Forwarded-Proto
@@ -111,40 +124,81 @@ behind an edge) and Host."
         (host (or (net.aserve:header-slot-value req :host) "localhost")))
     (format nil "~a://~a~a" proto host path)))
 
-(defun cad-export-source-url (req export)
-  (cad-export-public-url req (concatenate 'string (getf export :path) "/source")))
+(defun cad-export-trace-url (req export &optional query)
+  (cad-export-public-url req (format nil "~a/trace~@[?~a~]" (getf export :path)
+                                     (and query (plusp (length query)) query))))
 
-(defun cad-export-source-wanted? (export query)
+(defun cad-export-trace-wanted? (query)
   "Opt-in (the user, 2026-09-11: don't volunteer it with all results):
-the request said source=1 (or true/yes), and the export has sources."
-  (and (getf export :sources)
-       (let ((value (%export-query-value query "source")))
-         (and value (member value '("1" "true" "yes" "t") :test #'string-equal) t))))
+the request said trace=1 (or true/yes)."
+  (let ((value (%export-query-value query "trace")))
+    (and value (member value '("1" "true" "yes" "t") :test #'string-equal) t)))
 
-(defun cad-export-source-text (export)
-  "The registered sources as one text: define-objects reconstituted
-from the image, defuns from the Lisp's own source records."
+(defun %plain-number (value)
+  "A float without its exponent marker (the report mixes single and
+double floats); anything else as it is."
+  (if (floatp value)
+      (let ((*read-default-float-format* (if (typep value 'single-float) 'single-float 'double-float)))
+        (princ-to-string value))
+      value))
+
+(defun cad-export-trace-text (export query-alist query path)
+  "The verification record: the contract, the standards, the checks,
+the numbers for the request QUERY-ALIST/QUERY name (when they do),
+and -- for an :open export only -- the live source."
   (with-output-to-string (s)
-    (format s ";;;; ~a -- the code behind ~a~%;;;; ~a~%;;;; Reconstituted live from the running Genworks GDL image, for verifying~%;;;; the result it came with.~%~%"
+    (format s "~a -- verification record for ~a~%~a~%~%"
             (string-downcase (symbol-name (getf export :name))) (getf export :path)
-            *cad-export-license-line*)
-    (dolist (sym (getf export :sources))
-      (let ((text (handler-case (or (ignore-errors (gdl:definition-source-string sym))
-                                    (function-source-string sym))
-                    (error () nil))))
-        (format s "~&;;; --- ~(~a~) ---------------------------------------~%~%~a~%~%"
-                sym (or text ";; (no source recorded)"))))))
+            (cad-export-notice export))
+    (format s "RESOURCE~%  ~a~%  ~a~%~%" (getf export :path) (or (getf export :description) ""))
+    (format s "CONTRACT (the request's parameters)~%")
+    (dolist (definition (getf export :parameters))
+      (destructuring-bind (name &key type default required range description &allow-other-keys) definition
+        (format s "  ~a~@[ (~(~a~))~]~:[~; required~]~@[ default ~a~]~@[ range ~a~]~%    ~a~%"
+                name type required default range (or description ""))))
+    (when (getf export :standards)
+      (format s "~%STANDARDS AND DEFINITIONS THE GEOMETRY FOLLOWS~%~{  ~a~%~}" (getf export :standards)))
+    (when (getf export :checks)
+      (format s "~%CHECKS MADE ON EVERY RESULT~%~{  ~a~%~}" (getf export :checks)))
+    (when (and query (plusp (length query)) (getf export :report))
+      (multiple-value-bind (spec problem) (parse-cad-export-request export query-alist path)
+        (if spec
+            (handler-case
+                (let ((report (funcall (getf export :report) (funcall (getf export :build) spec) spec)))
+                  (format s "~%THE NUMBERS FOR ?~a~%" query)
+                  (dolist (pair report)
+                    (if (and (consp (cdr pair)) (consp (cadr pair)))
+                        (progn (format s "  ~a:~%" (car pair))
+                               (dolist (sub (cdr pair)) (format s "    ~a: ~a~%" (car sub) (%plain-number (cdr sub)))))
+                        (format s "  ~a: ~a~%" (car pair) (%plain-number (cdr pair))))))
+              (error (e) (format s "~%THE NUMBERS FOR ?~a~%  refused: ~a~%" query e)))
+            (format s "~%THE NUMBERS FOR ?~a~%  refused: ~a~%" query problem))))
+    (when (and (getf export :open) (getf export :sources))
+      (format s "~%SOURCE (this demo is published to spread Gendl; reconstituted live from the running image)~%~%")
+      (dolist (sym (getf export :sources))
+        (let ((text (handler-case (or (ignore-errors (gdl:definition-source-string sym))
+                                      (function-source-string sym))
+                      (error () nil))))
+          (format s "~&;;; --- ~(~a~) ---------------------------------------~%~%~a~%~%"
+                  sym (or text ";; (no source recorded)")))))))
 
-(defun respond-with-cad-export-source (req ent)
+(defun respond-with-cad-export-trace (req ent)
   (let* ((path (net.uri:uri-path (net.aserve:request-uri req)))
-         (base (subseq path 0 (max 0 (- (length path) (length "/source")))))
-         (export (%cad-export-for-path base)))
+         (base (subseq path 0 (max 0 (- (length path) (length "/trace")))))
+         (export (%cad-export-for-path base))
+         (query (net.uri:uri-query (net.aserve:request-uri req))))
     (if (null export)
         (net.aserve:with-http-response (req ent :response net.aserve:*response-not-found*)
           (net.aserve:with-http-body (req ent)))
         (net.aserve:with-http-response (req ent :content-type "text/plain; charset=utf-8")
           (net.aserve:with-http-body (req ent)
-            (write-string (cad-export-source-text export) (net.aserve:request-reply-stream req)))))))
+            (write-string (cad-export-trace-text export (net.aserve:request-query req) query base)
+                          (net.aserve:request-reply-stream req)))))))
+
+(defun cad-export-open? (name)
+  "Whether NAME's declaration is :open -- the demo pages' Source Code
+cards follow it, so closing an application is one flag."
+  (and (getf (find-cad-export name) :open) t))
 
 (defun %step-header-provenance! (path description)
   "Rewrite PATH's STEP FILE_DESCRIPTION to carry DESCRIPTION (a STEP
@@ -320,9 +374,10 @@ or (values nil message)."
                                     (string-downcase (symbol-name (getf export :name))))))
                       (if (eq format :json)
                           (let ((report (append (funcall (getf export :report) objects spec)
-                                                (when (cad-export-source-wanted? export query)
-                                                  (list (cons "source" (cad-export-source-url req export))
-                                                        (cons "license" *cad-export-license-line*))))))
+                                                (when (cad-export-trace-wanted? query)
+                                                  (list (cons "trace" (cad-export-trace-url req export
+                                                                                            (net.uri:uri-query (net.aserve:request-uri req))))
+                                                        (cons "trace_notice" (cad-export-notice export)))))))
                             (net.aserve:with-http-response (req ent :content-type "application/json")
                               (net.aserve:with-http-body (req ent)
                                 (%encode-report report (net.aserve:request-reply-stream req)))))
@@ -336,12 +391,13 @@ or (values nil message)."
                                    (when (eq format :step)
                                      (%step-header-provenance!
                                       temp-path
-                                      (format nil "Genworks GDL ~(~a~): ~a~@[; source ~a~]"
+                                      (format nil "Genworks GDL ~(~a~): ~a~@[; ~a~]"
                                               (getf export :name)
                                               (net.uri:uri-query (net.aserve:request-uri req))
-                                              (and (cad-export-source-wanted? export query)
-                                                   (format nil "~a (~a)" (cad-export-source-url req export)
-                                                           *cad-export-license-short*)))))
+                                              (and (cad-export-trace-wanted? query)
+                                                   (format nil "~a ~a" *cad-export-license-short*
+                                                           (cad-export-trace-url req export
+                                                                                 (net.uri:uri-query (net.aserve:request-uri req))))))))
                                    (%stream-file req ent temp-path
                                                  (ecase format (:step "model/step") (:iges "model/iges"))
                                                  (format nil "~a.~a" stem (ecase format (:step "stp") (:iges "igs")))))

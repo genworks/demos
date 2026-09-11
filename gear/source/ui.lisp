@@ -77,10 +77,18 @@ it."
                                                 (str (the problem))))
                                          (str (the viewport-area div))))))))
         (str (the stats-section div))
-        (:div :class "mt-8"
-          (str (the (card :title "Source Code"
-                          :subtitle "The complete GDL source for this demo: object definitions reconstituted live from the in-memory definitions serving this page, supporting functions via the Lisp's own source records."
-                          :content (the source-code-panes))))))))
+        (:div :class "mt-8 text-sm text-gray-500"
+          "Every result can be traced: the free "
+          (:a :href "/demo/gear/cad/trace" :class "text-indigo-600 hover:text-indigo-500" "verification record")
+          " states the standards this geometry follows and the checks made on every result; add trace=1 to an API request to have the report and the STEP header name it.")
+        ;; The Source Code card follows the declaration's :open flag
+        ;; (open for now, the user, 2026-09-11): closing the gear later
+        ;; is dropping :open in publish.lisp, nothing here.
+        (when (demos-common:cad-export-open? :gear)
+          (htm (:div :class "mt-4"
+                 (str (the (card :title "Source Code"
+                                 :subtitle "The complete GDL source for this demo: object definitions reconstituted live from the in-memory definitions serving this page, supporting functions via the Lisp's own source records."
+                                 :content (the source-code-panes))))))))))
 
    (stats-row
     (if (the problem)
