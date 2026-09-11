@@ -166,7 +166,9 @@ no instance table."
                     (list "points" :type :integer :default 216 :range '(50 500) :example 216
                           :description "Sample points per airfoil, 50 to 500; default 216")
                     (list "tolerance" :type :number :default 0.0005 :range '(0.0001 0.01) :example "0.0005"
-                          :description "NURBS approximation tolerance, 0.0001 to 0.01; default 0.0005"))
+                          :description "NURBS approximation tolerance, 0.0001 to 0.01; default 0.0005")
+                    (list "source" :type :string :default nil :example "1"
+                          :description "1 to be told where the code that built this file can be read (free, for verifying the result); omitted, nothing about code is included"))
   :build #'airfoil-family
   ;; the code behind the file, served free at /demo/naca-nurbs/cad/source
   :sources '(generate-naca-samples get-airfoil-spec analytical-tangent-parametric

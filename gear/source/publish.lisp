@@ -103,7 +103,9 @@ so an undercut refusal surfaces here, as a 400, not in the file."
                 ("mate" :type :integer :default nil :range (6 200) :example 40
                  :description "Tooth count of a mating gear: when given, the file holds both gears meshed at the working center distance and the report adds the pair's numbers")
                 ("mate_shift" :type :number :default 0d0 :range (-1 1.5) :example 0
-                 :description "The mate's profile shift coefficient; default 0"))
+                 :description "The mate's profile shift coefficient; default 0")
+                ("source" :type :string :default nil :example "1"
+                 :description "1 to be told where the code that built this file can be read (free, for verifying the result); omitted, nothing about code is included"))
   :build #'gear-family
   :leaves (lambda (objects) (loop for object in objects append (the-object object cad-objects)))
   :report #'gear-family-report

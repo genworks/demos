@@ -82,14 +82,16 @@ that built the file, for anyone who needs to trace it."
 
 ;;; --- traceability: the source that built the file ------------------------
 ;;;
-;;; Every paid file names where its code can be read: the free
+;;; The code behind a paid file can be read, on request: the free
 ;;; <path>/source endpoint serves the live definitions (reconstituted
-;;; from the running image), the JSON report carries the URL, and a
-;;; STEP file's header description records the resource, the
-;;; parameters and the source URL, so a part found on a disk years
-;;; later still says how it was made.  The served copy is for
-;;; verifying the result, under *cad-export-license-line* -- a
-;;; proprietary notice, the user's ruling of 2026-09-11.
+;;; from the running image); with source=1 on the request the JSON
+;;; report carries that URL and a STEP file's header names it.  Every
+;;; STEP header records the resource and the parameters regardless,
+;;; so a part found on a disk years later still says how it was made
+;;; -- that is the part's provenance, not the code's.  The served copy
+;;; is for verifying the result, under *cad-export-license-line* (a
+;;; proprietary notice) and it is opt-in, never volunteered: both the
+;;; user's rulings of 2026-09-11.
 
 (defparameter *cad-export-license-line*
   "Copyright (c) 2026 Genworks International. Provided with a purchased result for verification of that result only; not licensed for any other use, reproduction or redistribution."
@@ -111,6 +113,13 @@ behind an edge) and Host."
 
 (defun cad-export-source-url (req export)
   (cad-export-public-url req (concatenate 'string (getf export :path) "/source")))
+
+(defun cad-export-source-wanted? (export query)
+  "Opt-in (the user, 2026-09-11: don't volunteer it with all results):
+the request said source=1 (or true/yes), and the export has sources."
+  (and (getf export :sources)
+       (let ((value (%export-query-value query "source")))
+         (and value (member value '("1" "true" "yes" "t") :test #'string-equal) t))))
 
 (defun cad-export-source-text (export)
   "The registered sources as one text: define-objects reconstituted
@@ -311,7 +320,7 @@ or (values nil message)."
                                     (string-downcase (symbol-name (getf export :name))))))
                       (if (eq format :json)
                           (let ((report (append (funcall (getf export :report) objects spec)
-                                                (when (getf export :sources)
+                                                (when (cad-export-source-wanted? export query)
                                                   (list (cons "source" (cad-export-source-url req export))
                                                         (cons "license" *cad-export-license-line*))))))
                             (net.aserve:with-http-response (req ent :content-type "application/json")
@@ -322,14 +331,17 @@ or (values nil message)."
                                  (progn
                                    (write-cad-export-file temp-path format
                                                           (funcall (getf export :leaves) objects))
-                                   (when (and (eq format :step) (getf export :sources))
+                                   ;; the part's provenance always; the code's
+                                   ;; whereabouts only when asked (source=1)
+                                   (when (eq format :step)
                                      (%step-header-provenance!
                                       temp-path
-                                      (format nil "Genworks GDL ~(~a~): ~a; source ~a (~a)"
+                                      (format nil "Genworks GDL ~(~a~): ~a~@[; source ~a~]"
                                               (getf export :name)
                                               (net.uri:uri-query (net.aserve:request-uri req))
-                                              (cad-export-source-url req export)
-                                              *cad-export-license-short*)))
+                                              (and (cad-export-source-wanted? export query)
+                                                   (format nil "~a (~a)" (cad-export-source-url req export)
+                                                           *cad-export-license-short*)))))
                                    (%stream-file req ent temp-path
                                                  (ecase format (:step "model/step") (:iges "model/iges"))
                                                  (format nil "~a.~a" stem (ecase format (:step "stp") (:iges "igs")))))
