@@ -84,14 +84,22 @@ that built the file, for anyone who needs to trace it."
 ;;;
 ;;; Every paid file names where its code can be read: the free
 ;;; <path>/source endpoint serves the live definitions (reconstituted
-;;; from the running image, the same text the demo page's Source Code
-;;; panes show), the JSON report carries the URL, and a STEP file's
-;;; header description records the resource, the parameters and the
-;;; source URL, so a part found on a disk years later still says how
-;;; it was made.
+;;; from the running image), the JSON report carries the URL, and a
+;;; STEP file's header description records the resource, the
+;;; parameters and the source URL, so a part found on a disk years
+;;; later still says how it was made.  The served copy is for
+;;; verifying the result, under *cad-export-license-line* -- a
+;;; proprietary notice, the user's ruling of 2026-09-11.
 
 (defparameter *cad-export-license-line*
-  "GNU Affero General Public License v3.0 -- https://www.gnu.org/licenses/agpl-3.0.html")
+  "Copyright (c) 2026 Genworks International. Provided with a purchased result for verification of that result only; not licensed for any other use, reproduction or redistribution."
+  "The notice the served source carries (the user, 2026-09-11: the
+source is for their verification purposes only, proprietary headers
+unless we decide otherwise).  One line to change if that ruling
+changes.")
+
+(defparameter *cad-export-license-short* "verification-only source"
+  "The same ruling in the few characters a STEP header has room for.")
 
 (defun cad-export-public-url (req path)
   "PATH as the client reached it: the client's scheme (X-Forwarded-Proto
@@ -108,7 +116,7 @@ behind an edge) and Host."
   "The registered sources as one text: define-objects reconstituted
 from the image, defuns from the Lisp's own source records."
   (with-output-to-string (s)
-    (format s ";;;; ~a -- the code behind ~a~%;;;; ~a~%;;;; Reconstituted live from the running Genworks GDL image.~%~%"
+    (format s ";;;; ~a -- the code behind ~a~%;;;; ~a~%;;;; Reconstituted live from the running Genworks GDL image, for verifying~%;;;; the result it came with.~%~%"
             (string-downcase (symbol-name (getf export :name))) (getf export :path)
             *cad-export-license-line*)
     (dolist (sym (getf export :sources))
@@ -317,10 +325,11 @@ or (values nil message)."
                                    (when (and (eq format :step) (getf export :sources))
                                      (%step-header-provenance!
                                       temp-path
-                                      (format nil "Genworks GDL ~(~a~): ~a; source ~a; AGPL-3.0"
+                                      (format nil "Genworks GDL ~(~a~): ~a; source ~a (~a)"
                                               (getf export :name)
                                               (net.uri:uri-query (net.aserve:request-uri req))
-                                              (cad-export-source-url req export))))
+                                              (cad-export-source-url req export)
+                                              *cad-export-license-short*)))
                                    (%stream-file req ent temp-path
                                                  (ecase format (:step "model/step") (:iges "model/iges"))
                                                  (format nil "~a.~a" stem (ecase format (:step "stp") (:iges "igs")))))
