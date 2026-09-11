@@ -90,6 +90,7 @@ in (the numbers) and (the report)."
 
   :hidden-objects
   ((solid :type 'extruded-solid
+          :display-controls (list :color :steel-blue)
           :profile (the outline)
           :axis-vector (make-vector 0 0 1)
           :distance (or (the face-width) 1))))

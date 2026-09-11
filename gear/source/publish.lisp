@@ -55,6 +55,7 @@ distance, turned so a tooth space faces the driver's tooth.")
            :center (make-point (the center-distance) 0 0)))
   :hidden-objects
   ((solid :type 'extruded-solid
+          :display-controls (list :color :goldenrod)
           :profile (the placed)
           :axis-vector (make-vector 0 0 1)
           :distance (or (the driver face-width) 1))))

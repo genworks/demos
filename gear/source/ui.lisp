@@ -28,7 +28,7 @@ it."
   ((title "Involute Gear")
    (demo-slug "gear")
    (view-projection-key :gear-view)
-   (view-projection-vector (unitize-vector (make-vector 0.35 -0.7 1)))
+   (view-projection-vector (unitize-vector (make-vector 1 -1 0.7)))
 
    (module 2 :settable)
    (teeth 20 :settable)
