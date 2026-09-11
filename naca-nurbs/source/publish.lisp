@@ -168,5 +168,9 @@ no instance table."
                     (list "tolerance" :type :number :default 0.0005 :range '(0.0001 0.01) :example "0.0005"
                           :description "NURBS approximation tolerance, 0.0001 to 0.01; default 0.0005"))
   :build #'airfoil-family
+  ;; the code behind the file, served free at /demo/naca-nurbs/cad/source
+  :sources '(generate-naca-samples get-airfoil-spec analytical-tangent-parametric
+             analytical-curvature-parametric naca-nurbs-curves
+             parse-airfoil-digits export-airfoil-curves airfoil-family)
   :filename (lambda (spec)
               (format nil "naca-~{~a~^-~}" (mapcar #'symbol-name (getf spec :digits)))))

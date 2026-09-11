@@ -107,6 +107,10 @@ so an undercut refusal surfaces here, as a 400, not in the file."
   :build #'gear-family
   :leaves (lambda (objects) (loop for object in objects append (the-object object cad-objects)))
   :report #'gear-family-report
+  ;; the code behind the file, served free at /demo/gear/cad/source
+  :sources '(gear-numbers pair-numbers gear-profile-segments gear-report
+             %involute-samples %fillet-samples involute-function undercut-shift-minimum
+             gear-profile tooth-curves rotated-tooth meshed-mate gear-family)
   :filename (lambda (spec)
               (format nil "gear-m~a-z~a~@[-z~a~]~@[-b~a~]"
                       (getf spec :module) (getf spec :teeth) (getf spec :mate) (getf spec :face-width))))
