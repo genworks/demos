@@ -110,5 +110,25 @@ so an undercut refusal surfaces here, as a 400, not in the file."
               (format nil "gear-m~a-z~a~@[-z~a~]~@[-b~a~]"
                       (getf spec :module) (getf spec :teeth) (getf spec :mate) (getf spec :face-width))))
 
+;; The shared demos stylesheet lives at <demos>/css/ and serves at
+;; /demo/css/; every demo publishes it (idempotent).
+(defparameter *demos-dir*
+  (let ((base (glisp:source-pathname)))
+    (make-pathname :name nil :type nil
+                   :directory (butlast (pathname-directory base) 2)
+                   :defaults base)))
+
 (defun publish-gear! (&key host)
+  "The page (non-shared sessions, mortal through session-control-mixin),
+its free session-bound download, the stylesheet, and the declared
+stateless export."
+  (demos-common:register-portal-demo! "gear" "Involute Gear")
+  (with-all-servers (server)
+    (publish-gwl-app "/demo/gear" 'gear-ui :server server :host host)
+    (net.aserve:publish :path *cad-download-path*
+                        :server server :host host
+                        :function 'respond-with-gear-download)
+    (publish-directory :prefix "/demo/css/"
+                       :server server :host host
+                       :destination (namestring (merge-pathnames "css/" *demos-dir*))))
   (demos-common:publish-cad-export! :gear :host host))

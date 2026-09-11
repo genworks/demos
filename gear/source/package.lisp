@@ -14,4 +14,4 @@ per gear, a meshing pair at its working center distance, and the
 numbers a drawing needs.")
   (:export #:gear-numbers #:pair-numbers #:gear-profile-segments #:gear-report
            #:gear-profile #:meshed-mate #:involute-function #:undercut-shift-minimum
-           #:publish-gear! #:respond-with-gear-export #:parse-gear-request #:gear-family))
+           #:gear-ui #:publish-gear! #:respond-with-gear-download #:gear-family))

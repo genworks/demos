@@ -8,4 +8,5 @@
  :serial t :version "20260911" :depends-on (:demos-common)
  :components
  ((:file "source/package") (:file "source/geometry")
-  (:file "source/profile") (:file "source/publish")))
+  (:file "source/profile") (:file "source/ui")
+  (:file "source/publish")))
