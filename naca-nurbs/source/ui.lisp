@@ -46,8 +46,8 @@ viewports with quality metrics below."
                             x->t t->x lower-bound
                             ternary-search-maximum find-max-gradient-region
                             respond-with-cad-download
-                            respond-with-cad-export export-airfoil-curves
-                            write-airfoil-cad-file))
+                            parse-airfoil-digits export-airfoil-curves airfoil-family
+                            demos-common:respond-with-cad-export))
 
    ;; The menu control round-trips its keyword through the form as a
    ;; string; normalize back to the catalog keyword.

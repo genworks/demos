@@ -5,6 +5,7 @@
 (asdf:defsystem #:demos-common :description
  "The Gendl™ demos-common Subsystem" :author "Genworks International"
  :license "Affero Gnu Public License (http://www.gnu.org/licenses/)"
- :serial t :version "20260908" :depends-on nil :components
- ((:file "source/package") (:gdl "source/portal")
-  (:file "source/source-strings") (:gdl "source/ui-mixin")))
+ :serial t :version "20260911" :depends-on nil :components
+ ((:file "source/cad-export") (:file "source/package")
+  (:gdl "source/portal") (:file "source/source-strings")
+  (:gdl "source/ui-mixin")))

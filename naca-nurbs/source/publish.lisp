@@ -26,16 +26,13 @@
 ;; The stateless CAD export (2026-09-11): the airfoil family built from
 ;; query parameters alone, no minted instance, so an API caller (or an
 ;; agent paying through the x402 rule in front of it) gets the file in
-;; one GET.  /cad takes ?format=step|iges; /cad.stp and /cad.igs fix
-;; the format by name.
+;; one GET.  Declared below through demos-common's export declaration,
+;; which owns the handler and hands the cyclops rule its discovery
+;; block; /cad takes ?format=step|iges, /cad.stp and /cad.igs fix it.
 (defparameter *cad-export-path* "/demo/naca-nurbs/cad")
 
 (defparameter *cad-export-max-family* 12
   "Most airfoils one request may put in a single file.")
-(defparameter *cad-export-points-range* '(50 . 500)
-  "Allowed sample-point counts per airfoil (the UI's own range).")
-(defparameter *cad-export-tolerance-range* '(0.0001 . 0.01)
-  "Allowed approximation tolerances (the UI's own range).")
 
 ;; Individual (non-shared) sessions: each visitor's first hit on
 ;; /demo/naca-nurbs mints a fresh instance and redirects to its
@@ -52,16 +49,12 @@
                         :server server
                         :host host
                         :function 'respond-with-cad-download)
-    (dolist (suffix '("" ".stp" ".igs"))
-      (net.aserve:publish :path (concatenate 'string *cad-export-path* suffix)
-                          :server server
-                          :host host
-                          :function 'respond-with-cad-export))
     (publish-directory :prefix "/demo/css/"
                        :server server
                        :host host
                        :destination (namestring
-                                     (merge-pathnames "css/" *demos-dir*)))))
+                                     (merge-pathnames "css/" *demos-dir*))))
+  (demos-common:publish-cad-export! :naca-nurbs :host host))
 
 (defun respond-with-cad-download (req ent)
   "Stream the session's composed airfoil curves as IGES or STEP.
@@ -112,30 +105,8 @@ through the requested format's lens."
 ;;;;   &points=216               samples per airfoil, 50..500
 ;;;;   &tolerance=0.0005         NURBS approximation tolerance
 ;;;;   &format=step|iges         or ask for /cad.stp, /cad.igs
-;;;;
-;;;; Nothing is looked up and nothing is kept: each request builds
-;;;; its naca-nurbs-curves objects, writes them through the format
-;;;; lens, streams the file, and lets the objects go.
 
-(defun %export-query-value (query name)
-  (let ((value (cdr (assoc name query :test #'string-equal))))
-    (and value (plusp (length (string-trim " " value)))
-         (string-trim " " value))))
-
-(defun %export-parse-number (string name)
-  "A plain decimal number from a query parameter, or an error naming it."
-  (let ((cleaned (string-trim " " string)))
-    (unless (and (plusp (length cleaned))
-                 (every #'(lambda (c) (or (digit-char-p c) (find c "+-.eE"))) cleaned))
-      (error "~a must be a number, got ~s" name cleaned))
-    (let ((value (let ((*read-eval* nil)
-                       (*read-default-float-format* 'double-float))
-                   (ignore-errors (read-from-string cleaned)))))
-      (unless (realp value)
-        (error "~a must be a number, got ~s" name cleaned))
-      value)))
-
-(defun %export-parse-digits (string)
+(defun parse-airfoil-digits (string)
   "\"0012,2412, 23012\" -> (:|0012| :|2412| :|23012|), each code checked
 against the NACA 4-/5-digit parser so an unknown series fails here,
 before any geometry is built."
@@ -157,11 +128,6 @@ before any geometry is built."
           (error "~a is not a supported NACA code (~a)" code e))))
     (mapcar #'(lambda (code) (intern code :keyword)) codes)))
 
-(defun %export-check-range (value range name)
-  (unless (<= (car range) value (cdr range))
-    (error "~a must be between ~a and ~a, got ~a" name (car range) (cdr range) value))
-  value)
-
 (defun export-airfoil-curves (airfoil &key (n-points 216) (chord 1) (tolerance 0.0005))
   "The upper and lower composed NURBS curves of one NACA airfoil, unit
 chord along +x from the leading edge at the origin, scaled to CHORD
@@ -179,80 +145,28 @@ no instance table."
                     (make-object 'boxed-curve :curve-in curve :scale chord))
                 curves))))
 
-(defun write-airfoil-cad-file (path format curves)
-  "Write CURVES to PATH through the STEP or IGES lens -- the same
-with-format call the session download makes, one entity per curve, all
-of them in the one file."
-  (ecase format
-    (:step (with-format (step path)
-             (dolist (curve curves) (write-the-object curve cad-output))))
-    (:iges (with-format (iges path)
-             (dolist (curve curves) (write-the-object curve cad-output))))))
+(defun airfoil-family (spec)
+  "Every airfoil's two curves, in request order."
+  (loop for airfoil in (getf spec :digits)
+        append (export-airfoil-curves airfoil
+                                      :n-points (getf spec :points)
+                                      :chord (getf spec :chord)
+                                      :tolerance (getf spec :tolerance))))
 
-(defun %export-respond-error (req ent message)
-  (net.aserve:with-http-response (req ent :response net.aserve:*response-bad-request*
-                                          :content-type "text/plain")
-    (net.aserve:with-http-body (req ent)
-      (format (net.aserve:request-reply-stream req)
-              "~a~%~%usage: ~a?digits=2412[,0012,...]&chord=1&points=216&tolerance=0.0005&format=step|iges~%"
-              message *cad-export-path*))))
-
-(defun respond-with-cad-export (req ent)
-  "GET handler for the stateless export: parse and check the query,
-build the family, stream it as an attachment.  A bad parameter is a
-400 with the reason in plain text; nothing about the request survives
-the response."
-  (let* ((query (net.aserve:request-query req))
-         (path (net.uri:uri-path (net.aserve:request-uri req)))
-         (format-param (%export-query-value query "format")))
-    (multiple-value-bind (spec problem)
-        (ignore-errors
-          (let* ((format (cond ((and format-param (string-equal format-param "iges")) :iges)
-                               ((and format-param (string-equal format-param "step")) :step)
-                               (format-param (error "format must be step or iges, got ~s" format-param))
-                               ((glisp:match-regexp "\\.igs$" path) :iges)
-                               (t :step)))
-                 (airfoils (%export-parse-digits
-                            (or (%export-query-value query "digits")
-                                (error "digits is required, e.g. digits=2412"))))
-                 (chord (let ((c (%export-query-value query "chord")))
-                          (if c (%export-parse-number c "chord") 1)))
-                 (points (let ((p (%export-query-value query "points")))
-                           (if p (round (%export-parse-number p "points")) 216)))
-                 (tolerance (let ((tol (%export-query-value query "tolerance")))
-                              (if tol (%export-parse-number tol "tolerance") 0.0005))))
-            (unless (plusp chord) (error "chord must be positive, got ~a" chord))
-            (%export-check-range points *cad-export-points-range* "points")
-            (%export-check-range tolerance *cad-export-tolerance-range* "tolerance")
-            (list :format format :airfoils airfoils :chord chord
-                  :points points :tolerance tolerance)))
-      (if (null spec)
-          (%export-respond-error req ent (princ-to-string problem))
-          (destructuring-bind (&key format airfoils chord points tolerance) spec
-            (let* ((extension (ecase format (:step "stp") (:iges "igs")))
-                   (filename (format nil "naca-~{~a~^-~}.~a"
-                                     (mapcar #'symbol-name airfoils) extension))
-                   (temp-path (namestring (glisp:temporary-file))))
-              (unwind-protect
-                   (progn
-                     (write-airfoil-cad-file
-                      temp-path format
-                      (loop for airfoil in airfoils
-                            append (export-airfoil-curves airfoil
-                                                          :n-points points
-                                                          :chord chord
-                                                          :tolerance tolerance)))
-                     (net.aserve:with-http-response
-                         (req ent :content-type (ecase format
-                                                  (:step "model/step")
-                                                  (:iges "model/iges")))
-                       (setf (net.aserve:reply-header-slot-value req :content-disposition)
-                             (format nil "attachment; filename=~s" filename))
-                       (net.aserve:with-http-body (req ent)
-                         (with-open-file (in temp-path :element-type '(unsigned-byte 8))
-                           (let ((buffer (make-array 4096 :element-type '(unsigned-byte 8)))
-                                 (out (net.aserve:request-reply-stream req)))
-                             (loop for count = (read-sequence buffer in)
-                                   while (plusp count)
-                                   do (write-sequence buffer out :end count)))))))
-                (ignore-errors (delete-file temp-path)))))))))
+(demos-common:register-cad-export! :naca-nurbs
+  :path *cad-export-path*
+  :description "NACA 4/5-digit airfoil family as STEP or IGES NURBS curves (digits, chord, points, tolerance)"
+  :mime-type "model/step"
+  :formats '(:step :iges)
+  :parameters (list (list "digits" :type :string :required t :example "2412"
+                          :parse #'parse-airfoil-digits
+                          :description "One NACA 4- or 5-digit code, or a comma-separated family of up to twelve, e.g. 0012,2412,23012")
+                    (list "chord" :type :number :default 1 :range '(1d-6 1d9) :example 1
+                          :description "Scale factor applied to the unit chord; default 1")
+                    (list "points" :type :integer :default 216 :range '(50 500) :example 216
+                          :description "Sample points per airfoil, 50 to 500; default 216")
+                    (list "tolerance" :type :number :default 0.0005 :range '(0.0001 0.01) :example "0.0005"
+                          :description "NURBS approximation tolerance, 0.0001 to 0.01; default 0.0005"))
+  :build #'airfoil-family
+  :filename (lambda (spec)
+              (format nil "naca-~{~a~^-~}" (mapcar #'symbol-name (getf spec :digits)))))

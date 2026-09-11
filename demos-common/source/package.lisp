@@ -11,4 +11,8 @@
 public Gendl demos under /demo/ on genworks.com.")
   (:export #:demo-ui-mixin #:function-source-string #:*hack-base* #:*url-prefix*
            ;; the workshop portal (portal.gdl)
-           #:*console-base* #:*portal-demos* #:register-portal-demo! #:publish-portal!))
+           #:*console-base* #:*portal-demos* #:register-portal-demo! #:publish-portal!
+           ;; the export declaration (cad-export.lisp)
+           #:register-cad-export! #:publish-cad-export! #:find-cad-export
+           #:respond-with-cad-export #:cad-export-discovery #:cad-export-usage
+           #:parse-cad-export-request #:write-cad-export-file #:*cad-exports*))
