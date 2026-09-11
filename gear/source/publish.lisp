@@ -95,7 +95,9 @@ naming the parameter."
           :shift (%number-or query "shift" 0d0 *shift-range*)
           :backlash (%number-or query "backlash" 0d0 '(0 . 10))
           :mate (%number-or query "mate" nil *teeth-range* :integer? t)
-          :mate-shift (%number-or query "mate_shift" 0d0 *shift-range*))))
+          :mate-shift (%number-or query "mate_shift" 0d0 *shift-range*)
+          ;; a face width asks for the solid instead of the outline
+          :face-width (%number-or query "face_width" nil '(0.01 . 1000)))))
 
 (defun gear-family (spec)
   "The gear-profile objects a request describes: the gear, and its
@@ -104,7 +106,8 @@ mate meshed at the working center distance when :mate is given."
                             :module (getf spec :module) :teeth (getf spec :teeth)
                             :pressure-angle (getf spec :pressure-angle)
                             :shift (getf spec :shift) :backlash (getf spec :backlash)
-                            :mate-teeth (getf spec :mate) :mate-shift (getf spec :mate-shift)))
+                            :mate-teeth (getf spec :mate) :mate-shift (getf spec :mate-shift)
+                            :face-width (getf spec :face-width)))
          (mate (when (getf spec :mate)
                  (make-object 'meshed-mate :driver gear))))
     (remove nil (list gear mate))))
@@ -125,7 +128,8 @@ distance, turned so a tooth space faces the driver's tooth.")
                                                (rad->deg (the turn))
                                                (make-vector 0 0 1))
                         :top (make-vector 0 0 1)))
-   (outline (the placed)))
+   (outline (the placed))
+   (cad-objects (if (the driver face-width) (list (the solid)) (list (the placed)))))
   :objects
   ((mate :type 'gear-profile
          :module (the driver module) :teeth (the driver mate-teeth)
@@ -135,14 +139,22 @@ distance, turned so a tooth space faces the driver's tooth.")
            :curve-in (the mate outline)
            :orientation (the rotation)
            :orientation-center (make-point 0 0 0)
-           :center (make-point (the center-distance) 0 0))))
+           :center (make-point (the center-distance) 0 0)))
+  :hidden-objects
+  ((solid :type 'extruded-solid
+          :profile (the placed)
+          :axis-vector (make-vector 0 0 1)
+          :distance (or (the driver face-width) 1))))
 
 (defun write-gear-cad-file (path format objects)
-  (ecase format
-    (:step (with-format (step path)
-             (dolist (object objects) (write-the-object (the-object object outline) cad-output))))
-    (:iges (with-format (iges path)
-             (dolist (object objects) (write-the-object (the-object object outline) cad-output))))))
+  "Each object's cad-objects (its solid when a face width was asked,
+else its outline) through the format lens, all in the one file."
+  (flet ((leaves () (loop for object in objects append (the-object object cad-objects))))
+    (ecase format
+      (:step (with-format (step path)
+               (dolist (leaf (leaves)) (write-the-object leaf cad-output))))
+      (:iges (with-format (iges path)
+               (dolist (leaf (leaves)) (write-the-object leaf cad-output)))))))
 
 (defun %respond-error (req ent message)
   (net.aserve:with-http-response (req ent :response net.aserve:*response-bad-request*
@@ -186,8 +198,9 @@ the report; a bad parameter is a 400 with the reason."
             (if (null objects)
                 (%respond-error req ent (princ-to-string build-problem))
                 (let* ((format (getf spec :format))
-                       (stem (format nil "gear-m~a-z~a~@[-z~a~]"
-                                     (getf spec :module) (getf spec :teeth) (getf spec :mate))))
+                       (stem (format nil "gear-m~a-z~a~@[-z~a~]~@[-b~a~]"
+                                     (getf spec :module) (getf spec :teeth) (getf spec :mate)
+                                     (getf spec :face-width))))
                   (if (eq format :json)
                       (net.aserve:with-http-response (req ent :content-type "application/json")
                         (net.aserve:with-http-body (req ent)

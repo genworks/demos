@@ -38,7 +38,10 @@ in (the numbers) and (the report)."
    ;; the pair's mate, when this gear is drawn at a working center
    ;; distance from another: nil, or the mate's tooth count
    (mate-teeth nil :settable)
-   (mate-shift 0d0 :settable))
+   (mate-shift 0d0 :settable)
+   ;; a face width makes the gear a solid (the outline extruded along
+   ;; +z); nil keeps it a planar outline
+   (face-width nil :settable))
 
   :computed-slots
   ((numbers (gear-numbers :module (the module) :teeth (the teeth)
@@ -67,7 +70,11 @@ in (the numbers) and (the report)."
    (all-curves (loop for tooth in (list-elements (the teeth-curves))
                      append (the-object tooth ordered)))
 
-   (outline-objects (list (the outline))))
+   (outline-objects (list (the outline)))
+
+   ;; what the CAD export writes: the solid when there is a face
+   ;; width, else the outline
+   (cad-objects (if (the face-width) (list (the solid)) (list (the outline)))))
 
   :objects
   ((tooth-0 :type 'tooth-curves
@@ -79,7 +86,13 @@ in (the numbers) and (the report)."
                  :angle (* (the-child index) (the pitch-angle)))
 
    (outline :type 'composed-curve
-            :curves (the all-curves))))
+            :curves (the all-curves)))
+
+  :hidden-objects
+  ((solid :type 'extruded-solid
+          :profile (the outline)
+          :axis-vector (make-vector 0 0 1)
+          :distance (or (the face-width) 1))))
 
 (define-object tooth-curves (base-object)
   :documentation (:description "The curves of one tooth period, from
