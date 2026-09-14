@@ -1,25 +1,49 @@
+# Copyright © 2026 Gornskew Enterprises
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.  Distributed WITHOUT
+# ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+# GitLab CI for genworks/demos: one job, a COLD LOAD of the demos.
+#
+# Every push starts the web server and then loads demos-common and
+# every demo system through Quicklisp on the published free Gendl
+# image, genworks/gendl:devo-ccl, an image that has never seen this
+# repo -- what a stack host's services-init does (ci/cold-load.lisp,
+# which also lists the systems the free image cannot load and why).
+# Any error and any warning signalled while a system loads fails the
+# job.  A warm development image, where the packages already exist,
+# cannot catch a file that sorts ahead of package.lisp or a dependency
+# nobody declared; that is how every production demo went dark on
+# 2026-09-11, and this is the check that would have caught it.
+#
+# Nothing is built, pushed or deployed here: demos reach the stack
+# hosts through the repos deploy script, not through CI.  A pull-only
+# job needs no Docker Hub credentials.
+#
+# Runner: the amd64 docker-executor instance runner (tag "amd64"); the
+# job runs inside the Gendl image itself, so it never touches balaram's
+# shell runner and never contends with the gendl/gdl pipelines there.
+# The 2023 configuration this replaced wanted runners tagged
+# demos+website that no longer exist, so no pipeline had started since
+# 2023-12-08.
 
 stages:
-  - update
-  - build
-  - fetch
-  - deploy
+  - load
 
-update:
-  stage: update
+cold-load:
+  stage: load
+  image: genworks/gendl:devo-ccl
   tags:
-    - demos
-    - website
+    - amd64
+  variables:
+    GIT_DEPTH: "1"
   script:
-    - bash -x ./ci-script.sh linux git-pull
-  
-build:
-  stage: build
-  tags:
-    - demos
-    - website
-  when: manual
-  script:
-    - bash -x ./ci-script.sh linux load-script make-genworks-site
-
-
+    # A private copy of the checkout: register-local-projects writes
+    # system-index.txt beside the .asd files, and the build directory
+    # may belong to the runner's helper rather than the image's user.
+    - rm -rf /tmp/demos && cp -r "$CI_PROJECT_DIR" /tmp/demos
+    - cd /opt/gendl
+    - DEMOS_DIR=/tmp/demos ./gdl/program/gdl-ccl -n -b --load /tmp/demos/ci/cold-load.lisp
