@@ -23,26 +23,30 @@
 # hosts through the repos deploy script, not through CI.  A pull-only
 # job needs no Docker Hub credentials.
 #
-# Runner: the amd64 instance runner (tag "amd64") is balaram's SHELL
-# executor, the leg the gornskew repos build on; there is no amd64
-# docker executor, so an `image:` keyword would be ignored (pipeline
-# 3737).  The job therefore runs the image itself with docker, the
-# checkout streamed in as a tar so no bind mount and no file ownership
-# is involved, and the container gets no network.  It never goes
-# through the legacy build manager the gendl/gdl pipelines drive.  The
-# 2023 configuration this replaced wanted runners tagged demos+website
-# that no longer exist, so no pipeline had started since 2023-12-08.
+# Runner: the amd64 DOCKER executor (tag "amd64-docker", on balaram
+# beside the shell runner that carries plain "amd64"): the job runs
+# inside the Gendl image itself, as the image's own user, with the
+# checkout at $CI_PROJECT_DIR.  This is also the standing proof that
+# the published Gendl images work as CI images under a docker
+# executor.  It never goes through the legacy build manager the
+# gendl/gdl pipelines drive.  The 2023 configuration this replaced
+# wanted runners tagged demos+website that no longer exist, so no
+# pipeline had started since 2023-12-08.
 
 stages:
   - load
 
 cold-load:
   stage: load
+  image: genworks/gendl:devo-ccl
   tags:
-    - amd64
+    - amd64-docker
   variables:
     GIT_DEPTH: "1"
-    IMAGE: genworks/gendl:devo-ccl
   script:
-    - docker pull -q "$IMAGE"
-    - tar -C "$CI_PROJECT_DIR" -cf - . | docker run -i --rm --network none "$IMAGE" bash -c 'mkdir -p /tmp/demos && tar -C /tmp/demos -xf - && cd /opt/gendl && DEMOS_DIR=/tmp/demos ./gdl/program/gdl-ccl -n -b --load /tmp/demos/ci/cold-load.lisp </dev/null'
+    # A private copy of the checkout: register-local-projects writes
+    # system-index.txt beside the .asd files, and the build directory
+    # belongs to the runner's helper rather than the image's user.
+    - rm -rf /tmp/demos && cp -r "$CI_PROJECT_DIR" /tmp/demos
+    - cd /opt/gendl
+    - DEMOS_DIR=/tmp/demos ./gdl/program/gdl-ccl -n -b --load /tmp/demos/ci/cold-load.lisp
