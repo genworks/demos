@@ -41,7 +41,9 @@ reconstituted live from the in-memory definitions, and a standard
 viewport driven by the demo's objects list -- one viewport-html-div
 whose renderer follows graphics-format: shaded (x3dom), wireframe
 (svg) or hidden-line (svg through base-view's hidden-line remover),
-switched by the toggle the pane wears."
+switched by the toggle the pane wears -- and whose projection is the
+demo's own angle or one of Gendl's standard views, chosen from the
+View menu beside it."
    :author "Genworks International")
 
   :input-slots
@@ -54,7 +56,8 @@ which names it to the holodeck; nil renders no Hack-this-demo link."
     demo-slug nil)
 
    ;; Standard single-viewport setup; demos override the vector to
-   ;; pick their hero camera angle.
+   ;; pick their hero camera angle, which the View menu offers as
+   ;; "Default" ahead of Gendl's standard views.
    (view-projection-key :demo-view)
    (view-projection-vector (unitize-vector (make-vector 1 -1 0.5)))
 
@@ -69,10 +72,23 @@ hidden edges removed).  The toggle on the pane switches it."
 
    (graphics-format (the graphics-format-default) :settable)
 
-   ;; The toggle the viewport wears, top-right: Shaded | Wireframe |
-   ;; Hidden line.  Handed to the viewport-html-div as its header-html.
+   ;; The projection the viewport shows: the demo's own angle under
+   ;; its view-projection-key, or the standard view the View menu
+   ;; picked.  The renderers forget a remembered pose when the
+   ;; projection changes, so Top means Top.
+   (view-key (the view-control value))
+   (view-vector (if (eql (the view-key) (the view-projection-key))
+                    (the view-projection-vector)
+                    (getf *standard-views* (the view-key))))
+
+   ;; What the viewport wears, handed to the viewport-html-div as its
+   ;; header-html: the View menu top-left, and the Shaded | Wireframe
+   ;; | Hidden line toggle top-right.
    (viewport-toolbar-html
     (with-lhtml-string ()
+      (:div :class "absolute left-1 top-1 z-10 flex items-center rounded bg-white/80 px-2 py-0.5 text-xs shadow backdrop-blur select-none"
+        (:span :class "text-gray-600" "View")
+        (str (the view-control form-control)))
       (:div :class "absolute right-1 top-1 z-10 flex overflow-hidden rounded bg-white/80 text-xs shadow backdrop-blur select-none"
         (dolist (choice '((:x3dom "Shaded") (:svg "Wireframe") (:hidden-line "Hidden line")))
           (let ((active? (eql (first choice) (the graphics-format))))
@@ -267,15 +283,30 @@ hidden edges removed).  The toggle on the pane switches it."
                  (package-name (symbol-package sym)) (symbol-name sym))))))
 
   :objects
-  ;; The viewport is the section: its renderer child follows
-  ;; image-format, so switching the format re-renders this one div
-  ;; through gdlAjax (the same arrangement as sluice's panes).
-  ((viewport-area :type 'viewport-html-div
+  ;; The View menu: the demo's own angle, then the standard views.
+  ;; A change posts through gdlAjax and re-renders the viewport.
+  ((view-control :type 'menu-form-control
+                 :default (the view-projection-key)
+                 :size 1
+                 :ajax-submit-on-change? t
+                 :class "cursor-pointer text-xs text-gray-700"
+                 :style "background:transparent;border:0;padding:0 0 0 0.25rem"
+                 :choice-plist (list (the view-projection-key) "Default"
+                                     :trimetric "Trimetric"
+                                     :front "Front" :rear "Rear"
+                                     :left "Left" :right "Right"
+                                     :top "Top" :bottom "Bottom"))
+
+   ;; The viewport is the section: its renderer child follows
+   ;; image-format and its view-object the projection, so switching
+   ;; either re-renders this one div through gdlAjax (the same
+   ;; arrangement as sluice's panes).
+   (viewport-area :type 'viewport-html-div
                   :image-format (if (eql (the graphics-format) :hidden-line)
                                     :svg (the graphics-format))
                   :hidden-lines (if (eql (the graphics-format) :hidden-line)
                                     :remove :draw)
                   :header-html (the viewport-toolbar-html)
-                  :projection-key (the view-projection-key)
-                  :projection-vector (the view-projection-vector)
+                  :projection-key (the view-key)
+                  :projection-vector (the view-vector)
                   :display-list-object-roots (the objects))))
