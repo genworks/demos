@@ -29,6 +29,11 @@ the demo's source file.")
   "Alist of (slug . title) for the demos this host serves, in
 registration order -- what the index lists and /on accepts.")
 
+(defvar *portal-links* nil
+  "Alist of (label . href) for the other doors this host offers beside
+the demos -- the prompt lab, say -- listed under them on the index.
+The deploying stack's services-init pushes what it has published.")
+
 (defun register-portal-demo! (slug title)
   "Register a demo with the portal, replacing an earlier entry for SLUG."
   (setf *portal-demos*
@@ -88,6 +93,10 @@ registration order -- what the index lists and /on accepts.")
                       (when *console-base*
                         (cl-who:htm (:a :href (format nil "~a/?arg=~a" *console-base* slug)
                                         :target "_blank" :rel "noopener" "Source in Emacs"))))))))
+           (dolist (link *portal-links*)
+             (cl-who:htm
+              (:p :class "note"
+                  (:a :href (cdr link) (cl-who:esc (car link))))))
            (:p :class "note"
                "Any Gendl object, not just a demo: "
                (:a :href "/sluice-demo" :target "_blank" :rel "noopener" "sluice")

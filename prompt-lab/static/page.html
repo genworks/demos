@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Prompt lab</title>
+<style>
+  :root { color-scheme: light; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 14px/1.45 system-ui, sans-serif; color: #111827; background: #f3f4f6; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 1rem; padding: 0.45rem 1rem; background: #1f2937; color: #f9fafb; flex-wrap: wrap; }
+  header strong { font-size: 1.05rem; }
+  header .tag { font-size: 0.75rem; padding: 0.1rem 0.5rem; border-radius: 9999px; background: #4f46e5; color: #fff; }
+  header .spacer { flex: 1; }
+  header a { color: #c7d2fe; text-decoration: none; }
+  header a:hover { text-decoration: underline; }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(20rem, 30rem) 1fr; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-rows: auto minmax(24rem, 60vh); } }
+  aside { min-height: 0; overflow: auto; padding: 1rem; display: flex; flex-direction: column; gap: 1rem; border-right: 1px solid #d1d5db; background: #fff; }
+  section.viewer { min-height: 0; position: relative; background: #e5e7eb; }
+  section.viewer iframe { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
+  section.viewer .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6b7280; text-align: center; padding: 2rem; pointer-events: none; }
+  h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; margin: 0 0 0.4rem; }
+  textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem; resize: vertical; }
+  textarea.code { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; min-height: 14rem; white-space: pre; }
+  button { font: inherit; padding: 0.4rem 0.9rem; border: 0; border-radius: 0.375rem; background: #4f46e5; color: #fff; cursor: pointer; }
+  button:disabled { background: #a5b4fc; cursor: default; }
+  button.quiet { background: #e5e7eb; color: #111827; }
+  .row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+  .muted { color: #6b7280; font-size: 0.8rem; }
+  .error { color: #b91c1c; font-size: 0.85rem; }
+  ol.log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; max-height: 22rem; overflow: auto; }
+  ol.log li { padding: 0.35rem 0.5rem; border-radius: 0.375rem; background: #f9fafb; border-left: 3px solid #d1d5db; white-space: pre-wrap; word-break: break-word; }
+  ol.log li time { display: block; font-size: 0.7rem; color: #9ca3af; }
+  ol.log li.prompt { border-color: #4f46e5; background: #eef2ff; }
+  ol.log li.tool { border-color: #9ca3af; color: #4b5563; font-size: 0.8rem; }
+  ol.log li.tool-error { border-color: #f59e0b; background: #fffbeb; font-size: 0.8rem; }
+  ol.log li.done { border-color: #10b981; background: #ecfdf5; }
+  ol.log li.stopped { border-color: #ef4444; background: #fef2f2; }
+  ol.log li.reload { border-color: #0ea5e9; background: #f0f9ff; font-size: 0.8rem; }
+  .working { display: inline-block; width: 0.8rem; height: 0.8rem; border: 2px solid #c7d2fe; border-top-color: #4f46e5; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  details.fine { font-size: 0.78rem; color: #4b5563; }
+  details.fine summary { cursor: pointer; color: #6b7280; }
+</style>
+</head>
+<body>
+<header>
+  <strong>Prompt lab</strong>
+  <span class="tag">experimental</span>
+  <span>describe a part; a modeling agent builds it as a parametric Gendl model you can inspect and edit</span>
+  <span class="spacer"></span>
+  <a id="viewer-tab" href="#" target="_blank" rel="noopener" hidden>viewer in its own tab</a>
+  <a id="console-tab" href="#" target="_blank" rel="noopener" hidden>source in Emacs</a>
+  <a id="new-session" href="#">new session</a>
+</header>
+<main>
+  <aside>
+    <form id="prompt-form">
+      <h2>What should it build?</h2>
+      <textarea id="prompt" rows="4" maxlength="2000" placeholder="A bracket 120 by 80 mm, 6 mm thick, with four 8 mm mounting holes..." required></textarea>
+      <div class="row" style="margin-top:0.5rem">
+        <button id="build" type="submit">Build</button>
+        <span id="busy" class="working" hidden></span>
+        <span id="quota" class="muted"></span>
+      </div>
+      <div id="prompt-error" class="error" hidden></div>
+    </form>
+
+    <div>
+      <h2>Progress</h2>
+      <ol id="log" class="log"></ol>
+      <div id="usage" class="muted" style="margin-top:0.4rem"></div>
+    </div>
+
+    <div>
+      <h2>Model file</h2>
+      <textarea id="source" class="code" spellcheck="false" placeholder="The model's source appears here once it is built. Edit it and save to see your change."></textarea>
+      <div class="row" style="margin-top:0.5rem">
+        <button id="save" class="quiet" type="button" disabled>Save and reload</button>
+        <span id="source-state" class="muted"></span>
+      </div>
+      <div id="source-error" class="error" hidden></div>
+    </div>
+
+    <details class="fine">
+      <summary>About this page</summary>
+      <p>An experiment, offered as is, with no guarantees about what gets built. Your prompts and the generated code are logged. Generated code is yours under the GNU Affero General Public License, like Gendl itself. Each session allows a handful of prompts; take a copy of the model file if you want to keep it.</p>
+    </details>
+  </aside>
+  <section class="viewer">
+    <iframe id="viewer" title="Model viewer" hidden></iframe>
+    <div id="viewer-empty" class="empty">The model appears here once it is built.</div>
+  </section>
+</main>
+<script>
+(function () {
+  var base = location.pathname.replace(/\/+$/, '');
+  var session = new URLSearchParams(location.search).get('session');
+  var $ = function (id) { return document.getElementById(id); };
+  var logCount = 0, builds = 0, sourceDirty = false, lastSource = null, viewerUrl = null, timer = null;
+
+  function api(path, body) {
+    var options = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {};
+    return fetch(base + '/api/' + path + (body ? '' : '?session=' + encodeURIComponent(session)), options)
+      .then(function (r) { return r.json().then(function (j) { j._status = r.status; return j; }); });
+  }
+
+  function showError(id, text) {
+    var el = $(id);
+    el.textContent = text || '';
+    el.hidden = !text;
+  }
+
+  function ensureSession() {
+    if (session) return Promise.resolve();
+    return api('session', {}).then(function (r) {
+      session = r.session;
+      history.replaceState(null, '', base + '?session=' + session);
+    });
+  }
+
+  function formatTime(seconds) {
+    var d = new Date(seconds * 1000);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function render(state) {
+    var log = state.log || [];
+    var list = $('log');
+    for (var i = logCount; i < log.length; i++) {
+      var li = document.createElement('li');
+      li.className = log[i].kind;
+      var t = document.createElement('time');
+      t.textContent = formatTime(log[i].time) + ' · ' + log[i].kind;
+      li.appendChild(t);
+      li.appendChild(document.createTextNode(log[i].text));
+      list.appendChild(li);
+    }
+    if (log.length > logCount) list.scrollTop = list.scrollHeight;
+    logCount = log.length;
+
+    $('busy').hidden = !state.busy;
+    $('build').disabled = state.busy || state.prompts_used >= state.prompts_allowed;
+    $('quota').textContent = state.busy ? 'working…'
+      : (state.prompts_allowed - state.prompts_used) + ' of ' + state.prompts_allowed + ' prompts left';
+    var u = state.usage || {};
+    $('usage').textContent = (u.input || u.output) ? 'tokens: ' + u.input + ' in, ' + u.output + ' out, ' + u.cache_read + ' cached' : '';
+
+    if (state.model_source !== lastSource) {
+      lastSource = state.model_source;
+      if (!sourceDirty) $('source').value = state.model_source || '';
+    }
+    $('save').disabled = state.busy || !sourceDirty;
+
+    viewerUrl = state.viewer_url;
+    $('viewer-tab').href = viewerUrl;
+    $('viewer-tab').hidden = !state.model_defined;
+    if (state.console_url) { $('console-tab').href = state.console_url; $('console-tab').hidden = false; }
+
+    var completed = log.filter(function (e) { return e.kind === 'done' || e.kind === 'reload'; }).length;
+    if (state.model_defined && (completed !== builds || $('viewer').hidden)) {
+      builds = completed;
+      $('viewer').src = viewerUrl + '&t=' + Date.now();
+      $('viewer').hidden = false;
+      $('viewer-empty').hidden = true;
+    }
+    schedule(state.busy ? 2000 : 8000);
+  }
+
+  function schedule(ms) {
+    clearTimeout(timer);
+    timer = setTimeout(poll, ms);
+  }
+
+  function poll() {
+    if (!session) return;
+    api('state').then(function (state) {
+      if (state._status === 404) {
+        showError('prompt-error', 'This session is gone (the server restarted, or it expired). Start a new one.');
+        $('build').disabled = true;
+        return;
+      }
+      render(state);
+    }).catch(function () { schedule(5000); });
+  }
+
+  $('prompt-form').addEventListener('submit', function (event) {
+    event.preventDefault();
+    var prompt = $('prompt').value.trim();
+    if (!prompt) return;
+    showError('prompt-error', '');
+    $('build').disabled = true;
+    ensureSession().then(function () {
+      return api('prompt', { session: session, prompt: prompt });
+    }).then(function (r) {
+      if (r.error) { showError('prompt-error', r.error); $('build').disabled = false; return; }
+      $('prompt').value = '';
+      schedule(500);
+    }).catch(function (e) { showError('prompt-error', 'Could not reach the lab: ' + e); $('build').disabled = false; });
+  });
+
+  $('source').addEventListener('input', function () {
+    sourceDirty = true;
+    $('save').disabled = false;
+    $('source-state').textContent = 'edited';
+  });
+
+  $('save').addEventListener('click', function () {
+    showError('source-error', '');
+    $('save').disabled = true;
+    api('model', { session: session, source: $('source').value }).then(function (r) {
+      if (r.error) { showError('source-error', r.error); $('save').disabled = false; return; }
+      sourceDirty = false;
+      $('source-state').textContent = r.ok ? 'saved and loaded' : 'saved; see the log';
+      schedule(300);
+    }).catch(function (e) { showError('source-error', 'Could not save: ' + e); $('save').disabled = false; });
+  });
+
+  $('new-session').addEventListener('click', function (event) {
+    event.preventDefault();
+    location.href = base;
+  });
+
+  if (session) poll();
+})();
+</script>
+</body>
+</html>
