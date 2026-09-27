@@ -226,23 +226,36 @@ of 2026-09-25)."
 ;; own handler.
 ;;
 
+(defun render-keyword (string)
+  "A projection, layout or hidden-lines name from the API as the drawing
+system's keyword (the image's case)."
+  (and (stringp string) (plusp (length string))
+       (every #'(lambda (c) (or (alphanumericp c) (char= c #\-))) string)
+       ;; through the reader, so the keyword wears the image's case
+       (let ((*read-eval* nil)) (read-from-string (format nil ":~a" string)))))
+
 (defun render (session &key projection layout hidden-lines)
+  "A wireframe of (make-object 'model), drawn by the drawing system's svg
+lens and rasterised in process (raster.lisp): no Ghostscript."
   (handler-case
       (with-time-limit (*render-seconds* "render")
-      (let* ((arguments `((:expression . "(make-object 'model)")
-                          (:package . ,(session-package-name session))
-                          ,@(when projection `((:projection . ,projection)))
-                          ,@(when layout `((:layout . ,layout)))
-                          ,@(when hidden-lines `((:hidden-lines . ,hidden-lines)))))
-             (content (gendl-lisply::render-png-handler arguments))
-             (image (find "image" content :key #'(lambda (c) (cdr (assoc "type" c :test #'string=)))
-                                          :test #'equal)))
-        (if image
-            (values (list (image-block (cdr (assoc "data" image :test #'string=)))) nil)
-            (values (list (text-block "Render failed: ~a"
-                                      (or (cdr (assoc "text" (first content) :test #'string=))
-                                          content)))
-                    t))))
+        (let* ((*package* (session-package session))
+               (model (eval (read-from-string "(make-object 'model)")))
+               (file (merge-pathnames "render.svg" (session-directory session))))
+          (unwind-protect
+               (progn
+                 (apply (if layout 'gdl-user::generate-multi-view-drawing 'gdl-user::generate-single-view-drawing)
+                        :format :svg
+                        :output-file file
+                        :object-roots (list model)
+                        (append (if layout
+                                    (list :views-config (render-keyword layout))
+                                    (list :projection-vector (or (render-keyword projection) :trimetric)))
+                                (when (render-keyword hidden-lines)
+                                  (list :hidden-lines (render-keyword hidden-lines)))))
+                 (let ((png (render-svg-to-png (uiop:read-file-string file :external-format :utf-8))))
+                   (values (list (image-block (png-base64 png))) nil)))
+            (when (probe-file file) (ignore-errors (delete-file file))))))
     (error (condition)
       (values (list (text-block "Render failed: ~a" condition)) t))))
 
