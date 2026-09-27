@@ -236,7 +236,8 @@
     }).catch(function () {});
   }
   var $ = function (id) { return document.getElementById(id); };
-  var logCount = 0, builds = 0, sourceDirty = false, lastSource = null, viewerUrl = null, timer = null;
+  var logCount = 0, builds = 0, sourceDirty = false, lastSource = null, viewerUrl = null, timer = null, viewerLoaded = false;
+  window.addEventListener('pageshow', function (event) { if (event.persisted) viewerLoaded = false; });
   // Cloudflare Turnstile: rendered when the lab has a site key; each
   // token is single-use, so the widget is reset after every prompt.
   var turnstileKey = null, turnstileWidget = null, turnstileToken = null;
@@ -317,10 +318,12 @@
     logCount = log.length;
 
     $('busy').hidden = !state.busy;
-    $('build').disabled = state.busy || state.prompts_used >= state.prompts_allowed || !turnstileReady();
+    var capped = !state.prompts_unlimited && state.prompts_used >= state.prompts_allowed;
+    $('build').disabled = state.busy || capped || !turnstileReady();
     $('quota').textContent = state.busy ? 'working…'
       : !turnstileReady() ? 'checking you are human…'
-      : (state.prompts_allowed - state.prompts_used) + ' of ' + state.prompts_allowed + ' prompts left';
+      : state.prompts_unlimited ? 'prompts draw on your credits'
+      : (state.prompts_allowed - state.prompts_used) + ' of ' + state.prompts_allowed + ' free prompts left';
     var u = state.usage || {};
     $('usage').textContent = (u.input || u.output) ? 'tokens: ' + u.input + ' in, ' + u.output + ' out, ' + u.cache_read + ' cached' : '';
     renderSpend(state.spend);
@@ -337,7 +340,11 @@
     if (state.console_url) { $('console-tab').href = state.console_url; $('console-tab').hidden = false; }
 
     var completed = log.filter(function (e) { return e.kind === 'done' || e.kind === 'reload'; }).length;
-    if (state.model_defined && (completed !== builds || $('viewer').hidden)) {
+    // A browser coming back from the payment page may restore the
+    // iframe's old instance URL, which the server has since forgotten
+    // (a 404 in the viewer); a fresh src on the first render fixes it.
+    if (state.model_defined && (completed !== builds || $('viewer').hidden || !viewerLoaded)) {
+      viewerLoaded = true;
       builds = completed;
       $('viewer').src = viewerUrl + '&t=' + Date.now();
       $('viewer').hidden = false;

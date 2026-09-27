@@ -94,6 +94,13 @@ status instead: (refuse req ent *response-forbidden* \"No.\")."
 (defun prompts-used (session)
   (count :prompt (session-log session) :key #'second))
 
+(defun paying? (session)
+  "True when the session's wallet holds credit: the free-use caps (prompts
+a session, prompts and sessions an address a day) step aside, and the
+gate's budgets are what bind."
+  (let ((credits (session-credits session)))
+    (and (realp credits) (plusp credits))))
+
 (defun model-defined? (session)
   (let ((symbol (model-symbol session)))
     (and symbol (find-class symbol nil) t)))
@@ -193,6 +200,8 @@ it: the scheme and host the proxies forwarded."
        "busy" (if (session-busy? session) t 'yason:false)
        "prompts_used" (prompts-used session)
        "prompts_allowed" *max-prompts-per-session*
+       ;; with credit on the wallet the prompt cap does not apply
+       "prompts_unlimited" (if (paying? session) t 'yason:false)
        "usage" (h "input" (getf usage :input) "output" (getf usage :output)
                   "cache_read" (getf usage :cache-read) "cache_write" (getf usage :cache-write))
        "spend" (spend-state session)
@@ -227,9 +236,14 @@ One address opens at most *max-sessions-per-address* a day."
   (let* ((address (client-address req))
          (json (request-json req))
          (wallet (and json (gethash "wallet" json))))
-    (if (address-over-limit? address :sessions)
+    (if (and (address-over-limit? address :sessions)
+             ;; a wallet with credit opens sessions past the free cap
+             (not (and (wallet-id? wallet)
+                       (let ((balance (ignore-errors (gate-post "balance" (h "wallet" wallet)))))
+                         (and balance (realp (gethash "credits_cents" balance))
+                              (plusp (gethash "credits_cents" balance)))))))
         (refuse req ent *response-too-many-requests*
-                "This address has opened its ~a sessions for today.  Come back tomorrow, or bring your own agent."
+                "This address has opened its ~a free sessions for today.  Come back tomorrow, or bring your own agent."
                 *max-sessions-per-address*)
         (let ((session (make-session :address address :wallet (and (wallet-id? wallet) wallet))))
           (count-address! address :sessions)
@@ -318,12 +332,12 @@ prompt in a thread of its own; the page follows along through the state door."
            (refuse req ent "Say what to build."))
           ((> (length prompt) *max-prompt-length*)
            (refuse req ent "A prompt may have ~a characters at most." *max-prompt-length*))
-          ((>= (prompts-used session) *max-prompts-per-session*)
-           (refuse req ent "This session has used its ~a prompts.  Take a copy of the model file, or start a new session."
+          ((and (not (paying? session)) (>= (prompts-used session) *max-prompts-per-session*))
+           (refuse req ent "This session has used its ~a free prompts.  Buy modeling credits to keep going here, take a copy of the model file, or start a new session."
                    *max-prompts-per-session*))
-          ((address-over-limit? address :prompts)
+          ((and (not (paying? session)) (address-over-limit? address :prompts))
            (refuse req ent *response-too-many-requests*
-                   "This address has run its ~a prompts for today.  Take a copy of the model file, come back tomorrow, or bring your own agent."
+                   "This address has run its ~a free prompts for today.  Buy modeling credits to keep going, come back tomorrow, or bring your own agent."
                    *max-prompts-per-address*))
           ((session-busy? session)
            (refuse req ent "Still working on the previous request."))
