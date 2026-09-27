@@ -119,6 +119,69 @@ the page's editor shows, and what write-model takes back."
   (when *console-base*
     (format nil "~a/?arg=~a" *console-base* (namestring (session-model-file session)))))
 
+;;
+;; The gate's side doors -- balance, top-up, confirm -- beside the
+;; Messages door (guards.lisp knows the Turnstile one).  The gate holds
+;; the Stripe key and the wallet ledger; this side only relays for the
+;; page, and remembers what the gate said.
+;;
+
+(defun gate-door-url (name)
+  (format nil "~a/~a" (string-right-trim "/" *messages-url*) name))
+
+(defun gate-post (name object)
+  "POST OBJECT (a hash table) as JSON to the gate's side door NAME.
+Values: the parsed answer (a hash table, or nil) and the status."
+  (multiple-value-bind (status text) (post-json (gate-door-url name) (encode object) :seconds *gate-seconds*)
+    (let ((json (ignore-errors (yason:parse text))))
+      (values (and (hash-table-p json) json) status))))
+
+(defun note-balance (session json)
+  "Keep a balance answer from the gate on SESSION."
+  (let ((wallet (gethash "wallet" json))
+        (credits (gethash "credits_cents" json))
+        (cents (gethash "session_cents" json))
+        (allowance (gethash "allowance_cents" json)))
+    (when (and (stringp wallet) (plusp (length wallet))) (setf (session-wallet session) wallet))
+    (when (realp credits) (setf (session-credits session) credits))
+    (when (and (realp cents) (> cents (session-cents session))) (setf (session-cents session) cents))
+    (when (and (realp allowance) (plusp allowance)) (setf (session-allowance session) allowance))
+    (setf (session-balance session) json)
+    json))
+
+(defun refresh-balance! (session)
+  "Ask the gate about the session's spend and wallet; nothing on failure
+(a lab without a gate still works, it just shows no balance)."
+  (ignore-errors
+   (let ((json (gate-post "balance" (h "wallet" (session-wallet session) "session" (session-id session)))))
+     (when json (note-balance session json)))))
+
+(defun wallet-id? (string)
+  (and (stringp string) (= (length string) 24) (every #'(lambda (c) (digit-char-p c 16)) string)))
+
+(defun spend-state (session)
+  "What the page shows about money: the session's spend against the
+free allowance, the wallet's credit, and whether a top-up is offered."
+  (let ((balance (session-balance session)))
+    (h "session_cents" (session-cents session)
+       "allowance_cents" (or (session-allowance session) *free-allowance-cents*)
+       "charged_cents" (session-charged session)
+       "credits_cents" (session-credits session)
+       "wallet" (session-wallet session)
+       "topup" (if (and balance (eq (gethash "topup" balance) t)) t 'yason:false)
+       "topup_amounts" (or (and balance (gethash "topup_amounts" balance)) #())
+       "markup" (and balance (gethash "markup" balance)))))
+
+(defun page-url (req session)
+  "The page's own public URL for SESSION, as the visitor's browser has
+it: the scheme and host the proxies forwarded."
+  (flet ((header (value) (and (stringp value) (plusp (length value)) value)))
+    (let ((host (or (header (net.aserve:header-slot-value req :x-cyclops-forwarded-host))
+                    (header (net.aserve:header-slot-value req :host))
+                    "localhost"))
+          (proto (or (header (net.aserve:header-slot-value req :x-forwarded-proto)) "http")))
+      (format nil "~a://~a~a?session=~a" proto host *url-prefix* (session-id session)))))
+
 (defun session-state (session)
   (let ((usage (session-usage session)))
     (h "session" (session-id session)
@@ -127,6 +190,7 @@ the page's editor shows, and what write-model takes back."
        "prompts_allowed" *max-prompts-per-session*
        "usage" (h "input" (getf usage :input) "output" (getf usage :output)
                   "cache_read" (getf usage :cache-read) "cache_write" (getf usage :cache-write))
+       "spend" (spend-state session)
        "log" (map 'vector #'(lambda (entry)
                               (destructuring-bind (time kind text) entry
                                 (h "time" (epoch-seconds time)
@@ -153,17 +217,74 @@ the Turnstile site key (nil: no widget) and the limits it shows."
                            "prompt_max_length" *max-prompt-length*)))
 
 (defun session-door (req ent)
-  "POST <prefix>/api/session: open a session; answers its id.  One address
-opens at most *max-sessions-per-address* a day."
-  (let ((address (client-address req)))
+  "POST <prefix>/api/session {wallet?}: open a session; answers its id.
+One address opens at most *max-sessions-per-address* a day."
+  (let* ((address (client-address req))
+         (json (request-json req))
+         (wallet (and json (gethash "wallet" json))))
     (if (address-over-limit? address :sessions)
         (refuse req ent *response-too-many-requests*
                 "This address has opened its ~a sessions for today.  Come back tomorrow, or bring your own agent."
                 *max-sessions-per-address*)
-        (let ((session (make-session :address address)))
+        (let ((session (make-session :address address :wallet (and (wallet-id? wallet) wallet))))
           (count-address! address :sessions)
           (log-event session :note "Session ~a opened.  Describe what to build." (session-id session))
-          (respond-json req ent (h "session" (session-id session)))))))
+          (refresh-balance! session)
+          (respond-json req ent (h "session" (session-id session) "spend" (spend-state session)))))))
+
+(defun topup-door (req ent)
+  "POST <prefix>/api/topup {session, amount_cents}: a Stripe Checkout
+through the gate; answers {url, wallet} for the page to go to."
+  (let* ((json (request-json req))
+         (session (requested-session req json))
+         (amount (and json (gethash "amount_cents" json))))
+    (cond ((null session) (no-such-session req ent))
+          ((not (integerp amount)) (refuse req ent "Say how much."))
+          (t
+           (let ((url (page-url req session)))
+             (multiple-value-bind (answer status)
+                 (gate-post "topup" (h "wallet" (session-wallet session)
+                                       "amount_cents" amount
+                                       "success_url" url
+                                       "cancel_url" (concatenate 'string url "&topup=cancelled")))
+               (let ((checkout-url (and answer (gethash "url" answer)))
+                     (wallet (and answer (gethash "wallet" answer))))
+                 (cond ((and (eql status 200) (stringp checkout-url))
+                        (when (wallet-id? wallet) (setf (session-wallet session) wallet))
+                        (log-event session :note "Top-up started (~a).  Credit arrives when you come back from the payment page." (format-cents amount))
+                        (respond-json req ent (h "url" checkout-url "wallet" (session-wallet session))))
+                       (t (refuse req ent net.aserve:*response-service-unavailable* "~a"
+                                  (or (ignore-errors (gethash "message" (gethash "error" answer)))
+                                      "The top-up could not be started; try again in a moment.")))))))))))
+
+(defun format-cents (cents)
+  (if (and (realp cents) (>= cents 100))
+      (format nil "$~,2f" (/ cents 100))
+      (format nil "~,1f cents" (or cents 0))))
+
+(defun confirm-door (req ent)
+  "POST <prefix>/api/confirm {session, wallet, checkout}: the visitor is
+back from Stripe; have the gate credit the checkout once and answer the
+spend state with the outcome."
+  (let* ((json (request-json req))
+         (session (requested-session req json))
+         (wallet (and json (gethash "wallet" json)))
+         (checkout (and json (gethash "checkout" json))))
+    (cond ((null session) (no-such-session req ent))
+          ((not (wallet-id? wallet)) (refuse req ent "No wallet named."))
+          (t
+           (setf (session-wallet session) wallet)
+           (multiple-value-bind (answer status)
+               (gate-post "confirm" (h "wallet" wallet "checkout" checkout "session" (session-id session)))
+             (declare (ignore status))
+             (when answer (note-balance session answer))
+             (let ((outcome (and answer (gethash "outcome" answer))))
+               (when (equal outcome "credited")
+                 (log-event session :note "Credit added: ~a.  Builds beyond the free allowance now draw on it."
+                            (format-cents (session-credits session))))
+               (respond-json req ent (h "outcome" (or outcome "failed")
+                                        "text" (or (and answer (gethash "text" answer)) "The gate did not answer.")
+                                        "spend" (spend-state session)))))))))
 
 (defun state-door (req ent)
   "GET <prefix>/api/state?session=<id>: everything the page shows."
@@ -296,6 +417,8 @@ on every server."
     (net.aserve:publish :path (door-path "prompt") :server server :host host :function #'prompt-door)
     (net.aserve:publish :path (door-path "model") :server server :host host :function #'model-door)
     (net.aserve:publish :path (door-path "reload") :server server :host host :function #'reload-door)
+    (net.aserve:publish :path (door-path "topup") :server server :host host :function #'topup-door)
+    (net.aserve:publish :path (door-path "confirm") :server server :host host :function #'confirm-door)
     (publish-gwl-app (format nil "~a/viewer" *url-prefix*) 'viewer :server server :host host))
   (start-reaper!)
   *url-prefix*)

@@ -31,6 +31,17 @@
   (messages nil)
   ;; Token totals across every call of the session, a plist.
   (usage (list :input 0 :output 0 :cache-read 0 :cache-write 0))
+  ;; What the gate reports back with each answer (guards.lisp): the
+  ;; session's spend in cents, the free allowance, and the visitor's
+  ;; wallet -- its id, credit left and what it has been charged.
+  (cents 0)
+  (allowance nil)
+  (wallet nil)
+  (credits nil)
+  (charged 0)
+  ;; The gate's last balance answer (a hash table): whether top-ups
+  ;; are offered, the amounts, the markup.
+  (balance nil)
   ;; What the page shows: (time kind text) entries, newest last.
   (log nil)
   ;; True while a prompt is being worked on.
@@ -39,7 +50,7 @@
 (defun new-session-id ()
   (format nil "~(~{~2,'0x~}~)" (loop repeat 6 collect (random 256 (make-random-state t)))))
 
-(defun make-session (&key (id (new-session-id)) address)
+(defun make-session (&key (id (new-session-id)) address wallet)
   "Create a session: a fresh package defined like gdl-user, and a directory
 under *workspace-root*.  Returns the session."
   (let* ((keyword (intern (string-upcase (format nil "pl-~a" id)) :keyword))
@@ -47,7 +58,7 @@ under *workspace-root*.  Returns the session."
                          (find-package keyword)))
          (directory (merge-pathnames (format nil "~a/" id) *workspace-root*))
          (session (make-session-internal :id id :package-name (package-name package)
-                                         :directory directory :address address)))
+                                         :directory directory :address address :wallet wallet)))
     (ensure-directories-exist directory)
     (bt:with-lock-held (*sessions-lock*)
       (setf (gethash id *sessions*) session))

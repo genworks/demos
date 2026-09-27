@@ -79,6 +79,19 @@ verification on a trusted ship only; nil when the gate adds it.")
 (defparameter *turnstile-seconds* 15
   "Integer. Seconds one token verification may take.")
 
+(defparameter *free-allowance-cents* 100
+  "Integer. The free allowance a session has at the gate, in cents, as the
+page shows it before the gate has reported (the gate's
+:session-budget-cents is the one that counts; it reports it back with
+every answer, and that value replaces this one).")
+
+(defparameter *wallet-header* "X-Prompt-Lab-Wallet"
+  "String. The header naming the visitor's wallet to the gate on each
+call; must match the gate's :wallet-header.")
+
+(defparameter *gate-seconds* 20
+  "Integer. Seconds a gate side door (balance, top-up, confirm) may take.")
+
 (defparameter *session-lifetime* 7200
   "Integer. Seconds a session may sit unused before the reaper deletes it
 (its package and its directory).  A busy session is never reaped.")

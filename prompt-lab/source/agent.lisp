@@ -151,9 +151,9 @@ ship has moved to gate mode) all mean the same thing -- no key here."
 
 (defun post-json (url body &key headers (seconds *call-seconds*))
   "POST BODY (a UTF-8 string) to URL with HEADERS (an alist of name and
-value).  Returns (values status text), a refusal's body included;
-signals when the host cannot be reached."
-  (multiple-value-bind (answer status)
+value).  Returns (values status text response-headers), a refusal's
+body included; signals when the host cannot be reached."
+  (multiple-value-bind (answer status response-headers)
       (net.aserve.client:do-http-request url
         :method :post
         :content (babel:string-to-octets body :encoding :utf-8)
@@ -167,18 +167,46 @@ signals when the host cannot be reached."
     (values status
             (cond ((stringp answer) answer)
                   ((null answer) "")
-                  (t (babel:octets-to-string answer :encoding :utf-8))))))
+                  (t (babel:octets-to-string answer :encoding :utf-8)))
+            response-headers)))
+
+(defun response-header (headers name)
+  "The value of NAME in a do-http-request header alist (keys are
+keywords), or nil."
+  (cdr (assoc name headers :test #'string-equal)))
+
+(defun response-number (headers name)
+  (let ((value (response-header headers name)))
+    (and (stringp value)
+         (let ((n (ignore-errors (let ((*read-default-float-format* 'double-float))
+                                   (read-from-string value)))))
+           (and (realp n) n)))))
+
+(defun note-gate-answer (session headers)
+  "Keep what the gate says about money with each answer: the session's
+cents so far, the allowance, the wallet's charge and credit."
+  (let ((cents (response-number headers "X-Cyclops-LLM-Gate-Session-Cents"))
+        (allowance (response-number headers "X-Cyclops-LLM-Gate-Allowance"))
+        (charged (response-number headers "X-Cyclops-LLM-Gate-Charged"))
+        (credits (response-number headers "X-Cyclops-LLM-Gate-Credits")))
+    (when cents (setf (session-cents session) cents))
+    (when allowance (setf (session-allowance session) allowance))
+    (when (and charged (plusp charged)) (incf (session-charged session) charged))
+    (when credits (setf (session-credits session) credits))))
 
 (defun call-messages-api (session)
   "POST the session's next request.  Returns the parsed response (a hash
 table) or signals an error."
   (let ((key (api-key)))
-    (multiple-value-bind (status text)
+    (multiple-value-bind (status text headers)
         (post-json *messages-url* (request-body session)
                    :headers (append (list (cons "anthropic-version" "2023-06-01"))
                                     (when key (list (cons "x-api-key" key)))
-                                    (list (cons "X-Prompt-Lab-Session" (session-id session))))
+                                    (list (cons "X-Prompt-Lab-Session" (session-id session)))
+                                    (when (session-wallet session)
+                                      (list (cons *wallet-header* (session-wallet session)))))
                    :seconds *call-seconds*)
+      (note-gate-answer session headers)
       ;; A gate or a proxy may answer with something other than JSON
       ;; (an HTML error page); say what came back, with its status,
       ;; rather than fall over inside the parser.
@@ -246,6 +274,9 @@ the session busy (start-prompt!)."
                       (return (log-event session :stopped "API error: ~a"
                                          (gethash "message" (gethash "error" response)))))
                     (add-usage session (gethash "usage" response))
+                    (when (and (session-wallet session) (null (session-credits session)))
+                      ;; a wallet named but never priced: ask once
+                      (refresh-balance! session))
                     ;; the assistant turn goes back verbatim, thinking and all
                     (setf (session-messages session)
                           (append (session-messages session)
