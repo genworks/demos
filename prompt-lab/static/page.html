@@ -182,13 +182,18 @@
 
   // The card form on this page (Stripe's embedded Checkout) when the
   // gate hands out a publishable key; otherwise Stripe's hosted page.
+  // Every purchase spends the current Turnstile token, like every prompt.
+  function takeToken() { var t = turnstileToken; resetTurnstile(); return t; }
+
   function startTopup(amount) {
     chosenAmount = amount;
     closeCheckout();
+    if (!turnstileReady()) { note('Complete the human check first.'); return; }
     if (!publishableKey) return startHostedTopup(amount);
     note('Preparing the card form…');
+    var token = takeToken();
     ensureSession().then(function () {
-      return Promise.all([api('topup', { session: session, amount_cents: amount, embedded: true }), loadStripeJs()]);
+      return Promise.all([api('topup', { session: session, amount_cents: amount, embedded: true, turnstile: token }), loadStripeJs()]);
     }).then(function (results) {
       var r = results[0];
       if (r.error) { note(r.error); return; }
@@ -205,9 +210,11 @@
   }
 
   function startHostedTopup(amount) {
+    if (!turnstileReady()) { note('Complete the human check first.'); return; }
     note('Opening the payment page…');
+    var token = takeToken();
     ensureSession().then(function () {
-      return api('topup', { session: session, amount_cents: amount });
+      return api('topup', { session: session, amount_cents: amount, turnstile: token });
     }).then(function (r) {
       if (r.error) { note(r.error); return; }
       keepWallet(r);

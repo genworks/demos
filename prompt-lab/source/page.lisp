@@ -259,9 +259,22 @@ page, or {client_secret, publishable_key, wallet} for the in-page form."
   (let* ((json (request-json req))
          (session (requested-session req json))
          (amount (and json (gethash "amount_cents" json)))
-         (embedded? (and json (eq (gethash "embedded" json) t))))
+         (embedded? (and json (eq (gethash "embedded" json) t)))
+         (address (client-address req)))
+    (let ((verdict :unchecked))
+      (flet ((verified? ()
+               (when (eq verdict :unchecked)
+                 (setf verdict (multiple-value-list
+                                (verify-turnstile (and json (gethash "turnstile" json)) address))))
+               (first verdict))
+             (reason () (or (second verdict) "Complete the human check first.")))
     (cond ((null session) (no-such-session req ent))
           ((not (integerp amount)) (refuse req ent "Say how much."))
+          ;; a public Checkout for small amounts draws card testers: a
+          ;; fresh Turnstile token before every purchase, as before every
+          ;; prompt (checked once -- a token is single-use)
+          ((not (verified?))
+           (refuse req ent net.aserve:*response-forbidden* "~a" (reason)))
           (t
            (let ((url (page-url req session)))
              (multiple-value-bind (answer status)
@@ -282,7 +295,7 @@ page, or {client_secret, publishable_key, wallet} for the in-page form."
                                                  "wallet" (session-wallet session))))
                        (t (refuse req ent net.aserve:*response-service-unavailable* "~a"
                                   (or (ignore-errors (gethash "message" (gethash "error" answer)))
-                                      "The top-up could not be started; try again in a moment.")))))))))))
+                                      "The top-up could not be started; try again in a moment.")))))))))))))
 
 (defun format-cents (cents)
   (if (and (realp cents) (>= cents 100))
