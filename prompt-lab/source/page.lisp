@@ -160,17 +160,22 @@ Values: the parsed answer (a hash table, or nil) and the status."
   (and (stringp string) (= (length string) 24) (every #'(lambda (c) (digit-char-p c 16)) string)))
 
 (defun spend-state (session)
-  "What the page shows about money: the session's spend against the
-free allowance, the wallet's credit, and whether a top-up is offered."
-  (let ((balance (session-balance session)))
-    (h "session_cents" (session-cents session)
-       "allowance_cents" (or (session-allowance session) *free-allowance-cents*)
-       "charged_cents" (session-charged session)
-       "credits_cents" (session-credits session)
+  "What the page shows about money, in MODELING CREDITS -- the one unit
+the visitor ever sees.  A credit is a cent of the wallet's balance; the
+session's spend and its free allowance, which the gate keeps in the
+API's cents, are converted at the gate's rate so free and paid read on
+one scale.  Tokens never appear."
+  (let* ((balance (session-balance session))
+         (rate (or (and balance (let ((m (gethash "markup" balance))) (and (realp m) m))) 1))
+         (allowance (or (session-allowance session) *free-allowance-cents*)))
+    (h "credits_used" (round (* rate (session-cents session)))
+       "credits_free" (round (* rate allowance))
+       "credits_from_wallet" (round (session-charged session))
+       "credits_balance" (and (session-credits session) (max 0 (round (session-credits session))))
        "wallet" (session-wallet session)
        "topup" (if (and balance (eq (gethash "topup" balance) t)) t 'yason:false)
        "topup_amounts" (or (and balance (gethash "topup_amounts" balance)) #())
-       "markup" (and balance (gethash "markup" balance)))))
+       "publishable_key" (or (and balance (gethash "publishable_key" balance)) ""))))
 
 (defun page-url (req session)
   "The page's own public URL for SESSION, as the visitor's browser has
@@ -233,11 +238,13 @@ One address opens at most *max-sessions-per-address* a day."
           (respond-json req ent (h "session" (session-id session) "spend" (spend-state session)))))))
 
 (defun topup-door (req ent)
-  "POST <prefix>/api/topup {session, amount_cents}: a Stripe Checkout
-through the gate; answers {url, wallet} for the page to go to."
+  "POST <prefix>/api/topup {session, amount_cents, embedded?}: a Stripe
+Checkout through the gate.  Answers {url, wallet} for Stripe's hosted
+page, or {client_secret, publishable_key, wallet} for the in-page form."
   (let* ((json (request-json req))
          (session (requested-session req json))
-         (amount (and json (gethash "amount_cents" json))))
+         (amount (and json (gethash "amount_cents" json)))
+         (embedded? (and json (eq (gethash "embedded" json) t))))
     (cond ((null session) (no-such-session req ent))
           ((not (integerp amount)) (refuse req ent "Say how much."))
           (t
@@ -246,13 +253,18 @@ through the gate; answers {url, wallet} for the page to go to."
                  (gate-post "topup" (h "wallet" (session-wallet session)
                                        "amount_cents" amount
                                        "success_url" url
-                                       "cancel_url" (concatenate 'string url "&topup=cancelled")))
+                                       "cancel_url" (concatenate 'string url "&topup=cancelled")
+                                       "embedded" (if embedded? t 'yason:false)))
                (let ((checkout-url (and answer (gethash "url" answer)))
+                     (client-secret (and answer (gethash "client_secret" answer)))
                      (wallet (and answer (gethash "wallet" answer))))
-                 (cond ((and (eql status 200) (stringp checkout-url))
+                 (cond ((and (eql status 200) (or (stringp checkout-url) (stringp client-secret)))
                         (when (wallet-id? wallet) (setf (session-wallet session) wallet))
-                        (log-event session :note "Top-up started (~a).  Credit arrives when you come back from the payment page." (format-cents amount))
-                        (respond-json req ent (h "url" checkout-url "wallet" (session-wallet session))))
+                        (log-event session :note "Buying ~:d modeling credits.  They arrive when the payment completes." amount)
+                        (respond-json req ent (h "url" checkout-url
+                                                 "client_secret" client-secret
+                                                 "publishable_key" (gethash "publishable_key" (spend-state session))
+                                                 "wallet" (session-wallet session))))
                        (t (refuse req ent net.aserve:*response-service-unavailable* "~a"
                                   (or (ignore-errors (gethash "message" (gethash "error" answer)))
                                       "The top-up could not be started; try again in a moment.")))))))))))
@@ -280,8 +292,8 @@ spend state with the outcome."
              (when answer (note-balance session answer))
              (let ((outcome (and answer (gethash "outcome" answer))))
                (when (equal outcome "credited")
-                 (log-event session :note "Credit added: ~a.  Builds beyond the free allowance now draw on it."
-                            (format-cents (session-credits session))))
+                 (log-event session :note "Credits added: ~:d on your balance.  Builds beyond the free credits draw on it."
+                            (round (or (session-credits session) 0))))
                (respond-json req ent (h "outcome" (or outcome "failed")
                                         "text" (or (and answer (gethash "text" answer)) "The gate did not answer.")
                                         "spend" (spend-state session)))))))))
@@ -393,6 +405,9 @@ opens; the tree, the menus and the headset button are the sluice's own."
 
    (draw-model!
     ()
+    ;; hidden lines removed by default: the wireframe reads as a solid
+    ;; object rather than a cage (the remover is fast since 2026-09-27)
+    (ignore-errors (the viewport (set-slot! :hidden-lines :remove)))
     (when (the root-object)
       (ignore-errors (the viewport (draw-leaves! (the root-object))))))))
 

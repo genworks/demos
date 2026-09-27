@@ -77,12 +77,21 @@
     </div>
 
     <div id="spend-box">
-      <h2>Spend</h2>
-      <div id="spend" class="muted">Each build draws on a free allowance; the running total shows here.</div>
+      <h2>Modeling credits</h2>
+      <div id="spend" class="muted">Every session starts with free modeling credits; each build spends some. The running count shows here.</div>
       <meter id="spend-meter" min="0" max="100" value="0" style="width:100%; margin-top:0.3rem"></meter>
-      <div id="topup" class="row" style="margin-top:0.5rem" hidden>
-        <span class="muted">Add credit (drawn at a small markup once the free allowance is spent):</span>
-        <span id="topup-buttons"></span>
+      <div id="topup" style="margin-top:0.5rem" hidden>
+        <div class="row">
+          <span class="muted">Buy more:</span>
+          <span id="topup-buttons"></span>
+        </div>
+        <div id="checkout-box" hidden style="margin-top:0.6rem">
+          <div id="checkout"></div>
+          <div class="row" style="margin-top:0.4rem">
+            <button id="checkout-close" class="quiet" type="button">Close</button>
+            <a id="checkout-hosted" href="#" class="muted">more payment options</a>
+          </div>
+        </div>
       </div>
       <div id="spend-note" class="muted" hidden></div>
     </div>
@@ -120,23 +129,28 @@
   var checkout = params.get('checkout'), topupCancelled = params.get('topup') === 'cancelled';
   var topupButtonsMade = false;
 
-  function cents(c) { return c == null ? '' : (c >= 100 ? '$' + (c / 100).toFixed(2) : (Math.round(c * 10) / 10) + '¢'); }
+  // Money on this page is MODELING CREDITS, free and bought alike; the
+  // only dollars are on the buy buttons.  A credit is a cent of balance.
+  function credits(n) { return (n == null ? 0 : Math.round(n)).toLocaleString(); }
+  function dollars(c) { return '$' + (c / 100).toFixed(c % 100 ? 2 : 0); }
+  var publishableKey = '', embeddedCheckout = null, chosenAmount = null;
 
   function renderSpend(spend) {
     if (!spend) return;
-    var used = spend.session_cents || 0, allowance = spend.allowance_cents || 0;
-    var text = 'this session: ' + cents(used) + ' of ' + cents(allowance) + ' free';
-    if (spend.charged_cents > 0) text += ' · ' + cents(spend.charged_cents) + ' drawn from your credit';
-    if (spend.credits_cents != null) text += ' · credit left: ' + cents(Math.max(0, spend.credits_cents));
+    var used = spend.credits_used || 0, free = spend.credits_free || 0;
+    var text = 'this session: ' + credits(used) + ' of ' + credits(free) + ' free credits';
+    if (spend.credits_from_wallet > 0) text += ' · ' + credits(spend.credits_from_wallet) + ' from your balance';
+    if (spend.credits_balance != null) text += ' · balance: ' + credits(spend.credits_balance) + ' credits';
     $('spend').textContent = text;
-    $('spend-meter').max = allowance || 100;
-    $('spend-meter').value = Math.min(used, allowance || 100);
+    $('spend-meter').max = free || 100;
+    $('spend-meter').value = Math.min(used, free || 100);
+    if (spend.publishable_key) publishableKey = spend.publishable_key;
     if (spend.topup && !topupButtonsMade && spend.topup_amounts && spend.topup_amounts.length) {
       topupButtonsMade = true;
       spend.topup_amounts.forEach(function (amount) {
         var b = document.createElement('button');
         b.type = 'button'; b.className = 'quiet'; b.style.marginLeft = '0.4rem';
-        b.textContent = cents(amount);
+        b.textContent = credits(amount) + ' credits for ' + dollars(amount);
         b.addEventListener('click', function () { startTopup(amount); });
         $('topup-buttons').appendChild(b);
       });
@@ -146,16 +160,67 @@
 
   function note(text) { var el = $('spend-note'); el.textContent = text || ''; el.hidden = !text; }
 
+  function keepWallet(r) {
+    if (r && r.wallet) { wallet = r.wallet; try { localStorage.setItem('prompt-lab-wallet', wallet); } catch (e) {} }
+  }
+
+  function loadStripeJs() {
+    if (window.Stripe) return Promise.resolve();
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = 'https://js.stripe.com/v3/'; s.async = true;
+      s.onload = resolve; s.onerror = function () { reject(new Error('Stripe.js did not load')); };
+      document.head.appendChild(s);
+    });
+  }
+
+  function closeCheckout() {
+    if (embeddedCheckout) { try { embeddedCheckout.destroy(); } catch (e) {} embeddedCheckout = null; }
+    $('checkout-box').hidden = true;
+    $('checkout').innerHTML = '';
+  }
+
+  // The card form on this page (Stripe's embedded Checkout) when the
+  // gate hands out a publishable key; otherwise Stripe's hosted page.
   function startTopup(amount) {
+    chosenAmount = amount;
+    closeCheckout();
+    if (!publishableKey) return startHostedTopup(amount);
+    note('Preparing the card form…');
+    ensureSession().then(function () {
+      return Promise.all([api('topup', { session: session, amount_cents: amount, embedded: true }), loadStripeJs()]);
+    }).then(function (results) {
+      var r = results[0];
+      if (r.error) { note(r.error); return; }
+      keepWallet(r);
+      if (!r.client_secret) return startHostedTopup(amount);
+      var stripe = window.Stripe(r.publishable_key || publishableKey);
+      return stripe.initEmbeddedCheckout({ clientSecret: r.client_secret }).then(function (co) {
+        embeddedCheckout = co;
+        $('checkout-box').hidden = false;
+        co.mount('#checkout');
+        note('');
+      });
+    }).catch(function (e) { note('Could not open the card form: ' + e); startHostedTopup(amount); });
+  }
+
+  function startHostedTopup(amount) {
     note('Opening the payment page…');
     ensureSession().then(function () {
       return api('topup', { session: session, amount_cents: amount });
     }).then(function (r) {
       if (r.error) { note(r.error); return; }
-      if (r.wallet) { wallet = r.wallet; try { localStorage.setItem('prompt-lab-wallet', wallet); } catch (e) {} }
+      keepWallet(r);
       location.href = r.url;
-    }).catch(function (e) { note('Could not start the top-up: ' + e); });
+    }).catch(function (e) { note('Could not start the payment: ' + e); });
   }
+
+  $('checkout-close').addEventListener('click', function () { closeCheckout(); note(''); });
+  $('checkout-hosted').addEventListener('click', function (event) {
+    event.preventDefault();
+    closeCheckout();
+    if (chosenAmount) startHostedTopup(chosenAmount);
+  });
 
   function confirmTopup() {
     if (!checkout || !wallet) return Promise.resolve();
@@ -163,7 +228,7 @@
       return api('confirm', { session: session, wallet: wallet, checkout: checkout });
     }).then(function (r) {
       renderSpend(r.spend);
-      note(r.outcome === 'credited' ? 'Thank you: your credit is in.' :
+      note(r.outcome === 'credited' ? 'Thank you: your credits are in.' :
            r.outcome === 'already' ? 'That payment was already credited.' :
            r.outcome === 'unpaid' ? 'The payment has not completed yet; reload in a moment.' :
            'The payment could not be confirmed: ' + r.text);
@@ -339,7 +404,7 @@
   });
 
   loadConfig();
-  if (topupCancelled) { note('The top-up was cancelled; nothing was charged.'); history.replaceState(null, '', base + (session ? '?session=' + session : '')); }
+  if (topupCancelled) { note('The purchase was cancelled; nothing was charged.'); history.replaceState(null, '', base + (session ? '?session=' + session : '')); }
   if (checkout) confirmTopup().then(function () { if (session) poll(); });
   else if (session) poll();
 })();
