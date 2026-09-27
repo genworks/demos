@@ -61,6 +61,7 @@
     <form id="prompt-form">
       <h2>What should it build?</h2>
       <textarea id="prompt" rows="4" maxlength="2000" placeholder="A bracket 120 by 80 mm, 6 mm thick, with four 8 mm mounting holes..." required></textarea>
+      <div id="turnstile" style="margin-top:0.5rem" hidden></div>
       <div class="row" style="margin-top:0.5rem">
         <button id="build" type="submit">Build</button>
         <span id="busy" class="working" hidden></span>
@@ -101,6 +102,42 @@
   var session = new URLSearchParams(location.search).get('session');
   var $ = function (id) { return document.getElementById(id); };
   var logCount = 0, builds = 0, sourceDirty = false, lastSource = null, viewerUrl = null, timer = null;
+  // Cloudflare Turnstile: rendered when the lab has a site key; each
+  // token is single-use, so the widget is reset after every prompt.
+  var turnstileKey = null, turnstileWidget = null, turnstileToken = null;
+
+  function turnstileReady() { return !turnstileKey || !!turnstileToken; }
+
+  function renderTurnstile() {
+    if (!turnstileKey || !window.turnstile) return;
+    $('turnstile').hidden = false;
+    turnstileWidget = window.turnstile.render('#turnstile', {
+      sitekey: turnstileKey,
+      size: 'flexible',
+      callback: function (token) { turnstileToken = token; $('build').disabled = false; $('quota').textContent = ''; },
+      'expired-callback': function () { turnstileToken = null; },
+      'error-callback': function (code) { turnstileToken = null; showError('prompt-error', 'The human check could not load (' + code + ').  Reload the page.'); }
+    });
+  }
+
+  function resetTurnstile() {
+    turnstileToken = null;
+    if (turnstileWidget !== null && window.turnstile) window.turnstile.reset(turnstileWidget);
+  }
+
+  function loadConfig() {
+    return fetch(base + '/api/config').then(function (r) { return r.json(); }).then(function (config) {
+      turnstileKey = config.turnstile_site_key || null;
+      if (!turnstileKey) return;
+      $('build').disabled = true;
+      $('quota').textContent = 'checking you are human…';
+      window.__turnstileLoaded = renderTurnstile;
+      var script = document.createElement('script');
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=__turnstileLoaded&render=explicit';
+      script.async = true; script.defer = true;
+      document.head.appendChild(script);
+    }).catch(function () { /* no config door: an older lab; carry on without a widget */ });
+  }
 
   function api(path, body) {
     var options = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {};
@@ -143,8 +180,9 @@
     logCount = log.length;
 
     $('busy').hidden = !state.busy;
-    $('build').disabled = state.busy || state.prompts_used >= state.prompts_allowed;
+    $('build').disabled = state.busy || state.prompts_used >= state.prompts_allowed || !turnstileReady();
     $('quota').textContent = state.busy ? 'working…'
+      : !turnstileReady() ? 'checking you are human…'
       : (state.prompts_allowed - state.prompts_used) + ' of ' + state.prompts_allowed + ' prompts left';
     var u = state.usage || {};
     $('usage').textContent = (u.input || u.output) ? 'tokens: ' + u.input + ' in, ' + u.output + ' out, ' + u.cache_read + ' cached' : '';
@@ -191,15 +229,18 @@
     event.preventDefault();
     var prompt = $('prompt').value.trim();
     if (!prompt) return;
+    if (!turnstileReady()) { showError('prompt-error', 'Complete the human check first.'); return; }
     showError('prompt-error', '');
     $('build').disabled = true;
+    var token = turnstileToken;
     ensureSession().then(function () {
-      return api('prompt', { session: session, prompt: prompt });
+      return api('prompt', { session: session, prompt: prompt, turnstile: token });
     }).then(function (r) {
-      if (r.error) { showError('prompt-error', r.error); $('build').disabled = false; return; }
+      resetTurnstile();
+      if (r.error) { showError('prompt-error', r.error); $('build').disabled = !turnstileReady(); return; }
       $('prompt').value = '';
       schedule(500);
-    }).catch(function (e) { showError('prompt-error', 'Could not reach the lab: ' + e); $('build').disabled = false; });
+    }).catch(function (e) { resetTurnstile(); showError('prompt-error', 'Could not reach the lab: ' + e); $('build').disabled = !turnstileReady(); });
   });
 
   $('source').addEventListener('input', function () {
@@ -224,6 +265,7 @@
     location.href = base;
   });
 
+  loadConfig();
   if (session) poll();
 })();
 </script>

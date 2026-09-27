@@ -51,6 +51,34 @@ the terminal's door script hands to emacsclient.  Nil: no link.")
 (defparameter *max-prompt-length* 2000
   "Integer. Characters a prompt may have.")
 
+(defparameter *max-sessions-per-address* 4
+  "Integer or nil. Sessions one visitor address may open in a UTC day
+(an IPv6 address counts by its /64); nil for no limit.")
+
+(defparameter *max-prompts-per-address* 12
+  "Integer or nil. Prompts one visitor address may run in a UTC day, across
+its sessions; nil for no limit.  Two full sessions' worth.")
+
+(defparameter *turnstile-site-key* nil
+  "String or nil. The Cloudflare Turnstile site key (public) the page
+renders its widget with; nil renders no widget and the prompt door asks
+for no token.  Cloudflare's test key 1x00000000000000000000AA always
+passes, for a dev ship.")
+
+(defparameter *turnstile-verify-url* nil
+  "String or nil. Where a Turnstile token is verified.  Nil means the gate's
+Turnstile door beside the Messages door (<*messages-url*>/turnstile), which
+adds the secret; Cloudflare's siteverify
+(https://challenges.cloudflare.com/turnstile/v0/siteverify) together with
+*turnstile-secret-file* on a trusted dev ship.")
+
+(defparameter *turnstile-secret-file* nil
+  "Pathname or nil. A one-line file holding the widget's secret, for direct
+verification on a trusted ship only; nil when the gate adds it.")
+
+(defparameter *turnstile-seconds* 15
+  "Integer. curl --max-time for one token verification.")
+
 (defparameter *session-lifetime* 7200
   "Integer. Seconds a session may sit unused before the reaper deletes it
 (its package and its directory).  A busy session is never reaped.")

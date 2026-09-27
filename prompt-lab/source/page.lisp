@@ -72,9 +72,16 @@ multiplication sign in it arrived as mojibake before this."
 (defun no-such-session (req ent)
   (respond-json req ent (h "error" "No such session.") net.aserve:*response-not-found*))
 
+(defvar *response-too-many-requests* (net.aserve::make-resp 429 "Too Many Requests")
+  "AllegroServe ships no 429; this is ours.")
+
 (defun refuse (req ent control &rest args)
-  (respond-json req ent (h "error" (apply #'format nil control args))
-                net.aserve:*response-bad-request*))
+  "A 400 with the reason.  A leading response object in ARGS sets the
+status instead: (refuse req ent *response-forbidden* \"No.\")."
+  (let ((response net.aserve:*response-bad-request*))
+    (when (typep control 'net.aserve::response)
+      (setf response control control (pop args)))
+    (respond-json req ent (h "error" (apply #'format nil control args)) response)))
 
 (defun epoch-seconds (universal-time)
   (- universal-time #.(encode-universal-time 0 0 0 1 1 1970 0)))
@@ -138,11 +145,25 @@ the page's editor shows, and what write-model takes back."
 ;; The doors.
 ;;
 
+(defun config-door (req ent)
+  "GET <prefix>/api/config: what the page needs before it has a session --
+the Turnstile site key (nil: no widget) and the limits it shows."
+  (respond-json req ent (h "turnstile_site_key" *turnstile-site-key*
+                           "prompts_allowed" *max-prompts-per-session*
+                           "prompt_max_length" *max-prompt-length*)))
+
 (defun session-door (req ent)
-  "POST <prefix>/api/session: open a session; answers its id."
-  (let ((session (make-session)))
-    (log-event session :note "Session ~a opened.  Describe what to build." (session-id session))
-    (respond-json req ent (h "session" (session-id session)))))
+  "POST <prefix>/api/session: open a session; answers its id.  One address
+opens at most *max-sessions-per-address* a day."
+  (let ((address (client-address req)))
+    (if (address-over-limit? address :sessions)
+        (refuse req ent *response-too-many-requests*
+                "This address has opened its ~a sessions for today.  Come back tomorrow, or bring your own agent."
+                *max-sessions-per-address*)
+        (let ((session (make-session :address address)))
+          (count-address! address :sessions)
+          (log-event session :note "Session ~a opened.  Describe what to build." (session-id session))
+          (respond-json req ent (h "session" (session-id session)))))))
 
 (defun state-door (req ent)
   "GET <prefix>/api/state?session=<id>: everything the page shows."
@@ -156,7 +177,8 @@ the page's editor shows, and what write-model takes back."
 prompt in a thread of its own; the page follows along through the state door."
   (let* ((json (request-json req))
          (session (requested-session req json))
-         (prompt (and json (gethash "prompt" json))))
+         (prompt (and json (gethash "prompt" json)))
+         (address (client-address req)))
     (cond ((null session) (no-such-session req ent))
           ((not (and (stringp prompt)
                      (plusp (length (string-trim '(#\space #\tab #\newline #\return) prompt)))))
@@ -166,9 +188,21 @@ prompt in a thread of its own; the page follows along through the state door."
           ((>= (prompts-used session) *max-prompts-per-session*)
            (refuse req ent "This session has used its ~a prompts.  Take a copy of the model file, or start a new session."
                    *max-prompts-per-session*))
-          ((not (start-prompt! session (string-trim '(#\space #\tab #\newline #\return) prompt)))
+          ((address-over-limit? address :prompts)
+           (refuse req ent *response-too-many-requests*
+                   "This address has run its ~a prompts for today.  Take a copy of the model file, come back tomorrow, or bring your own agent."
+                   *max-prompts-per-address*))
+          ((session-busy? session)
            (refuse req ent "Still working on the previous request."))
-          (t (respond-json req ent (h "started" t) net.aserve:*response-accepted*)))))
+          (t
+           ;; the token is single-use and the check is a network call:
+           ;; last, after every cheap refusal
+           (multiple-value-bind (ok? reason) (verify-turnstile (gethash "turnstile" json) address)
+             (cond ((not ok?) (refuse req ent net.aserve:*response-forbidden* "~a" reason))
+                   ((not (start-prompt! session (string-trim '(#\space #\tab #\newline #\return) prompt)))
+                    (refuse req ent "Still working on the previous request."))
+                   (t (count-address! address :prompts)
+                      (respond-json req ent (h "started" t) net.aserve:*response-accepted*))))))))
 
 (defun model-door (req ent)
   "POST <prefix>/api/model {session, source}: the visitor's own edit of the
@@ -250,11 +284,13 @@ opens; the tree, the menus and the headset button are the sluice's own."
   (format nil "~a/api/~a" *url-prefix* name))
 
 (defun publish-prompt-lab! (&key host)
-  "Publish the page at *url-prefix*, its doors under <prefix>/api/ and the
-viewer at <prefix>/viewer, on every server."
+  "Publish the page at *url-prefix*, its doors under <prefix>/api/ (config,
+session, state, prompt, model, reload) and the viewer at <prefix>/viewer,
+on every server."
   (gwl:with-all-servers (server)
     (net.aserve:publish-file :path *url-prefix* :server server :host host
                              :file (namestring *page-file*) :content-type "text/html; charset=utf-8")
+    (net.aserve:publish :path (door-path "config") :server server :host host :function #'config-door)
     (net.aserve:publish :path (door-path "session") :server server :host host :function #'session-door)
     (net.aserve:publish :path (door-path "state") :server server :host host :function #'state-door)
     (net.aserve:publish :path (door-path "prompt") :server server :host host :function #'prompt-door)

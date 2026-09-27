@@ -25,4 +25,9 @@
              #:*workspace-root*
              #:*url-prefix*
              #:*console-base*
-             #:*max-prompts-per-session*))
+             #:*max-prompts-per-session*
+             #:*max-sessions-per-address*
+             #:*max-prompts-per-address*
+             #:*turnstile-site-key*
+             #:*turnstile-verify-url*
+             #:*turnstile-secret-file*))

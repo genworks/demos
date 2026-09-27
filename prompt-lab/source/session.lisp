@@ -24,6 +24,8 @@
   directory
   (created (get-universal-time))
   (last-used (get-universal-time))
+  ;; The visitor's address as the session door saw it (guards.lisp).
+  (address nil)
   ;; The agent's conversation, append-only (thinking blocks included, as
   ;; returned), as yason hash tables.
   (messages nil)
@@ -37,7 +39,7 @@
 (defun new-session-id ()
   (format nil "~(~{~2,'0x~}~)" (loop repeat 6 collect (random 256 (make-random-state t)))))
 
-(defun make-session (&key (id (new-session-id)))
+(defun make-session (&key (id (new-session-id)) address)
   "Create a session: a fresh package defined like gdl-user, and a directory
 under *workspace-root*.  Returns the session."
   (let* ((keyword (intern (string-upcase (format nil "pl-~a" id)) :keyword))
@@ -45,7 +47,7 @@ under *workspace-root*.  Returns the session."
                          (find-package keyword)))
          (directory (merge-pathnames (format nil "~a/" id) *workspace-root*))
          (session (make-session-internal :id id :package-name (package-name package)
-                                         :directory directory)))
+                                         :directory directory :address address)))
     (ensure-directories-exist directory)
     (bt:with-lock-held (*sessions-lock*)
       (setf (gethash id *sessions*) session))
@@ -117,7 +119,7 @@ a no-op when one is running."
     (setf *reaper-thread*
           (bt:make-thread #'(lambda ()
                               (loop (sleep *reaper-interval*)
-                                    (handler-case (reap-sessions!)
+                                    (handler-case (progn (reap-sessions!) (prune-addresses!))
                                       (error (condition)
                                         (format *error-output* "~&prompt-lab reaper: ~a~%" condition)))))
                           :name "prompt-lab reaper")))
