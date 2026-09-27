@@ -7,7 +7,7 @@
  :author "Genworks International" :license
  "Affero Gnu Public License (http://www.gnu.org/licenses/)" :serial t
  :version "20260927" :depends-on
- (:gwl-graphics :yason :alexandria :babel :zpng) :components
+ (:gwl-graphics :yason :alexandria :babel) :components
  ((:file "source/package") (:file "source/parameters")
   (:file "source/session") (:file "source/raster")
   (:file "source/tools") (:file "source/agent")

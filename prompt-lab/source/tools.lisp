@@ -276,7 +276,7 @@ SESSION.  Values: content blocks, and true on failure."
         ((string= name "check_model")
          (let ((size (input "expected_size" input)))
            (check-model session :expected-size (when size (coerce size 'list)))))
-        ((and (string= name "render") (not *render-tool?*))
+        ((and (string= name "render") (not (render-offered?)))
          (values (list (text-block "There is no render on this host; judge the model by check_model's numbers.")) t))
         ((string= name "render")
          (render session :projection (input "projection" input)
@@ -289,11 +289,15 @@ SESSION.  Values: content blocks, and true on failure."
     ("properties" . ,(or properties (make-hash-table)))
     ("required" . ,(coerce required 'vector))))
 
+(defun render-offered? ()
+  "Whether the agent gets the render tool: allowed, and the PNG writer here."
+  (and *render-tool?* (raster-available?)))
+
 (defun tool-definitions ()
   "The tools, as the Messages API's tools array (a vector of alists);
-render only where *render-tool?* allows it."
+render only where it is offered."
   (let ((tools (%tool-definitions)))
-    (if *render-tool?*
+    (if (render-offered?)
         tools
         (remove "render" tools :key #'(lambda (tool) (cdr (assoc "name" tool :test #'string=)))
                                :test #'string=))))

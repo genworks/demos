@@ -25,6 +25,31 @@
 API resizes anything over 1568).")
 
 ;;
+;; zpng (and salza2 under it) write the PNG.  Neither is in every Gendl
+;; image, and the public workshop's rooms have no way to fetch them, so
+;; copies ride in vendor/ (BSD-licensed, Zach Beane's) where the demos
+;; directory's Quicklisp registration finds them.  They are loaded on
+;; demand and named through symbol-call, so a lab without them still
+;; loads, with the render tool withheld, rather than not at all.
+;;
+
+(defvar *raster-loaded?* nil)
+
+(defun raster-available? ()
+  "True when the PNG writer is loaded (loading it on the first call)."
+  (or *raster-loaded?*
+      (setf *raster-loaded?*
+            (and (or (find-package :zpng)
+                     (ignore-errors
+                      (when (find-package :ql)
+                        (uiop:symbol-call :ql :register-local-projects))
+                      (uiop:symbol-call :asdf :load-system :zpng)
+                      (find-package :zpng)))
+                 (find-package :flexi-streams)
+                 (find-package :cl-base64)
+                 t))))
+
+;;
 ;; Reading the svg.
 ;;
 
@@ -200,13 +225,16 @@ drawing's width and height as second and third values."
                 ;; a second pass one pixel over thickens the stroke to ~1.5 px
                 (draw-line canvas (+ (* x0 scale) 0.5d0) (+ (* y0 scale) 0.5d0)
                            (+ (* x1 scale) 0.5d0) (+ (* y1 scale) 0.5d0) :weight 0.6d0)))))
-      (let ((png (make-instance 'zpng:png :color-type :grayscale :width pw :height ph)))
-        (let ((data (zpng:data-array png)))
-          (dotimes (y ph)
-            (dotimes (x pw)
-              (setf (aref data y x 0) (aref canvas y x)))))
-        (flexi-streams:with-output-to-sequence (out)
-          (zpng:write-png-stream png out))))))
+      (unless (raster-available?)
+        (error "No PNG writer is loaded (zpng)."))
+      (let* ((png (make-instance (find-symbol "PNG" :zpng) :color-type :grayscale :width pw :height ph))
+             (data (uiop:symbol-call :zpng :data-array png)))
+        (dotimes (y ph)
+          (dotimes (x pw)
+            (setf (aref data y x 0) (aref canvas y x))))
+        (let ((out (uiop:symbol-call :flexi-streams :make-in-memory-output-stream)))
+          (uiop:symbol-call :zpng :write-png-stream png out)
+          (uiop:symbol-call :flexi-streams :get-output-stream-sequence out))))))
 
 (defun png-base64 (octets)
   (uiop:symbol-call :cl-base64 :usb8-array-to-base64-string octets))

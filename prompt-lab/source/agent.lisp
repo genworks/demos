@@ -98,7 +98,7 @@ Rules:
 - If a request is not a buildable design, say briefly what you can build instead.
 
 ~a"
-          (if *render-tool?*
+          (if (render-offered?)
               ", then render (layout isometric-plus-ortho) and look"
               " and read its numbers closely: there is no render on this host, and the visitor sees the model in a live viewer beside your reply")
           *engine-note*
