@@ -215,12 +215,6 @@
     }).catch(function (e) { note('Could not start the payment: ' + e); });
   }
 
-  $('checkout-close').addEventListener('click', function () { closeCheckout(); note(''); });
-  $('checkout-hosted').addEventListener('click', function (event) {
-    event.preventDefault();
-    closeCheckout();
-    if (chosenAmount) startHostedTopup(chosenAmount);
-  });
 
   function confirmTopup() {
     if (!checkout || !wallet) return Promise.resolve();
@@ -408,6 +402,13 @@
   $('new-session').addEventListener('click', function (event) {
     event.preventDefault();
     location.href = base;
+  });
+
+  $('checkout-close').addEventListener('click', function () { closeCheckout(); note(''); });
+  $('checkout-hosted').addEventListener('click', function (event) {
+    event.preventDefault();
+    closeCheckout();
+    if (chosenAmount) startHostedTopup(chosenAmount);
   });
 
   loadConfig();
