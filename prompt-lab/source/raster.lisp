@@ -25,12 +25,13 @@
 API resizes anything over 1568).")
 
 ;;
-;; zpng (and salza2 under it) write the PNG.  Neither is in every Gendl
-;; image, and the public workshop's rooms have no way to fetch them, so
-;; copies ride in vendor/ (BSD-licensed, Zach Beane's) where the demos
-;; directory's Quicklisp registration finds them.  They are loaded on
-;; demand and named through symbol-call, so a lab without them still
-;; loads, with the render tool withheld, rather than not at all.
+;; zpng (salza2 under it) writes the PNG.  It joined the Quicklisp
+;; tree the Gendl images are built from (genworks/quicklisp, dist
+;; 2023-06-18) on 2026-09-27; images built before that carry salza2
+;; but not zpng, and the public workshop's rooms cannot fetch it (no
+;; network, by design).  So it is loaded on demand and named through
+;; symbol-call: a lab on an older image still loads, and merely
+;; withholds the render tool, rather than not loading at all.
 ;;
 
 (defvar *raster-loaded?* nil)
