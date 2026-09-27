@@ -9,8 +9,8 @@
 (in-package :prompt-lab)
 
 ;;
-;; The agent loop: the Claude Messages API over raw HTTP (curl, driven by
-;; a config file), with the tools of tools.lisp run on the session.
+;; The agent loop: the Claude Messages API over raw HTTP (AllegroServe's
+;; client, in process), with the tools of tools.lisp run on the session.
 ;;
 ;; In production the loop talks to an LLM gate, which holds the API key,
 ;; pins the model and enforces budgets; the loop itself holds no key
@@ -37,7 +37,7 @@ only.  Nil when *messages-url* is a gate that adds the key.")
   "Integer. Tool rounds allowed for one visitor prompt.")
 
 (defparameter *call-seconds* 180
-  "Integer. curl --max-time for one API call.")
+  "Integer. Seconds one API call may take.")
 
 (defparameter *engine-note*
   "The engine is open-source Gendl (no solid modelling kernel): there are no boolean operations, so holes can be drawn but not cut. Say so plainly when a request needs them."
@@ -131,41 +131,58 @@ ship has moved to gate mode) all mean the same thing -- no key here."
                                   (uiop:read-file-string path)))))
           (and line (plusp (length line)) line))))))
 
+;;
+;; One HTTP POST, through AllegroServe's own client, in process -- to a
+;; gate over plain http (every production case) or to the API itself
+;; over https (a dev ship with a key file).  No subprocess, on purpose:
+;; the loop went through curl until 2026-09-27, when on the public
+;; workshop (a 2-vCPU hull) CCL's monitor thread for a child process
+;; was seen spinning for minutes after even a bare `true` had exited,
+;; and the prompt door hung behind it.  The https handshake needs the
+;; server's name sent (SNI); without it api.anthropic.com answers
+;; alert 40, which is all that ever made https look unavailable here.
+;;
+
+(defun url-host (url)
+  (ignore-errors (net.uri:uri-host (net.uri:parse-uri url))))
+
+(defun post-json (url body &key headers (seconds *call-seconds*))
+  "POST BODY (a UTF-8 string) to URL with HEADERS (an alist of name and
+value).  Returns (values status text), a refusal's body included;
+signals when the host cannot be reached."
+  (multiple-value-bind (answer status)
+      (net.aserve.client:do-http-request url
+        :method :post
+        :content (babel:string-to-octets body :encoding :utf-8)
+        :content-type "application/json"
+        :accept "application/json"
+        :headers headers
+        :format :binary
+        :keep-alive nil
+        :timeout seconds
+        :ssl-args (let ((host (url-host url))) (and host (list :server-name host))))
+    (values status
+            (cond ((stringp answer) answer)
+                  ((null answer) "")
+                  (t (babel:octets-to-string answer :encoding :utf-8))))))
+
 (defun call-messages-api (session)
   "POST the session's next request.  Returns the parsed response (a hash
 table) or signals an error."
-  (let* ((directory (session-directory session))
-         (body (merge-pathnames "request.json" directory))
-         (config (merge-pathnames "curl.cfg" directory))
-         (response (merge-pathnames "response.json" directory))
-         (key (api-key)))
-    (unwind-protect
-         (progn
-           (with-open-file (s body :direction :output :if-exists :supersede :external-format :utf-8)
-             (write-string (request-body session) s))
-           (with-open-file (s config :direction :output :if-exists :supersede :external-format :utf-8)
-             (format s "url = ~s~%silent~%show-error~%max-time = ~a~%~
-header = \"Content-Type: application/json\"~%header = \"anthropic-version: 2023-06-01\"~%~
-~@[header = \"x-api-key: ~a\"~%~]~
-header = \"X-Prompt-Lab-Session: ~a\"~%data-binary = \"@~a\"~%output = ~s~%~
-write-out = \"%{http_code}\"~%"
-                     *messages-url* *call-seconds* key (session-id session)
-                     (namestring body) (namestring response)))
-           (multiple-value-bind (status error-output code)
-               (uiop:run-program (list "curl" "-K" (namestring config))
-                                 :ignore-error-status t :output :string :error-output :string)
-             (unless (and (eql code 0) (probe-file response))
-               (error "The API call failed (curl exit ~a): ~a" code error-output))
-             ;; A gate or a proxy may answer with something other than
-             ;; JSON (an HTML error page); say what came back, with its
-             ;; status, rather than fall over inside the parser.
-             (let ((text (uiop:read-file-string response :external-format :utf-8)))
-               (handler-case (yason:parse text)
-                 (error ()
-                   (error "The API answered ~a with a body that is not JSON: ~a"
-                          status (subseq text 0 (min 200 (length text)))))))))
-      (dolist (file (list config body response))
-        (when (probe-file file) (ignore-errors (delete-file file)))))))
+  (let ((key (api-key)))
+    (multiple-value-bind (status text)
+        (post-json *messages-url* (request-body session)
+                   :headers (append (list (cons "anthropic-version" "2023-06-01"))
+                                    (when key (list (cons "x-api-key" key)))
+                                    (list (cons "X-Prompt-Lab-Session" (session-id session))))
+                   :seconds *call-seconds*)
+      ;; A gate or a proxy may answer with something other than JSON
+      ;; (an HTML error page); say what came back, with its status,
+      ;; rather than fall over inside the parser.
+      (handler-case (yason:parse text)
+        (error ()
+          (error "The API answered ~a with a body that is not JSON: ~a"
+                 status (subseq text 0 (min 200 (length text)))))))))
 
 (defun add-usage (session usage)
   (when usage

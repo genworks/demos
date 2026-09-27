@@ -77,7 +77,7 @@ adds the secret; Cloudflare's siteverify
 verification on a trusted ship only; nil when the gate adds it.")
 
 (defparameter *turnstile-seconds* 15
-  "Integer. curl --max-time for one token verification.")
+  "Integer. Seconds one token verification may take.")
 
 (defparameter *session-lifetime* 7200
   "Integer. Seconds a session may sit unused before the reaper deletes it

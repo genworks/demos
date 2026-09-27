@@ -148,15 +148,7 @@ must be present and the verifier must answer {\"success\": true}."
                                      (append (when (and address (not (equal address "unknown")))
                                                (list "remoteip" address))
                                              (when secret (list "secret" secret))))))
-                (answer (uiop:with-temporary-file (:stream s :pathname file :direction :output
-                                                   :external-format :utf-8 :prefix "turnstile-")
-                          (write-string body s)
-                          :close-stream
-                          (uiop:run-program (list "curl" "-s" "-m" (princ-to-string *turnstile-seconds*)
-                                                  "-H" "Content-Type: application/json"
-                                                  "--data-binary" (format nil "@~a" (namestring file))
-                                                  (turnstile-verify-url))
-                                            :output :string :ignore-error-status t)))
+                (answer (nth-value 1 (post-json (turnstile-verify-url) body :seconds *turnstile-seconds*)))
                 (json (ignore-errors (yason:parse answer))))
            (cond ((not (hash-table-p json))
                   (values nil "The human check could not be completed; try again in a moment."))
