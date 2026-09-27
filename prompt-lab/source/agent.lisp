@@ -87,7 +87,7 @@ lists for yason."
 How to work:
 1. From the request, state to yourself the overall envelope in mm (x y z).
 2. write_model: one define-object named MODEL whose input-slot defaults build exactly what was asked, with the key dimensions as inputs; helper objects and functions as needed.
-3. check_model with expected_size, then render (layout isometric-plus-ortho) and look.  Fix what is wrong.  Few, deliberate calls: a correct model in three to six calls is the aim.
+3. check_model with expected_size~a.  Fix what is wrong.  Few, deliberate calls: a correct model in three to six calls is the aim.
 4. Finish with a short reply to the visitor: what you built, which inputs they can change, and any limits.  No code in the reply; the code is in their editor.
 
 Rules:
@@ -98,6 +98,9 @@ Rules:
 - If a request is not a buildable design, say briefly what you can build instead.
 
 ~a"
+          (if *render-tool?*
+              ", then render (layout isometric-plus-ortho) and look"
+              " and read its numbers closely: there is no render on this host, and the visitor sees the model in a live viewer beside your reply")
           *engine-note*
           (or (primer-text) "")))
 

@@ -263,6 +263,8 @@ SESSION.  Values: content blocks, and true on failure."
         ((string= name "check_model")
          (let ((size (input "expected_size" input)))
            (check-model session :expected-size (when size (coerce size 'list)))))
+        ((and (string= name "render") (not *render-tool?*))
+         (values (list (text-block "There is no render on this host; judge the model by check_model's numbers.")) t))
         ((string= name "render")
          (render session :projection (input "projection" input)
                          :layout (input "layout" input)
@@ -275,7 +277,15 @@ SESSION.  Values: content blocks, and true on failure."
     ("required" . ,(coerce required 'vector))))
 
 (defun tool-definitions ()
-  "The tools, as the Messages API's tools array (a vector of alists)."
+  "The tools, as the Messages API's tools array (a vector of alists);
+render only where *render-tool?* allows it."
+  (let ((tools (%tool-definitions)))
+    (if *render-tool?*
+        tools
+        (remove "render" tools :key #'(lambda (tool) (cdr (assoc "name" tool :test #'string=)))
+                               :test #'string=))))
+
+(defun %tool-definitions ()
   (vector
    `(("name" . "write_model")
      ("description" . "Replace the session's model file with SOURCE and compile and load it. The source holds every definition the model needs: one define-object named MODEL, whose input-slot defaults build the requested design, plus any helper define-objects or defuns. Never include an in-package form; the file header sets the package. Returns compiler warnings and errors. The visitor sees and may edit this same file.")

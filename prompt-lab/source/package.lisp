@@ -26,6 +26,7 @@
              #:*url-prefix*
              #:*console-base*
              #:*max-prompts-per-session*
+             #:*render-tool?*
              #:*max-sessions-per-address*
              #:*max-prompts-per-address*
              #:*turnstile-site-key*

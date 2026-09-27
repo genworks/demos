@@ -96,3 +96,11 @@ hold the session's thread forever.")
 
 (defparameter *render-seconds* 60
   "Integer. Time a render may take.")
+
+(defparameter *render-tool?* t
+  "Boolean. Whether the agent is offered the render tool.  Rendering
+rasterises through Ghostscript, a subprocess; on a host where
+run-program stalls (the public workshop, 2026-09-27: every render sat
+150 s behind CCL's spinning process monitor, past the time limit, which
+cannot interrupt that wait) the tool is withheld and the agent works
+from check_model's numbers -- the visitor has the live viewer anyway.")
