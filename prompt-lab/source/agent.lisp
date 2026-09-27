@@ -325,4 +325,5 @@ the session busy (start-prompt!)."
                       ((equal stop "max_tokens")
                        (return (log-event session :stopped "The reply hit its length limit.")))
                       (t (return (log-event session :stopped "Stopped: ~a" stop)))))))
-    (setf (session-busy? session) nil)))
+    (setf (session-busy? session) nil)
+    (save-session! session)))

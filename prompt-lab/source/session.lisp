@@ -64,8 +64,100 @@ under *workspace-root*.  Returns the session."
       (setf (gethash id *sessions*) session))
     session))
 
+(defvar *restore-lock* (bt:make-lock "prompt-lab restore"))
+
 (defun find-session (id)
-  (bt:with-lock-held (*sessions-lock*) (gethash id *sessions*)))
+  "The live session ID, or the one restored from its directory when a
+restart has emptied the table (see save-session!); nil when neither."
+  (or (bt:with-lock-held (*sessions-lock*) (gethash id *sessions*))
+      (bt:with-lock-held (*restore-lock*)
+        (or (bt:with-lock-held (*sessions-lock*) (gethash id *sessions*))
+            (restore-session id)))))
+
+
+;;
+;; Sessions survive a restart of the Lisp.  Everything a session is,
+;; beyond its model file, is written beside that file as session.json
+;; after every prompt and every edit; a request naming a session the
+;; table has forgotten reads it back, makes the package afresh and
+;; compiles the model file again, so the visitor's page and viewer carry
+;; on across a raise of the workshop (a visitor lost an Arc de Triomphe
+;; that way on 2026-09-27).  The conversation goes with it, thinking
+;; blocks and rendered images included, so the agent's memory of the
+;; session survives too.
+;;
+
+(defun session-id? (id)
+  (and (stringp id) (= (length id) 12) (every #'(lambda (c) (digit-char-p c 16)) id)))
+
+(defun session-state-file (session)
+  (merge-pathnames "session.json" (session-directory session)))
+
+(defun save-session! (session)
+  "Write SESSION's record beside its model file, atomically.  Never signals."
+  (ignore-errors
+   (let* ((file (session-state-file session))
+          (tmp (make-pathname :type "tmp" :defaults file))
+          (usage (session-usage session)))
+     (ensure-directories-exist file)
+     (with-open-file (out tmp :direction :output :if-exists :supersede :external-format :utf-8)
+       (yason:encode
+        (h "version" 1
+           "id" (session-id session)
+           "address" (session-address session)
+           "wallet" (session-wallet session)
+           "created" (session-created session)
+           "last_used" (session-last-used session)
+           "usage" (h "input" (getf usage :input) "output" (getf usage :output)
+                      "cache_read" (getf usage :cache-read) "cache_write" (getf usage :cache-write))
+           "cents" (session-cents session)
+           "allowance" (session-allowance session)
+           "credits" (session-credits session)
+           "charged" (session-charged session)
+           "log" (mapcar #'(lambda (entry)
+                             (list (first entry) (string-downcase (second entry)) (third entry)))
+                         (session-log session))
+           "messages" (session-messages session))
+        out))
+     (when (probe-file file) (delete-file file))
+     (rename-file tmp file)
+     file)))
+
+(defun restore-session (id)
+  "Bring session ID back from its directory: the record from session.json,
+a fresh package, the model file compiled and loaded.  Nil when nothing
+is on disk for it."
+  (when (session-id? id)
+    (let* ((directory (merge-pathnames (format nil "~a/" id) *workspace-root*))
+           (file (merge-pathnames "session.json" directory))
+           (json (and (probe-file file)
+                      (ignore-errors (with-open-file (in file :external-format :utf-8) (yason:parse in))))))
+      (when (hash-table-p json)
+        (let ((session (make-session :id id :address (gethash "address" json)
+                                     :wallet (let ((w (gethash "wallet" json))) (and (stringp w) w)))))
+          (flet ((number-or (key default) (let ((v (gethash key json))) (if (realp v) v default)))
+                 (number-or-nil (key) (let ((v (gethash key json))) (and (realp v) v))))
+            (setf (session-created session) (number-or "created" (get-universal-time))
+                  (session-cents session) (number-or "cents" 0)
+                  (session-allowance session) (number-or-nil "allowance")
+                  (session-credits session) (number-or-nil "credits")
+                  (session-charged session) (number-or "charged" 0))
+            (let ((usage (gethash "usage" json)))
+              (when (hash-table-p usage)
+                (setf (session-usage session)
+                      (list :input (or (gethash "input" usage) 0) :output (or (gethash "output" usage) 0)
+                            :cache-read (or (gethash "cache_read" usage) 0)
+                            :cache-write (or (gethash "cache_write" usage) 0)))))
+            (setf (session-log session)
+                  (loop for entry in (gethash "log" json)
+                        when (and (listp entry) (= (length entry) 3) (stringp (second entry)))
+                          collect (list (first entry) (intern (string-upcase (second entry)) :keyword) (third entry))))
+            (setf (session-messages session) (gethash "messages" json)))
+          (when (probe-file (session-model-file session))
+            (ignore-errors (load-model-file session)))
+          (log-event session :note "The workshop restarted; your session was restored from its file.")
+          (save-session! session)
+          session)))))
 
 (defun delete-session (session)
   "Forget SESSION, delete its package and its directory."
@@ -117,7 +209,10 @@ and directories reaped."
         (ignore-errors (delete-session session))
         (push (session-id session) reaped)))
     (dolist (directory (stale-directories))
-      (let ((age (- now (or (ignore-errors (file-write-date directory)) now))))
+      ;; an unowned directory is a session a restarted Lisp has not been
+      ;; asked for yet: its age is its record's, when it has one
+      (let* ((record (merge-pathnames "session.json" directory))
+             (age (- now (or (ignore-errors (file-write-date (if (probe-file record) record directory))) now))))
         (when (> age lifetime)
           (ignore-errors (uiop:delete-directory-tree (pathname directory) :validate t))
           (push (namestring directory) reaped))))

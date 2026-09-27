@@ -249,6 +249,7 @@ One address opens at most *max-sessions-per-address* a day."
           (count-address! address :sessions)
           (log-event session :note "Session ~a opened.  Describe what to build." (session-id session))
           (refresh-balance! session)
+          (save-session! session)
           (respond-json req ent (h "session" (session-id session) "spend" (spend-state session)))))))
 
 (defun topup-door (req ent)
@@ -308,6 +309,7 @@ spend state with the outcome."
                (when (equal outcome "credited")
                  (log-event session :note "Credits added: ~:d on your balance.  Builds beyond the free credits draw on it."
                             (round (or (session-credits session) 0))))
+               (save-session! session)
                (respond-json req ent (h "outcome" (or outcome "failed")
                                         "text" (or (and answer (gethash "text" answer)) "The gate did not answer.")
                                         "spend" (spend-state session)))))))))
@@ -363,6 +365,7 @@ model file, written, compiled and loaded like the agent's."
           (t (multiple-value-bind (blocks error?) (write-model (touch session) source)
                (let ((text (or (cdr (assoc "text" (first blocks) :test #'string=)) "")))
                  (log-event session :reload "Your edit: ~a" text)
+                 (save-session! session)
                  (respond-json req ent (h "ok" (if error? 'yason:false t) "text" text))))))))
 
 (defun reload-door (req ent)
@@ -376,6 +379,7 @@ it is on disk, after an edit made in the terminal."
           (t (multiple-value-bind (blocks error?) (load-model-file (touch session))
                (let ((text (or (cdr (assoc "text" (first blocks) :test #'string=)) "")))
                  (log-event session :reload "Reloaded from disk: ~a" text)
+                 (save-session! session)
                  (respond-json req ent (h "ok" (if error? 'yason:false t) "text" text))))))))
 
 
