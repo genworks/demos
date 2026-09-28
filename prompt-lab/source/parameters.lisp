@@ -96,7 +96,9 @@ verification on a trusted ship only; nil when the gate adds it.")
 cost, as the page shows it before the gate has reported (the gate's
 :session-budget-cents is the one that counts; it reports it back with
 every answer, and that value replaces this one).  77 c reads as a round
-100 modeling credits at the gate's 1.3 markup.")
+100 modeling credits at the gate's 1.3 markup; the gate itself takes
+:session-budget-credits and derives the cents from whatever the markup
+is, and the balance door reports both before the first build.")
 
 (defparameter *wallet-header* "X-Prompt-Lab-Wallet"
   "String. The header naming the visitor's wallet to the gate on each
