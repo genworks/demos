@@ -9,6 +9,7 @@
  :version "20260927" :depends-on
  (:gwl-graphics :yason :alexandria :babel) :components
  ((:file "source/package") (:file "source/parameters")
-  (:file "source/session") (:file "source/raster")
-  (:file "source/tools") (:file "source/agent")
-  (:file "source/guards") (:file "source/page")))
+  (:file "source/session") (:file "source/archive")
+  (:file "source/raster") (:file "source/tools")
+  (:file "source/agent") (:file "source/guards")
+  (:file "source/page")))

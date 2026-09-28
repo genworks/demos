@@ -94,8 +94,10 @@ restart has emptied the table (see save-session!); nil when neither."
   (merge-pathnames "session.json" (session-directory session)))
 
 (defun save-session! (session)
-  "Write SESSION's record beside its model file, atomically.  Never signals."
-  (ignore-errors
+  "Write SESSION's record beside its model file, atomically, then its copy,
+transcript and model file to the archive (archive.lisp).  Never signals."
+  (prog1
+   (ignore-errors
    (let* ((file (session-state-file session))
           (tmp (make-pathname :type "tmp" :defaults file))
           (usage (session-usage session)))
@@ -121,7 +123,8 @@ restart has emptied the table (see save-session!); nil when neither."
         out))
      (when (probe-file file) (delete-file file))
      (rename-file tmp file)
-     file)))
+     file))
+    (archive-session! session)))
 
 (defun repair-messages (messages)
   "MESSAGES as parsed from a session file, with every tool_result's
@@ -182,7 +185,9 @@ is on disk for it."
           session)))))
 
 (defun delete-session (session)
-  "Forget SESSION, delete its package and its directory."
+  "Forget SESSION, delete its package and its directory -- after a last
+copy of what it holds goes to the archive."
+  (archive-session! session)
   (bt:with-lock-held (*sessions-lock*)
     (remhash (session-id session) *sessions*))
   (let ((package (find-package (session-package-name session))))
@@ -236,6 +241,7 @@ and directories reaped."
       (let* ((record (merge-pathnames "session.json" directory))
              (age (- now (or (ignore-errors (file-write-date (if (probe-file record) record directory))) now))))
         (when (> age lifetime)
+          (archive-stale-directory! directory)
           (ignore-errors (uiop:delete-directory-tree (pathname directory) :validate t))
           (push (namestring directory) reaped))))
     (nreverse reaped)))

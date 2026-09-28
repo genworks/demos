@@ -73,9 +73,11 @@ The file's header already sets the session package.")) t)))
 
 (defun load-model-file (session)
   "Compile and load the session's model file.  Values: content blocks and
-an error flag."
+an error flag.  The file as it is now goes to the archive first, so a
+version that fails to compile is kept too."
   (let ((file (session-model-file session))
         (warnings nil))
+    (archive-model! session)
     (handler-case
         (with-time-limit (*load-seconds* "compile and load")
           (let ((fasl (handler-bind ((warning #'(lambda (w)

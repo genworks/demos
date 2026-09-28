@@ -19,6 +19,18 @@ door so it can open a session's model file), the shared state directory
 (defparameter *workspace-root* (default-workspace-root)
   "String. Directory under which each session keeps its own model file.")
 
+(defun default-archive-root ()
+  "A prompt-lab-archive/ directory beside the workspace root:
+/state/prompt-lab-archive/ on the public workshop, /projects/.state/prompt-lab-archive/
+on a dev ship."
+  (namestring (merge-pathnames "prompt-lab-archive/"
+                               (uiop:pathname-parent-directory-pathname (pathname *workspace-root*)))))
+
+(defparameter *archive-root* (default-archive-root)
+  "String or nil. Directory under which every session's record, its
+transcript and each version of its model file are kept for review
+(archive.lisp), out of the reaper's reach.  Nil keeps no archive.")
+
 (defparameter *result-limit* 4000
   "Integer. Characters of printed result or output handed back to the agent
 from one tool call; longer text is cut and marked.")
