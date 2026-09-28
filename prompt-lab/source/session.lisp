@@ -31,6 +31,9 @@
   (messages nil)
   ;; Token totals across every call of the session, a plist.
   (usage (list :input 0 :output 0 :cache-read 0 :cache-write 0))
+  ;; Symbols compiled and run, as reported to the gate's meter (meter.lisp):
+  ;; a plist (:compile n :run n).
+  (meter nil)
   ;; What the gate reports back with each answer (guards.lisp): the
   ;; session's spend in cents, the free allowance, and the visitor's
   ;; wallet -- its id, credit left and what it has been charged.
@@ -112,6 +115,8 @@ transcript and model file to the archive (archive.lisp).  Never signals."
            "last_used" (session-last-used session)
            "usage" (h "input" (getf usage :input) "output" (getf usage :output)
                       "cache_read" (getf usage :cache-read) "cache_write" (getf usage :cache-write))
+           "meter" (h "compile" (or (getf (session-meter session) :compile) 0)
+                      "run" (or (getf (session-meter session) :run) 0))
            "cents" (session-cents session)
            "allowance" (session-allowance session)
            "credits" (session-credits session)
@@ -173,6 +178,11 @@ is on disk for it."
                       (list :input (or (gethash "input" usage) 0) :output (or (gethash "output" usage) 0)
                             :cache-read (or (gethash "cache_read" usage) 0)
                             :cache-write (or (gethash "cache_write" usage) 0)))))
+            (let ((meter (gethash "meter" json)))
+              (when (hash-table-p meter)
+                (setf (session-meter session)
+                      (list :compile (let ((n (gethash "compile" meter))) (if (integerp n) n 0))
+                            :run (let ((n (gethash "run" meter))) (if (integerp n) n 0))))))
             (setf (session-log session)
                   (loop for entry in (gethash "log" json)
                         when (and (listp entry) (= (length entry) 3) (stringp (second entry)))

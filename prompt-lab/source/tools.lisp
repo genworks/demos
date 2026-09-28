@@ -78,6 +78,13 @@ version that fails to compile is kept too."
   (let ((file (session-model-file session))
         (warnings nil))
     (archive-model! session)
+    ;; a compile costs credits by the volume of the file (meter.lisp)
+    (multiple-value-bind (ok? reason)
+        (meter! session :compile
+                (or (ignore-errors (symbol-volume (uiop:read-file-string file :external-format :utf-8)
+                                                  (session-package session)))
+                    0))
+      (unless ok? (return-from load-model-file (meter-refusal reason))))
     (handler-case
         (with-time-limit (*load-seconds* "compile and load")
           (let ((fasl (handler-bind ((warning #'(lambda (w)
@@ -123,6 +130,9 @@ version that fails to compile is kept too."
         (return-from evaluate
           (values (list (text-block "Refused: one expression per call, as at a REPL. ~
 Wrap several forms in progn, or put definitions in the model with write_model.")) t)))
+      ;; a run costs credits by the volume of what runs (meter.lisp)
+      (multiple-value-bind (ok? reason) (meter! session :run (form-volume form))
+        (unless ok? (return-from evaluate (meter-refusal reason))))
       (let (result)
         (handler-case
             (let ((output (with-output-to-string (*standard-output*)
@@ -166,6 +176,9 @@ of 2026-09-25)."
         (list (corner #'min #'first) (corner #'max #'second))))))
 
 (defun check-model (session &key expected-size)
+  ;; building the model runs the whole file (meter.lisp)
+  (multiple-value-bind (ok? reason) (meter! session :run (model-volume session))
+    (unless ok? (return-from check-model (meter-refusal reason))))
   (handler-case
       (with-time-limit (*eval-seconds* "build and check")
       (let* ((model (make-model session))
@@ -239,6 +252,9 @@ system's keyword (the image's case)."
 (defun render (session &key projection layout hidden-lines)
   "A wireframe of (make-object 'model), drawn by the drawing system's svg
 lens and rasterised in process (raster.lisp): no Ghostscript."
+  ;; building the model runs the whole file (meter.lisp)
+  (multiple-value-bind (ok? reason) (meter! session :run (model-volume session))
+    (unless ok? (return-from render (meter-refusal reason))))
   (handler-case
       (with-time-limit (*render-seconds* "render")
         (let* ((*package* (session-package session))

@@ -326,7 +326,9 @@
       : state.prompts_unlimited ? 'prompts draw on your credits'
       : (state.prompts_allowed - state.prompts_used) + ' of ' + state.prompts_allowed + ' free prompts left';
     var u = state.usage || {};
-    $('usage').textContent = (u.input || u.output) ? 'tokens: ' + u.input + ' in, ' + u.output + ' out, ' + u.cache_read + ' cached' : '';
+    var m = state.meter || {};
+    $('usage').textContent = ((u.input || u.output) ? 'tokens: ' + u.input + ' in, ' + u.output + ' out, ' + u.cache_read + ' cached' : '')
+      + ((m.compile || m.run) ? ((u.input || u.output) ? ' \u00b7 ' : '') + 'symbols: ' + m.compile + ' compiled, ' + m.run + ' run' : '');
     renderSpend(state.spend);
 
     if (state.model_source !== lastSource) {

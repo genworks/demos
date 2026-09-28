@@ -142,6 +142,7 @@ every message in order."
       (format out "# Prompt lab session ~a~%~%" (session-id session))
       (format out "- opened: ~a~%- last used: ~a~%- visitor: ~a~%- prompts: ~a~%~
 - tokens: input ~:d, output ~:d, cache read ~:d, cache write ~:d~%~
+- symbols: compiled ~:d, run ~:d~%~
 - spend: ~,2f cents~@[, allowance ~a~]~@[, wallet ~a~]~%~%"
               (utc-time (session-created session))
               (utc-time (session-last-used session))
@@ -149,6 +150,8 @@ every message in order."
               (count :prompt (session-log session) :key #'second)
               (or (getf usage :input) 0) (or (getf usage :output) 0)
               (or (getf usage :cache-read) 0) (or (getf usage :cache-write) 0)
+              (or (getf (session-meter session) :compile) 0)
+              (or (getf (session-meter session) :run) 0)
               (or (session-cents session) 0)
               (session-allowance session)
               (session-wallet session))

@@ -11,5 +11,5 @@
  ((:file "source/package") (:file "source/parameters")
   (:file "source/session") (:file "source/archive")
   (:file "source/raster") (:file "source/tools")
-  (:file "source/agent") (:file "source/guards")
-  (:file "source/page")))
+  (:file "source/agent") (:file "source/meter")
+  (:file "source/guards") (:file "source/page")))

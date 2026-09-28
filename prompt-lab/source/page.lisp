@@ -204,6 +204,9 @@ it: the scheme and host the proxies forwarded."
        "prompts_unlimited" (if (paying? session) t 'yason:false)
        "usage" (h "input" (getf usage :input) "output" (getf usage :output)
                   "cache_read" (getf usage :cache-read) "cache_write" (getf usage :cache-write))
+       ;; symbols compiled and run, the meter's side of the spend
+       "meter" (h "compile" (or (getf (session-meter session) :compile) 0)
+                  "run" (or (getf (session-meter session) :run) 0))
        "spend" (spend-state session)
        "log" (map 'vector #'(lambda (entry)
                               (destructuring-bind (time kind text) entry
@@ -436,6 +439,10 @@ opens; the tree, the menus and the headset button are the sluice's own."
 
    (draw-model!
     ()
+    ;; drawing the model runs it: metered like a check (meter.lisp); a
+    ;; refusal is not enforced here -- the page's doors already are
+    (let ((session (the session)))
+      (when session (ignore-errors (meter! session :run (model-volume session)))))
     ;; hidden lines removed by default: the wireframe reads as a solid
     ;; object rather than a cage (the remover is fast since 2026-09-27)
     (ignore-errors (the viewport (set-slot! :hidden-lines :remove)))
