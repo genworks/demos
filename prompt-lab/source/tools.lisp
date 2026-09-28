@@ -304,6 +304,9 @@ SESSION.  Values: content blocks, and true on failure."
          (render session :projection (input "projection" input)
                          :layout (input "layout" input)
                          :hidden-lines (input "hidden_lines" input)))
+        ;; the reference (docs.lisp)
+        ((string= name "search_docs") (search-docs (input "query" input) :hits (input "hits" input)))
+        ((string= name "describe_object") (describe-type session (input "type" input)))
         (t (values (list (text-result "Unknown tool ~a." name)) t))))
 
 (defun schema (properties &optional required)
@@ -317,12 +320,14 @@ SESSION.  Values: content blocks, and true on failure."
 
 (defun tool-definitions ()
   "The tools, as the Messages API's tools array (a vector of alists);
-render only where it is offered."
+render and search_docs only where they are offered."
   (let ((tools (%tool-definitions)))
-    (if (render-offered?)
-        tools
-        (remove "render" tools :key #'(lambda (tool) (cdr (assoc "name" tool :test #'string=)))
-                               :test #'string=))))
+    (flet ((without (name tools)
+             (remove name tools :key #'(lambda (tool) (cdr (assoc "name" tool :test #'string=)))
+                                :test #'string=)))
+      (unless (render-offered?) (setq tools (without "render" tools)))
+      (unless (search-offered?) (setq tools (without "search_docs" tools)))
+      tools)))
 
 (defun %tool-definitions ()
   (vector
@@ -359,7 +364,20 @@ render only where it is offered."
                                   ("hidden_lines" . (("type" . "string")
                                                      ("enum" . ,(vector "draw" "remove" "dashed"))
                                                      ("description" . "remove or dashed suits solids."))))
-                                nil)))))
+                                nil)))
+   ;; the reference: what a type takes, and where a thing is defined (docs.lisp)
+   `(("name" . "describe_object")
+     ("description" . "Describe a Gendl object type: its description and mixins, its input slots (required and optional) with their documentation, and its documented computed slots, children and functions. Use it to learn what a type takes -- subtracted-solid, extruded-solid, global-polygon-projection -- before writing it into the model. Cheap: nothing is evaluated.")
+     ("input_schema" . ,(schema `(("type" . (("type" . "string")
+                                             ("description" . "The type's name, as written in a define-object (e.g. cylinder-solid, surf:subtracted-solid)."))))
+                                '("type"))))
+   `(("name" . "search_docs")
+     ("description" . "Search the Gendl sources and guides: object definitions with their documentation, functions, the guide's sections, the demos. Returns the best matches with file, line and a passage. Use it to find the right type or input name, or an example, instead of guessing one.")
+     ("input_schema" . ,(schema `(("query" . (("type" . "string")
+                                              ("description" . "Words to search for, e.g. extruded-solid profile, or keyway.")))
+                                  ("hits" . (("type" . "integer")
+                                             ("description" . "How many matches to return (default 5, at most 20)."))))
+                                '("query"))))))
 
 
 ;;
