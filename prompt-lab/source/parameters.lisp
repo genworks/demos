@@ -125,6 +125,48 @@ hold the session's thread forever.")
 (defparameter *render-seconds* 60
   "Integer. Time a render may take.")
 
+;;
+;; The engine behind the session: which kernel the room runs.  The agent
+;; is told (agent.lisp), the page shows it, the archive records it and
+;; the gate's meter prices by it -- a solids room's symbols cost a
+;; multiple, the factor a knob on the gate (:meter-engine-factors in the
+;; cyclops config, beside the rates).  A room's services-init sets it;
+;; the default reads the image, since the SMLib package is aboard only
+;; on a Genworks GDL workshop.
+;;
+
+(defparameter *engine* (if (find-package :smlib) :solid :gendl)
+  "Keyword. The engine behind this lab's sessions: :gendl (open-source
+Gendl -- wireframe and surface primitives, no booleans) or :solid
+(Genworks GDL with the SMLib kernel -- breps, booleans, volumes).  Sent
+as \"engine\" with every meter report, so the gate can price a solids
+room at its factor.")
+
+(defparameter *engine-labels*
+  '(:gendl "open-source Gendl"
+    :solid "Genworks GDL with the SMLib solid modelling kernel")
+  "Plist, engine -> what the page calls it.")
+
+(defparameter *engine-notes*
+  '(:gendl "The engine is open-source Gendl (no solid modelling kernel): there are no boolean operations, so holes can be drawn but not cut. Say so plainly when a request needs them."
+    :solid "The engine is Genworks GDL with the SMLib solid modelling kernel. Whenever a request needs holes, cuts or joins, build it from the brep solids (box-solid, cylinder-solid, cone-solid, torus-solid, extruded-solid) and the booleans (subtracted-solid, united-solid, intersected-solid), so the visible result is one real solid with a volume; keep the tool solids as hidden children. Plain box, cylinder and the other wireframe primitives are fine for parts that need no boolean.")
+  "Plist, engine -> the sentence the system prompt says about it.")
+
+(defparameter *sibling-lab* nil
+  "Nil, or (url . label): a lab on the same site running the other
+engine, offered as a link on the page -- (\"/prompt-lab/solid\" . \"solid
+modelling lab\") on a free room, the reverse on a solids room.")
+
+(defun engine-name ()
+  "The engine as the meter names it to the gate and the page reads it."
+  (string-downcase (symbol-name *engine*)))
+
+(defun engine-label ()
+  (or (getf *engine-labels* *engine*) (engine-name)))
+
+(defun engine-note ()
+  (or (getf *engine-notes* *engine*) ""))
+
 (defparameter *render-tool?* t
   "Boolean. Whether the agent is offered the render tool.  Rendering
 rasterises through Ghostscript, a subprocess; on a host where

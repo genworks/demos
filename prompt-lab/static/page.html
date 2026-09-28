@@ -13,6 +13,7 @@
   header { display: flex; align-items: center; gap: 1rem; padding: 0.45rem 1rem; background: #1f2937; color: #f9fafb; flex-wrap: wrap; }
   header strong { font-size: 1.05rem; }
   header .tag { font-size: 0.75rem; padding: 0.1rem 0.5rem; border-radius: 9999px; background: #4f46e5; color: #fff; }
+  header .tag.engine { background: #374151; color: #e5e7eb; }
   header .spacer { flex: 1; }
   header a { color: #c7d2fe; text-decoration: none; }
   header a:hover { text-decoration: underline; }
@@ -50,8 +51,10 @@
 <header>
   <strong>Prompt lab</strong>
   <span class="tag">experimental</span>
+  <span id="engine" class="tag engine" title="the engine behind this room" hidden></span>
   <span>describe a part; a modeling agent builds it as a parametric Gendl model you can inspect and edit</span>
   <span class="spacer"></span>
+  <a id="sibling" href="#" hidden></a>
   <a id="viewer-tab" href="#" target="_blank" rel="noopener" hidden>viewer in its own tab</a>
   <a id="console-tab" href="#" target="_blank" rel="noopener" hidden>source in Emacs</a>
   <a id="new-session" href="#">new session</a>
@@ -264,6 +267,9 @@
 
   function loadConfig() {
     return fetch(base + '/api/config').then(function (r) { return r.json(); }).then(function (config) {
+      // which engine this room runs, and the lab on the other one
+      if (config.engine_label) { $('engine').textContent = config.engine_label; $('engine').hidden = false; }
+      if (config.sibling_url) { $('sibling').href = config.sibling_url; $('sibling').textContent = config.sibling_label || 'the other lab'; $('sibling').hidden = false; }
       turnstileKey = config.turnstile_site_key || null;
       if (!turnstileKey) return;
       $('build').disabled = true;
@@ -328,7 +334,8 @@
     var u = state.usage || {};
     var m = state.meter || {};
     $('usage').textContent = ((u.input || u.output) ? 'tokens: ' + u.input + ' in, ' + u.output + ' out, ' + u.cache_read + ' cached' : '')
-      + ((m.compile || m.run) ? ((u.input || u.output) ? ' \u00b7 ' : '') + 'symbols: ' + m.compile + ' compiled, ' + m.run + ' run' : '');
+      + ((m.compile || m.run) ? ((u.input || u.output) ? ' \u00b7 ' : '') + 'symbols: ' + m.compile + ' compiled, ' + m.run + ' run'
+         + (m.credits ? ' (' + credits(m.credits) + ' credits)' : '') : '');
     renderSpend(state.spend);
 
     if (state.model_source !== lastSource) {

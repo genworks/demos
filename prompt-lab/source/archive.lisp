@@ -56,6 +56,14 @@ there is no archive."
        (string= (uiop:read-file-string a :external-format :utf-8)
                 (uiop:read-file-string b :external-format :utf-8))))
 
+(defun copy-file! (from to)
+  "Copy FROM over TO.  uiop:copy-file refuses an existing destination on
+Allegro (\"Destination file exists\"), so on the workshop every archive
+write after a session's first failed inside its ignore-errors and the
+record, transcript and model.lisp stayed as they first were (2026-09-28)."
+  (when (probe-file to) (delete-file to))
+  (uiop:copy-file from to))
+
 (defun write-text-file (text file)
   "Write TEXT to FILE atomically, UTF-8."
   (let ((tmp (make-pathname :type "tmp" :defaults file)))
@@ -77,9 +85,9 @@ Never signals."
                             #'string<))
             (newest (car (last versions))))
        (unless (and newest (same-text-file? file newest))
-         (uiop:copy-file file (merge-pathnames (format nil "model-~3,'0d.lisp" (1+ (length versions)))
-                                               directory))))
-     (uiop:copy-file file (merge-pathnames "model.lisp" directory))
+         (copy-file! file (merge-pathnames (format nil "model-~3,'0d.lisp" (1+ (length versions)))
+                                           directory))))
+     (copy-file! file (merge-pathnames "model.lisp" directory))
      directory)))
 
 (defun archive-model! (session)
@@ -140,18 +148,20 @@ every message in order."
   (let ((usage (session-usage session)))
     (with-output-to-string (out)
       (format out "# Prompt lab session ~a~%~%" (session-id session))
-      (format out "- opened: ~a~%- last used: ~a~%- visitor: ~a~%- prompts: ~a~%~
+      (format out "- opened: ~a~%- last used: ~a~%- visitor: ~a~%- engine: ~a~%- prompts: ~a~%~
 - tokens: input ~:d, output ~:d, cache read ~:d, cache write ~:d~%~
-- symbols: compiled ~:d, run ~:d~%~
+- symbols: compiled ~:d, run ~:d (~,1f credits)~%~
 - spend: ~,2f cents~@[, allowance ~a~]~@[, wallet ~a~]~%~%"
               (utc-time (session-created session))
               (utc-time (session-last-used session))
               (or (session-address session) "unknown")
+              (engine-name)
               (count :prompt (session-log session) :key #'second)
               (or (getf usage :input) 0) (or (getf usage :output) 0)
               (or (getf usage :cache-read) 0) (or (getf usage :cache-write) 0)
               (or (getf (session-meter session) :compile) 0)
               (or (getf (session-meter session) :run) 0)
+              (or (getf (session-meter session) :credits) 0)
               (or (session-cents session) 0)
               (session-allowance session)
               (session-wallet session))
@@ -180,7 +190,7 @@ Never signals; nil when there is no archive."
        (ensure-directories-exist directory)
        (let ((record (session-state-file session)))
          (when (probe-file record)
-           (uiop:copy-file record (merge-pathnames "session.json" directory))))
+           (copy-file! record (merge-pathnames "session.json" directory))))
        (write-text-file (transcript-text session) (merge-pathnames "transcript.md" directory))
        (archive-model! session)
        directory))))
@@ -201,5 +211,5 @@ file, in the archive directory its record names.  Never signals."
          (when target
            (unless (probe-file (merge-pathnames "session.json" target))
              (ensure-directories-exist target)
-             (uiop:copy-file record (merge-pathnames "session.json" target)))
+             (copy-file! record (merge-pathnames "session.json" target)))
            (archive-model-file! (merge-pathnames "model.lisp" directory) target)))))))

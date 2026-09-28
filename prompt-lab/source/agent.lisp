@@ -39,10 +39,6 @@ only.  Nil when *messages-url* is a gate that adds the key.")
 (defparameter *call-seconds* 180
   "Integer. Seconds one API call may take.")
 
-(defparameter *engine-note*
-  "The engine is open-source Gendl (no solid modelling kernel): there are no boolean operations, so holes can be drawn but not cut. Say so plainly when a request needs them."
-  "String. What the agent is told about the engine behind the session.")
-
 
 ;;
 ;; JSON: the tool layer speaks alists (cl-json style); requests and
@@ -102,7 +98,8 @@ Rules:
           (if (render-offered?)
               ", then render (layout isometric-plus-ortho) and look"
               " and read its numbers closely: there is no render on this host, and the visitor sees the model in a live viewer beside your reply")
-          *engine-note*
+          ;; which engine this room runs (parameters.lisp)
+          (engine-note)
           (or (primer-text) "")))
 
 

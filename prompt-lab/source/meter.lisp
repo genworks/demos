@@ -18,8 +18,12 @@
 ;; metered by the symbols of the file compiled (the agent's write_model,
 ;; the visitor's edit or reload); a RUN by the symbols of what runs: the
 ;; expression an evaluate reads, the whole model file when the model is
-;; built (check_model, render, the viewer drawing it).  A gate without
-;; the door, or no gate at all, meters nothing and the lab works on.
+;; built (check_model, render, the viewer drawing it).  Each report names
+;; the ENGINE behind the room (*engine*, parameters.lisp), and the gate
+;; multiplies a solids room's symbols by its factor for that engine
+;; (:meter-engine-factors beside the rates in the cyclops config: the
+;; knobs are there, never here).  A gate without the door, or no gate
+;; at all, meters nothing and the lab works on.
 ;;
 
 (defparameter *meter?* t
@@ -79,11 +83,17 @@ refused -- the credits are spent -- so the caller can refuse the act."
               (gate-post "meter" (h "session" (session-id session)
                                     "wallet" (session-wallet session)
                                     "kind" (string-downcase (symbol-name kind))
-                                    "symbols" symbols))
+                                    "symbols" symbols
+                                    "engine" (engine-name)))
             (cond ((and (eql status 200) (hash-table-p json))
                    (note-balance session json)
-                   (let ((meter (session-meter session)))
+                   (let ((meter (session-meter session))
+                         ;; what the gate booked for this act, in credits
+                         ;; (the symbols times its rate and engine factor)
+                         (credits (gethash "credits" json)))
                      (setf (getf meter kind) (+ symbols (or (getf meter kind) 0)))
+                     (when (realp credits)
+                       (setf (getf meter :credits) (+ credits (or (getf meter :credits) 0))))
                      (setf (session-meter session) meter))
                    t)
                   ((member status '(402 429))
@@ -99,4 +109,4 @@ refused -- the credits are spent -- so the caller can refuse the act."
 
 (defun meter-refusal (reason)
   "A tool's answer when the meter refused: content blocks and the error flag."
-  (values (list (text-block "~a" reason)) t))
+  (values (list (text-result "~a" reason)) t))

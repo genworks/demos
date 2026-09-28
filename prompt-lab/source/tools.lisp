@@ -31,7 +31,7 @@ so the tool's own error handling reports it like any other failure."
               (subseq string 0 *result-limit*) (- (length string) *result-limit*))
       string))
 
-(defun text-block (control &rest args)
+(defun text-result (control &rest args)
   `(("type" . "text") ("text" . ,(clip (apply #'format nil control args)))))
 
 (defun image-block (base64)
@@ -58,7 +58,7 @@ so the tool's own error handling reports it like any other failure."
 (defun write-model (session source)
   (when (search "(in-package" source :test #'char-equal)
     (return-from write-model
-      (values (list (text-block "Refused: do not put an in-package form in the source. ~
+      (values (list (text-result "Refused: do not put an in-package form in the source. ~
 The file's header already sets the session package.")) t)))
   (let ((file (session-model-file session))
         (package-name (session-package-name session)))
@@ -98,52 +98,56 @@ version that fails to compile is kept too."
               (load fasl))
             (let ((defined? (let ((symbol (model-symbol session)))
                               (and symbol (find-class symbol nil) t))))
-              (values (list (text-block "Compiled and loaded.~:[  No object named MODEL is defined!~;~]~@[~%Warnings:~%~{- ~a~%~}~]"
+              (values (list (text-result "Compiled and loaded.~:[  No object named MODEL is defined!~;~]~@[~%Warnings:~%~{- ~a~%~}~]"
                                         defined? (reverse warnings)))
                       (not defined?)))))
       (error (condition)
-        (values (list (text-block "Error compiling or loading the model file: ~a~@[~%Warnings first:~%~{- ~a~%~}~]"
+        (values (list (text-result "Error compiling or loading the model file: ~a~@[~%Warnings first:~%~{- ~a~%~}~]"
                                   condition (reverse warnings)))
                 t)))))
 
 (defun read-model (session)
   (let ((file (session-model-file session)))
     (if (probe-file file)
-        (values (list (text-block "~a" (uiop:read-file-string file :external-format :utf-8))) nil)
-        (values (list (text-block "There is no model file yet.")) nil))))
+        (values (list (text-result "~a" (uiop:read-file-string file :external-format :utf-8))) nil)
+        (values (list (text-result "There is no model file yet.")) nil))))
 
 
 ;;
 ;; evaluate: one expression, as at a REPL.
 ;;
 
-(defun evaluate (session expression)
+;; (Named evaluate-expression, and the tool's text blocks text-result:
+;; the symbols evaluate and text-block are exported by gendl and
+;; geom-base, which Allegro locks -- a defun on either fails to load on
+;; the workshop, and silently redefines them on CCL.)
+(defun evaluate-expression (session expression)
   (let ((*package* (session-package session)))
     (multiple-value-bind (form end)
         (handler-case (read-from-string expression)
           (error (condition)
-            (return-from evaluate
-              (values (list (text-block "Could not read the expression: ~a" condition)) t))))
+            (return-from evaluate-expression
+              (values (list (text-result "Could not read the expression: ~a" condition)) t))))
       (when (let ((rest (string-trim '(#\space #\tab #\newline #\return)
                                      (subseq expression end))))
               (plusp (length rest)))
-        (return-from evaluate
-          (values (list (text-block "Refused: one expression per call, as at a REPL. ~
+        (return-from evaluate-expression
+          (values (list (text-result "Refused: one expression per call, as at a REPL. ~
 Wrap several forms in progn, or put definitions in the model with write_model.")) t)))
       ;; a run costs credits by the volume of what runs (meter.lisp)
       (multiple-value-bind (ok? reason) (meter! session :run (form-volume form))
-        (unless ok? (return-from evaluate (meter-refusal reason))))
+        (unless ok? (return-from evaluate-expression (meter-refusal reason))))
       (let (result)
         (handler-case
             (let ((output (with-output-to-string (*standard-output*)
                             (with-time-limit (*eval-seconds* "evaluation")
                               (setq result (eval form))))))
               (values (list (let ((*print-length* 50) (*print-level* 6))
-                              (text-block "~s~@[~%Output:~%~a~]"
+                              (text-result "~s~@[~%Output:~%~a~]"
                                           result (when (plusp (length output)) output))))
                       nil))
           (error (condition)
-            (values (list (text-block "Error: ~a" condition)) t)))))))
+            (values (list (text-result "Error: ~a" condition)) t)))))))
 
 
 ;;
@@ -208,7 +212,7 @@ of 2026-09-25)."
                                                    (max 1 (* 0.05 (abs want)))))
                                    collect (format nil "~a: expected ~,1f, got ~,1f" axis want have)))))
         (values
-         (list (text-block "~{~a~%~}"
+         (list (text-result "~{~a~%~}"
                            (remove nil
                                    (list "MODEL builds with default inputs."
                                          (format nil "Leaves: ~a (types: ~{~(~a~)~^, ~})."
@@ -233,7 +237,7 @@ of 2026-09-25)."
                                                (expected-size "Expected size matched."))))))
          (and (or pile? broken mismatches) t))))
     (error (condition)
-      (values (list (text-block "MODEL does not build with default inputs: ~a" condition)) t))))
+      (values (list (text-result "MODEL does not build with default inputs: ~a" condition)) t))))
 
 
 ;;
@@ -275,7 +279,7 @@ lens and rasterised in process (raster.lisp): no Ghostscript."
                    (values (list (image-block (png-base64 png))) nil)))
             (when (probe-file file) (ignore-errors (delete-file file))))))
     (error (condition)
-      (values (list (text-block "Render failed: ~a" condition)) t))))
+      (values (list (text-result "Render failed: ~a" condition)) t))))
 
 
 ;;
@@ -290,17 +294,17 @@ SESSION.  Values: content blocks, and true on failure."
   (touch session)
   (cond ((string= name "write_model") (write-model session (input "source" input)))
         ((string= name "read_model") (read-model session))
-        ((string= name "evaluate") (evaluate session (input "expression" input)))
+        ((string= name "evaluate") (evaluate-expression session (input "expression" input)))
         ((string= name "check_model")
          (let ((size (input "expected_size" input)))
            (check-model session :expected-size (when size (coerce size 'list)))))
         ((and (string= name "render") (not (render-offered?)))
-         (values (list (text-block "There is no render on this host; judge the model by check_model's numbers.")) t))
+         (values (list (text-result "There is no render on this host; judge the model by check_model's numbers.")) t))
         ((string= name "render")
          (render session :projection (input "projection" input)
                          :layout (input "layout" input)
                          :hidden-lines (input "hidden_lines" input)))
-        (t (values (list (text-block "Unknown tool ~a." name)) t))))
+        (t (values (list (text-result "Unknown tool ~a." name)) t))))
 
 (defun schema (properties &optional required)
   `(("type" . "object")
@@ -341,15 +345,19 @@ render only where it is offered."
                                                       ("items" . (("type" . "number")))
                                                       ("description" . "Expected overall size [x, y, z] in mm (optional)."))))
                                 nil)))
+   ;; the enums as ,(vector ...), not #(...) literals: inside a nested
+   ;; backquote Allegro's reader turns a vector literal into an
+   ;; (excl::bq-vector ...) form, which reached the encoder as a list
+   ;; with a symbol at its head (the workshop, 2026-09-28)
    `(("name" . "render")
      ("description" . "Render (make-object 'model) as a wireframe drawing and return the image, to see what you built.")
      ("input_schema" . ,(schema `(("projection" . (("type" . "string")
-                                                   ("enum" . #("trimetric" "top" "bottom" "left" "right" "front" "rear"))))
+                                                   ("enum" . ,(vector "trimetric" "top" "bottom" "left" "right" "front" "rear"))))
                                   ("layout" . (("type" . "string")
-                                               ("enum" . #("isometric-plus-ortho" "orthographic-3view" "standard-4view"))
+                                               ("enum" . ,(vector "isometric-plus-ortho" "orthographic-3view" "standard-4view"))
                                                ("description" . "A multi-view layout; overrides projection.")))
                                   ("hidden_lines" . (("type" . "string")
-                                                     ("enum" . #("draw" "remove" "dashed"))
+                                                     ("enum" . ,(vector "draw" "remove" "dashed"))
                                                      ("description" . "remove or dashed suits solids."))))
                                 nil)))))
 

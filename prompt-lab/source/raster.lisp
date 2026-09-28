@@ -228,7 +228,12 @@ drawing's width and height as second and third values."
                            (+ (* x1 scale) 0.5d0) (+ (* y1 scale) 0.5d0) :weight 0.6d0)))))
       (unless (raster-available?)
         (error "No PNG writer is loaded (zpng)."))
-      (let* ((png (make-instance (find-symbol "PNG" :zpng) :color-type :grayscale :width pw :height ph))
+      ;; the class name through (string :png), not "PNG": on a modern-mode
+      ;; Allegro workshop zpng's symbols are lower case and the literal
+      ;; found nothing ("No class named: nil" on every render, 2026-09-28);
+      ;; the keyword reads in the image's own case, as the symbol-calls'
+      ;; keywords below already do
+      (let* ((png (make-instance (find-symbol (string :png) :zpng) :color-type :grayscale :width pw :height ph))
              (data (uiop:symbol-call :zpng :data-array png)))
         (dotimes (y ph)
           (dotimes (x pw)

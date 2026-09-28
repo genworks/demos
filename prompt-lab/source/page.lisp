@@ -204,9 +204,12 @@ it: the scheme and host the proxies forwarded."
        "prompts_unlimited" (if (paying? session) t 'yason:false)
        "usage" (h "input" (getf usage :input) "output" (getf usage :output)
                   "cache_read" (getf usage :cache-read) "cache_write" (getf usage :cache-write))
-       ;; symbols compiled and run, the meter's side of the spend
+       ;; symbols compiled and run, the meter's side of the spend, and
+       ;; the credits the gate booked for them
        "meter" (h "compile" (or (getf (session-meter session) :compile) 0)
-                  "run" (or (getf (session-meter session) :run) 0))
+                  "run" (or (getf (session-meter session) :run) 0)
+                  "credits" (round (or (getf (session-meter session) :credits) 0)))
+       "engine" (engine-name)
        "spend" (spend-state session)
        "log" (map 'vector #'(lambda (entry)
                               (destructuring-bind (time kind text) entry
@@ -228,10 +231,15 @@ it: the scheme and host the proxies forwarded."
 
 (defun config-door (req ent)
   "GET <prefix>/api/config: what the page needs before it has a session --
-the Turnstile site key (nil: no widget) and the limits it shows."
+the Turnstile site key (nil: no widget), the limits it shows, the engine
+behind this room and the sibling lab on the other engine, if any."
   (respond-json req ent (h "turnstile_site_key" *turnstile-site-key*
                            "prompts_allowed" *max-prompts-per-session*
-                           "prompt_max_length" *max-prompt-length*)))
+                           "prompt_max_length" *max-prompt-length*
+                           "engine" (engine-name)
+                           "engine_label" (engine-label)
+                           "sibling_url" (car *sibling-lab*)
+                           "sibling_label" (cdr *sibling-lab*))))
 
 (defun session-door (req ent)
   "POST <prefix>/api/session {wallet?}: open a session; answers its id.
@@ -419,9 +427,10 @@ opens; the tree, the menus and the headset button are the sluice's own."
 
    (session (let ((id (the session-id))) (and (stringp id) (find-session id))))
 
-   (root-object-type (let ((session (the session)))
-                       (and session (model-defined? session) (model-symbol session)))
-                     :settable)
+   ;; root-object-type is not overridden here but SET at instantiation
+   ;; (below): it is the sluice's own settable input, and on a Genworks
+   ;; GDL workshop, where the sluice package is locked, redefining it
+   ;; is a reserved-word error at load (2026-09-28).
 
    (empty-display-list-greeting
     (with-lhtml-string ()
@@ -435,6 +444,11 @@ opens; the tree, the menus and the headset button are the sluice's own."
   ((set-instantiation-time!
     ()
     (call-next-method)
+    ;; the sluice opens on the session's MODEL, a symbol (a string
+    ;; passes root-object-type-valid? and then fails make-object)
+    (let ((session (the session)))
+      (when (and session (model-defined? session))
+        (the (set-slot! :root-object-type (model-symbol session)))))
     (the (draw-model!)))
 
    (draw-model!
