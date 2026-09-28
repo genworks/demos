@@ -91,11 +91,12 @@ verification on a trusted ship only; nil when the gate adds it.")
 (defparameter *turnstile-seconds* 15
   "Integer. Seconds one token verification may take.")
 
-(defparameter *free-allowance-cents* 100
-  "Integer. The free allowance a session has at the gate, in cents, as the
-page shows it before the gate has reported (the gate's
+(defparameter *free-allowance-cents* 77
+  "Integer. The free allowance a session has at the gate, in cents of API
+cost, as the page shows it before the gate has reported (the gate's
 :session-budget-cents is the one that counts; it reports it back with
-every answer, and that value replaces this one).")
+every answer, and that value replaces this one).  77 c reads as a round
+100 modeling credits at the gate's 1.3 markup.")
 
 (defparameter *wallet-header* "X-Prompt-Lab-Wallet"
   "String. The header naming the visitor's wallet to the gate on each
