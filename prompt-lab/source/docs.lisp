@@ -228,13 +228,30 @@ line (or left out when DOCUMENTED-ONLY)."
       (when bare
         (format out "- undocumented: ~{~(~a~)~^, ~}~%" bare)))))
 
+(defun gendl-describes? ()
+  "Whether this image's Lisply backend carries describe-object-type (gendl
+since 2026-09-28: the same walk, promoted there as the describe_object
+MCP tool).  Named through the reader so the symbol wears the image's case."
+  (let ((symbol (find-symbol (symbol-name :describe-object-type) :gendl-lisply)))
+    (and symbol (fboundp symbol) t)))
+
 (defun describe-type (session name)
   "Describe object type NAME for the agent.  Values: content blocks and
-an error flag."
+an error flag.  Delegates to the Lisply backend's describe-object-type
+where the image has it; the walk below is the same code, kept for the
+images built before it moved (drop it when every image carries gendl's)."
   (let ((name (and (stringp name) (string-trim '(#\space #\tab #\newline #\return) name))))
     (cond
       ((or (null name) (zerop (length name)))
        (values (list (text-result "Name the object type to describe.")) t))
+      ((gendl-describes?)
+       (handler-case
+           (with-time-limit (*eval-seconds* "description")
+             (values (list (text-result "~a" (uiop:symbol-call :gendl-lisply :describe-object-type
+                                                              name :package (session-package session))))
+                     nil))
+         (error (condition)
+           (values (list (text-result "~a  search_docs may find the name you mean." condition)) t))))
       (t
        (handler-case
            (with-time-limit (*eval-seconds* "description")
