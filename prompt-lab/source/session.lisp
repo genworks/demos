@@ -123,6 +123,20 @@ restart has emptied the table (see save-session!); nil when neither."
      (rename-file tmp file)
      file)))
 
+(defun repair-messages (messages)
+  "MESSAGES as parsed from a session file, with every tool_result's
+is_error a JSON boolean again: a file written between the first
+restore and this fix holds null there, and the API refuses null."
+  (dolist (message messages messages)
+    (when (hash-table-p message)
+      (let ((content (gethash "content" message)))
+        (when (listp content)
+          (dolist (block content)
+            (when (and (hash-table-p block) (equal (gethash "type" block) "tool_result"))
+              (let ((flag (gethash "is_error" block)))
+                (setf (gethash "is_error" block)
+                      (if (or (eq flag t) (eq flag 'yason:true)) t 'yason:false))))))))))
+
 (defun restore-session (id)
   "Bring session ID back from its directory: the record from session.json,
 a fresh package, the model file compiled and loaded.  Nil when nothing
@@ -131,7 +145,15 @@ is on disk for it."
     (let* ((directory (merge-pathnames (format nil "~a/" id) *workspace-root*))
            (file (merge-pathnames "session.json" directory))
            (json (and (probe-file file)
-                      (ignore-errors (with-open-file (in file :external-format :utf-8) (yason:parse in))))))
+                      (ignore-errors
+                       (with-open-file (in file :external-format :utf-8)
+                         ;; booleans come back as yason:true / yason:false,
+                         ;; not T / NIL: a tool_result's "is_error": false
+                         ;; parsed as NIL re-encodes as null, which the API
+                         ;; refuses ("Input should be a valid boolean" --
+                         ;; the first restored session, 2026-09-27)
+                         (let ((yason:*parse-json-booleans-as-symbols* t))
+                           (yason:parse in)))))))
       (when (hash-table-p json)
         (let ((session (make-session :id id :address (gethash "address" json)
                                      :wallet (let ((w (gethash "wallet" json))) (and (stringp w) w)))))
@@ -152,7 +174,7 @@ is on disk for it."
                   (loop for entry in (gethash "log" json)
                         when (and (listp entry) (= (length entry) 3) (stringp (second entry)))
                           collect (list (first entry) (intern (string-upcase (second entry)) :keyword) (third entry))))
-            (setf (session-messages session) (gethash "messages" json)))
+            (setf (session-messages session) (repair-messages (gethash "messages" json))))
           (when (probe-file (session-model-file session))
             (ignore-errors (load-model-file session)))
           (log-event session :note "The workshop restarted; your session was restored from its file.")
