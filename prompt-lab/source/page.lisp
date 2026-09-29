@@ -101,6 +101,14 @@ were minted has none; the address that opened it stands in, by the same
 (defun owner-request? (req session &optional json)
   (owner? session (request-owner-key req json) (client-address req)))
 
+(defun visible-to? (session key)
+  "Whether a request naming owner KEY may see SESSION: any session that is
+not private, and a private one only with its key.  (A private session
+always has a key: going private mints one -- see privacy-door.)"
+  (or (not (session-private? session))
+      (let ((owner (session-owner session)))
+        (and owner (stringp key) (string= key owner)))))
+
 (defun not-yours (req ent)
   (refuse req ent net.aserve:*response-forbidden*
           "This session belongs to the visitor who opened it; you can watch it, not change it.  Start a session of your own to build."))
@@ -133,6 +141,13 @@ a session, prompts and sessions an address a day) step aside, and the
 gate's budgets are what bind."
   (let ((credits (session-credits session)))
     (and (realp credits) (plusp credits))))
+
+(defun paid? (session)
+  "True once the session's wallet has bought credits -- credit on it now,
+or credits already drawn from it here: what makes a session eligible to
+be made private."
+  (or (paying? session)
+      (let ((charged (session-charged session))) (and (realp charged) (plusp charged)))))
 
 (defun model-defined? (session)
   (let ((symbol (model-symbol session)))
@@ -246,6 +261,9 @@ file's place and the terminal opened on it."
   (let ((usage (session-usage session)))
     (h "session" (session-id session)
        "editable" (if owner? t 'yason:false)
+       "private" (if (session-private? session) t 'yason:false)
+       ;; the owner may close the session once it has bought credits
+       "may_be_private" (if (and owner? (paid? session)) t 'yason:false)
        "busy" (if (session-busy? session) t 'yason:false)
        "prompts_used" (prompts-used session)
        "prompts_allowed" *max-prompts-per-session*
@@ -396,8 +414,37 @@ watcher is refused when *browsing?* is off."
   (let ((session (requested-session req)))
     (cond ((null session) (no-such-session req ent))
           ((owner-request? req session) (respond-json req ent (session-state (touch session))))
-          (*browsing?* (respond-json req ent (session-state session :owner? nil)))
+          ((and *browsing?* (not (session-private? session)))
+           (respond-json req ent (session-state session :owner? nil)))
           (t (refuse req ent net.aserve:*response-forbidden* "This session is private.")))))
+
+(defun privacy-door (req ent)
+  "POST <prefix>/api/privacy {session, private}: the owner closes the
+session to watchers -- out of the listings, live and archived, its URL
+answering no one else -- or opens it again.  Closing takes a session
+that has bought credits.  A session opened before owner keys gets one
+here, answered as \"owner\", since the address no longer suffices once
+nobody else may look."
+  (let* ((json (request-json req))
+         (session (requested-session req json))
+         (private? (and json (eq (gethash "private" json) t))))
+    (cond ((null session) (no-such-session req ent))
+          ((not (owner-request? req session json)) (not-yours req ent))
+          ((and private? (not (paid? session)))
+           (refuse req ent "A session becomes private once it has bought modeling credits."))
+          (t (unless (session-owner session) (setf (session-owner session) (new-owner-key)))
+             (unless (eq private? (session-private? session))
+               (setf (session-private? session) private?)
+               ;; a replay built from the archive while it was open would
+               ;; still show it (browse.lisp); the next is built afresh
+               (let ((replay (find-replay (session-id session))))
+                 (when replay (drop-replay replay)))
+               (log-event session :note (if private?
+                                            "This session is private now: out of the listings, and closed to anyone else with its link."
+                                            "This session is open to view again.")))
+             (save-session! session)
+             (respond-json req ent (h "private" (if private? t 'yason:false)
+                                      "owner" (session-owner session)))))))
 
 (defun prompt-door (req ent)
   "POST <prefix>/api/prompt {session, prompt}: start the agent on the
@@ -486,16 +533,18 @@ opens; the tree, the menus and the headset button are the sluice's own."
    ;; by the replay door (browse.lisp)
    (replay-id (cdr (assoc "replay" (the query-toplevel) :test #'string-equal)))
 
-   (session (let ((id (the session-id)) (replay (the replay-id)))
-              (cond ((stringp id) (find-session id))
-                    ((stringp replay) (find-replay replay)))))
+   ;; the owner's page names its key (owner=) on the iframe
+   (owner-key (cdr (assoc "owner" (the query-toplevel) :test #'string-equal)))
 
-   ;; the owner's page names its key (owner=) on the iframe; only the
-   ;; owner's draws are metered -- a watcher's cost the owner nothing
+   ;; a private session shows only to its owner's key
+   (session (let* ((id (the session-id)) (replay (the replay-id))
+                   (session (cond ((stringp id) (find-session id))
+                                  ((stringp replay) (find-replay replay)))))
+              (and session (visible-to? session (the owner-key)) session)))
+
+   ;; only the owner's draws are metered -- a watcher's cost the owner nothing
    (owner-viewing? (let ((session (the session)))
-                     (and session
-                          (owner? session (cdr (assoc "owner" (the query-toplevel)
-                                                      :test #'string-equal))))))
+                     (and session (owner? session (the owner-key)))))
 
    ;; root-object-type is not overridden here but SET at instantiation
    ;; (below): it is the sluice's own settable input, and on a Genworks
@@ -529,8 +578,13 @@ opens; the tree, the menus and the headset button are the sluice's own."
       (when (and session (the owner-viewing?))
         (ignore-errors (meter! session :run (model-volume session)))))
     ;; hidden lines removed by default: the wireframe reads as a solid
-    ;; object rather than a cage (the remover is fast since 2026-09-27)
-    (ignore-errors (the viewport (set-slot! :hidden-lines :remove)))
+    ;; object rather than a cage -- up to *hidden-lines-max-leaves*;
+    ;; removal is quadratic in the edges, so a larger model opens as the
+    ;; plain wireframe and View > Hidden Lines turns removal back on
+    (when (and (the root-object)
+               (<= (or (ignore-errors (length (the root-object leaves))) 0)
+                   *hidden-lines-max-leaves*))
+      (ignore-errors (the viewport (set-slot! :hidden-lines :remove))))
     (when (the root-object)
       (ignore-errors (the viewport (draw-leaves! (the root-object))))))))
 
@@ -544,7 +598,7 @@ opens; the tree, the menus and the headset button are the sluice's own."
 
 (defun publish-prompt-lab! (&key host)
   "Publish the page at *url-prefix*, its doors under <prefix>/api/ (config,
-session, state, prompt, model, reload, topup, confirm; sessions, archive,
+session, state, prompt, model, reload, topup, confirm, privacy; sessions, archive,
 archived, replay) and the viewer at <prefix>/viewer, on every server."
   (gwl:with-all-servers (server)
     (net.aserve:publish-file :path *url-prefix* :server server :host host
@@ -557,6 +611,7 @@ archived, replay) and the viewer at <prefix>/viewer, on every server."
     (net.aserve:publish :path (door-path "reload") :server server :host host :function #'reload-door)
     (net.aserve:publish :path (door-path "topup") :server server :host host :function #'topup-door)
     (net.aserve:publish :path (door-path "confirm") :server server :host host :function #'confirm-door)
+    (net.aserve:publish :path (door-path "privacy") :server server :host host :function #'privacy-door)
     ;; browsing other sessions (browse.lisp)
     (net.aserve:publish :path (door-path "sessions") :server server :host host :function #'sessions-door)
     (net.aserve:publish :path (door-path "archive") :server server :host host :function #'archive-door)

@@ -40,7 +40,7 @@ there is none or it does not parse."
 (defparameter *title-length* 160
   "Integer. Characters of a session's first prompt a listing shows.")
 
-(defun summary (&key id created last-used log engine model? busy?)
+(defun summary (&key id created last-used log engine model? busy? private?)
   "One line of a listing.  LOG as the struct keeps it or as a record
 holds it: (time kind text), the kind a keyword or a string."
   (let ((prompts (loop for entry in log
@@ -57,12 +57,18 @@ holds it: (time kind text), the kind a keyword or a string."
                      first))
        "engine" (or engine "gendl")
        "model" (if model? t 'yason:false)
-       "busy" (if busy? t 'yason:false))))
+       "busy" (if busy? t 'yason:false)
+       ;; dropped by worth-listing? before any listing goes out
+       "private" (if private? t 'yason:false))))
+
+(defun record-private? (json)
+  (eq (gethash "private" json) 'yason:true))
 
 (defun record-summary (json model-file)
   (summary :id (gethash "id" json) :created (gethash "created" json)
            :last-used (gethash "last_used" json) :log (gethash "log" json)
-           :engine (gethash "engine" json) :model? (probe-file model-file)))
+           :engine (gethash "engine" json) :model? (probe-file model-file)
+           :private? (record-private? json)))
 
 ;; A record holds the whole conversation, rendered images and all; a
 ;; listing reads a summary once per version of the file.
@@ -88,8 +94,9 @@ unchanged; nil when it does not parse."
 
 (defun worth-listing? (summary)
   "A session that never took a prompt and holds no model is only an
-opened page."
-  (or (plusp (gethash "prompts" summary)) (eq (gethash "model" summary) t)))
+opened page; a private one is listed nowhere."
+  (and (not (eq (gethash "private" summary) t))
+       (or (plusp (gethash "prompts" summary)) (eq (gethash "model" summary) t))))
 
 (defun newest-first (summaries)
   (let ((sorted (sort (copy-list summaries) #'>
@@ -114,7 +121,7 @@ directories a restarted Lisp has not been asked for yet."
                   (summary :id (session-id session) :created (session-created session)
                            :last-used (session-last-used session) :log (session-log session)
                            :engine (engine-name) :model? (probe-file (session-model-file session))
-                           :busy? (session-busy? session)))
+                           :busy? (session-busy? session) :private? (session-private? session)))
               sessions)
       (loop for file in (directory (merge-pathnames "*/session.json" *workspace-root*))
             for summary = (file-summary file)
@@ -170,6 +177,14 @@ marked live when it still is."
                                                copy))
                                          (newest-first summaries)))))))
 
+(defun record-visible? (json key)
+  "A record opens to anyone unless it is private; a private one only to
+its owner's KEY -- a private session is as absent from the archive as
+from the listings, to everyone else."
+  (or (not (record-private? json))
+      (let ((owner (gethash "owner" json)))
+        (and (stringp owner) (stringp key) (string= owner key)))))
+
 (defun model-versions (directory)
   "The model-NNN.lisp files in an archive DIRECTORY, oldest first."
   (sort (directory (merge-pathnames "model-*.lisp" directory)) #'string< :key #'namestring))
@@ -182,7 +197,8 @@ as it last was or its Nth version, and whether a replay can draw it."
          (directory (and *browsing?* (archived-directory id)))
          (json (and directory (read-record (merge-pathnames "session.json" directory)))))
     (cond ((not *browsing?*) (browsing-off req ent))
-          ((null json) (refuse req ent net.aserve:*response-not-found* "No such archived session."))
+          ((not (and json (record-visible? json (request-owner-key req))))
+           (refuse req ent net.aserve:*response-not-found* "No such archived session."))
           (t
            (let* ((versions (model-versions directory))
                   (version (ignore-errors (parse-integer (query-value req "version"))))
@@ -263,6 +279,9 @@ archive holds no model for ID) and the compiler's text."
                                        (find-package keyword)))
                        (replay (make-session-internal
                                 :id id :package-name (package-name package) :replay? t
+                                ;; the viewer shows a private replay only to its owner
+                                :private? (record-private? json)
+                                :owner (let ((o (gethash "owner" json))) (and (stringp o) o))
                                 :created (let ((c (gethash "created" json))) (if (integerp c) c (get-universal-time)))
                                 :directory (merge-pathnames (format nil "~a/" id) *replay-root*))))
                   (ensure-directories-exist (session-directory replay))
@@ -283,9 +302,12 @@ archive holds no model for ID) and the compiler's text."
   "POST <prefix>/api/replay {id}: draw archived session ID -- its model
 compiled again, if it is not already -- and answer the viewer's URL."
   (let* ((json (request-json req))
-         (id (and json (gethash "id" json))))
+         (id (and json (gethash "id" json)))
+         (directory (and *browsing?* (archived-directory id)))
+         (record (and directory (read-record (merge-pathnames "session.json" directory)))))
     (cond ((not *browsing?*) (browsing-off req ent))
-          ((not (archived-directory id)) (refuse req ent net.aserve:*response-not-found* "No such archived session."))
+          ((not (and record (record-visible? record (request-owner-key req json))))
+           (refuse req ent net.aserve:*response-not-found* "No such archived session."))
           (t (multiple-value-bind (replay text) (ensure-replay id)
                (if (null replay)
                    (refuse req ent "This session left no model to draw.")

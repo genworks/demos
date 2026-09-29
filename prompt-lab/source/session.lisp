@@ -31,6 +31,9 @@
   ;; everyone else watches (browse.lisp).  Nil on a session opened
   ;; before owners were minted, whose own address stands in for it.
   (owner nil)
+  ;; True when the owner, having bought credits, closed the session to
+  ;; watchers: out of the listings, its URL answering no one else.
+  (private? nil)
   ;; True for a replay: an archived session's model compiled again to be
   ;; drawn, never archived or metered (browse.lisp).
   (replay? nil)
@@ -132,6 +135,7 @@ transcript and model file to the archive (archive.lisp).  Never signals."
            "id" (session-id session)
            "address" (session-address session)
            "owner" (session-owner session)
+           "private" (if (session-private? session) t 'yason:false)
            "wallet" (session-wallet session)
            "created" (session-created session)
            "last_used" (session-last-used session)
@@ -194,6 +198,7 @@ is on disk for it."
                                      :owner (let ((o (gethash "owner" json))) (and (stringp o) o)))))
           (flet ((number-or (key default) (let ((v (gethash key json))) (if (realp v) v default)))
                  (number-or-nil (key) (let ((v (gethash key json))) (and (realp v) v))))
+            (setf (session-private? session) (eq (gethash "private" json) 'yason:true))
             (setf (session-created session) (number-or "created" (get-universal-time))
                   (session-cents session) (number-or "cents" 0)
                   (session-allowance session) (number-or-nil "allowance")

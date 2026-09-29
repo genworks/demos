@@ -124,6 +124,10 @@
         </div>
       </div>
       <div id="spend-note" class="muted" hidden></div>
+      <label id="privacy-row" class="row" style="margin-top:0.6rem; gap:0.4rem; align-items:flex-start" hidden>
+        <input id="private" type="checkbox" style="margin-top:0.2rem">
+        <span><strong>Keep this session private</strong><br><span class="muted">Out of the live listing and the archive, and closed to anyone else who has its link. Open to everyone otherwise.</span></span>
+      </label>
     </div>
 
     <div>
@@ -143,7 +147,7 @@
     <details class="fine">
       <summary>About this page</summary>
       <p>An experiment, offered as is, with no guarantees about what gets built. Your prompts and the generated code are logged. Generated code is yours under the GNU Affero General Public License, like Gendl itself. Each session allows a handful of prompts; take a copy of the model file if you want to keep it.</p>
-      <p id="about-browsing" hidden>Sessions are open to view: other visitors can browse your prompts, the agent's replies and the model, live and later in the archive, but only this browser can prompt, edit or buy credits in the sessions it opened.</p>
+      <p id="about-browsing" hidden>Sessions are open to view: other visitors can browse your prompts, the agent's replies and the model, live and later in the archive, but only this browser can prompt, edit or buy credits in the sessions it opened. A session that has bought modeling credits can be made private.</p>
     </details>
   </aside>
   <section class="viewer">
@@ -348,7 +352,10 @@
 
   // A door that names no session (the listings, the archive).
   function getJSON(path) {
-    return fetch(base + '/api/' + path)
+    // this browser's key for an archived session it opened: a private
+    // one answers only to it
+    var key = archiveId && owners[archiveId];
+    return fetch(base + '/api/' + path, key ? { headers: { 'X-Prompt-Lab-Owner': key } } : {})
       .then(function (r) { return r.json().then(function (j) { j._status = r.status; return j; }); });
   }
 
@@ -435,8 +442,15 @@
     }
     $('save').disabled = state.busy || !sourceDirty;
 
+    // closing the session to watchers, once it has bought credits
+    if (editable) {
+      $('privacy-row').hidden = !(state.may_be_private || state.private);
+      if (!privacyPending) $('private').checked = !!state.private;
+    }
+
     viewerUrl = state.viewer_url;
-    $('viewer-tab').href = viewerUrl;
+    // a private session's viewer shows only to its key, in the tab too
+    $('viewer-tab').href = viewerUrl + (state.private && editable && ownerKey() ? '&owner=' + encodeURIComponent(ownerKey()) : '');
     $('viewer-tab').hidden = !state.model_defined;
     if (state.console_url) { $('console-tab').href = state.console_url; $('console-tab').hidden = false; }
 
@@ -509,12 +523,14 @@
         return;
       }
       $('viewer-empty').textContent = 'Building the model to draw it… a large one takes a while.';
-      return fetch(base + '/api/replay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: a.id }) })
+      var key = owners[a.id] || null;
+      return fetch(base + '/api/replay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: a.id, owner: key }) })
         .then(function (r) { return r.json(); })
         .then(function (r) {
           if (r.error || !r.ok) { $('viewer-empty').textContent = r.error || ('The model did not build again: ' + (r.text || '')); return; }
-          $('viewer-tab').href = r.viewer_url; $('viewer-tab').hidden = false;
-          $('viewer').src = r.viewer_url + '&t=' + Date.now();
+          var url = r.viewer_url + (key ? '&owner=' + encodeURIComponent(key) : '');
+          $('viewer-tab').href = url; $('viewer-tab').hidden = false;
+          $('viewer').src = url + '&t=' + Date.now();
           $('viewer').hidden = false;
           $('viewer-empty').hidden = true;
         });
@@ -643,6 +659,20 @@
   $('new-session').addEventListener('click', function (event) {
     event.preventDefault();
     location.href = base;
+  });
+
+  var privacyPending = false;
+  $('private').addEventListener('change', function () {
+    var want = $('private').checked;
+    privacyPending = true;
+    api('privacy', { session: session, private: want }).then(function (r) {
+      privacyPending = false;
+      if (r.error) { $('private').checked = !want; note(r.error); return; }
+      if (r.owner) keepOwner(session, r.owner);
+      $('private').checked = !!r.private;
+      note(r.private ? 'This session is private now.' : 'This session is open to view again.');
+      schedule(300);
+    }).catch(function (e) { privacyPending = false; $('private').checked = !want; note('Could not change it: ' + e); });
   });
 
   $('checkout-close').addEventListener('click', function () { closeCheckout(); note(''); });
