@@ -20,6 +20,18 @@
 ;;;; wanted: a system without source/file-ordering.isc loads its files
 ;;;; alphabetically, and one that sorts ahead of package.lisp breaks.
 ;;;;
+;;;; Then a SMOKE RUN through what loaded: each demo is published on
+;;;; the image's own web server and its page fetched (a gwl app mints
+;;;; a session and redirects; a page whose model or markup fails
+;;;; ends the connection early, which fails here too); the shared
+;;;; stylesheet and the portal likewise; x3dom-page writes a page for
+;;;; a box; and the prompt lab is driven through its doors with no
+;;;; agent and no network -- config, a session, a hand-written model
+;;;; compiled and loaded through the model door, the state door
+;;;; reading it back, and the viewer (the sluice) drawing it.  Its gate
+;;;; is pointed at a closed local port, so the balance and meter calls
+;;;; fail at once, which the lab treats as "no gate".
+;;;;
 ;;;; Locally, with DEMOS_DIR naming a checkout:
 ;;;;   cd /opt/gendl && DEMOS_DIR=/path/to/demos \
 ;;;;     ./gdl/program/gdl-ccl -n -b --load /path/to/demos/ci/cold-load.lisp
@@ -91,6 +103,151 @@ thing this check should report instead."
 (pushnew (namestring *demos-dir*) ql:*local-project-directories* :test #'equalp)
 (ql:register-local-projects)
 
+;;;
+;;; The smoke run.
+;;;
+
+;;; (system package publish-function path): each demo page, published
+;;; with no host so it answers on localhost.
+(defparameter *smoke-pages*
+  '((:brick-wall "BRICK-WALL-DEMO" "PUBLISH-BRICK-WALL!" "/demo/brick-wall")
+    (:bus "GENWORKS.DEMOS.BUS" "PUBLISH-BUS!" "/demo/bus")
+    (:robot "ROBOT-DEMO" "PUBLISH-ROBOT!" "/demo/robot")
+    (:staircase "STAIRCASE-DEMO" "PUBLISH-STAIRCASE!" "/demo/staircase")))
+
+;;; What the prompt lab's model door is given: a small model in the
+;;; shape its agent writes -- the object named MODEL, inputs for the
+;;; key dimensions, a coloured child.
+(defparameter *smoke-model* "(define-object model (base-object)
+  :input-slots ((length 120) (width 60) (thickness 8))
+  :objects ((plate :type 'box :length (the length) :width (the width)
+                   :height (the thickness)
+                   :display-controls (list :color :steelblue))
+            (post :type 'cylinder :radius 6 :length 40
+                  :center (translate (the center) :up (+ (half (the thickness)) 20))
+                  :orientation (alignment :rear (the (face-normal-vector :top)))
+                  :display-controls (list :color :firebrick))))
+")
+
+(defvar *smoke-failures* nil "((what message) ...) in run order.")
+
+(defun smoke (what thunk)
+  "Run THUNK, which returns true or signals; record WHAT as a failure on
+nil or any error, and print a line either way."
+  (let ((start (get-internal-real-time))
+        (problem nil))
+    (handler-case (unless (funcall thunk) (setq problem "check failed"))
+      (error (e) (setq problem (format nil "~a: ~a" (type-of e) e))))
+    (format t "~&~a ~a (~,1f s)~%" (if problem "FAIL" "ok  ") what
+            (/ (- (get-internal-real-time) start) internal-time-units-per-second))
+    (when problem
+      (format t "      ~a~%" problem)
+      (push (list what problem) *smoke-failures*))
+    (null problem)))
+
+(defun http-port ()
+  (or (and (boundp 'gwl:*http-port*) (integerp gwl:*http-port*) gwl:*http-port*)
+      (socket:local-port (net.aserve:wserver-socket gwl::*http-server*))))
+
+(defun http (method path &key json headers)
+  "One request to this image's own server, redirects followed.  Values:
+the body, the status, the final path."
+  (multiple-value-bind (body status response-headers uri)
+      (net.aserve.client:do-http-request
+          (format nil "http://127.0.0.1:~a~a" (http-port) path)
+        :method method :redirect 5 :timeout 180 :headers headers
+        :content-type (and json "application/json")
+        ;; yason arrives with the prompt lab: named, not read, since this
+        ;; file is read before anything is loaded
+        :content (and json (with-output-to-string (s) (uiop:symbol-call "YASON" "ENCODE" json s))))
+    (declare (ignore response-headers))
+    (values body status (if uri (net.uri:uri-path uri) path))))
+
+(defun page-ok? (path)
+  "PATH answers 200 with a whole HTML document."
+  (multiple-value-bind (body status) (http :get path)
+    (unless (eql status 200) (error "~a answered ~a" path status))
+    (unless (search "</html>" body :test #'char-equal)
+      (error "~a answered 200 but no whole page (~a characters)" path (length body)))
+    t))
+
+(defun json-of (method path &key json headers)
+  "Request PATH and parse its JSON answer; any status but 200 is an error."
+  (multiple-value-bind (body status) (http method path :json json :headers headers)
+    (unless (eql status 200)
+      (error "~a answered ~a: ~a" path status (subseq body 0 (min 200 (length body)))))
+    (uiop:symbol-call "YASON" "PARSE" body)))
+
+(defun table (&rest plist)
+  (let ((table (make-hash-table :test #'equal)))
+    (loop for (key value) on plist by #'cddr do (setf (gethash key table) value))
+    table))
+
+(defun smoke-pages (loaded)
+  (dolist (entry *smoke-pages*)
+    (destructuring-bind (system package function path) entry
+      (when (member system loaded)
+        (smoke (format nil "~(~a~) page ~a" system path)
+               (lambda ()
+                 (uiop:symbol-call package function)
+                 (page-ok? path))))))
+  (when (intersection loaded (mapcar #'first *smoke-pages*))
+    (smoke "shared stylesheet /demo/css/demos-style.css"
+           (lambda ()
+             (multiple-value-bind (body status) (http :get "/demo/css/demos-style.css")
+               (and (eql status 200) (plusp (length body)))))))
+  (when (member :demos-common loaded)
+    (smoke "portal /"
+           (lambda ()
+             (uiop:symbol-call "DEMOS-COMMON" "PUBLISH-PORTAL!")
+             (page-ok? "/")))))
+
+(defun smoke-x3dom-page ()
+  (smoke "x3dom-page writes a page for a box"
+         (lambda ()
+           (let ((file (merge-pathnames "demos-smoke/box.html" (uiop:temporary-directory))))
+             (uiop:symbol-call "X3DOM-PAGE" "WRITE-X3DOM-PAGE"
+                               (make-object 'box :length 10 :width 20 :height 30) file)
+             (let ((text (uiop:read-file-string file)))
+               (and (search "<Scene>" text) (search "</html>" text)))))))
+
+(defun smoke-prompt-lab ()
+  (flet ((lab (name) (find-symbol name "PROMPT-LAB")))
+    ;; no agent, no gate, no network: the gate's doors fail at once
+    (setf (symbol-value (lab "*MESSAGES-URL*")) "http://127.0.0.1:9/llm/messages"
+          (symbol-value (lab "*METER?*")) nil
+          (symbol-value (lab "*RENDER-TOOL?*")) nil)
+    (let ((prefix (symbol-value (lab "*URL-PREFIX*")))
+          (session nil) (owner nil))
+      (flet ((door (name) (format nil "~a/api/~a" prefix name))
+             (owner-headers () (list (cons "X-Prompt-Lab-Owner" owner))))
+        (smoke "prompt-lab publish" (lambda () (uiop:symbol-call "PROMPT-LAB" "PUBLISH-PROMPT-LAB!") t))
+        (smoke (format nil "prompt-lab page ~a" prefix) (lambda () (page-ok? prefix)))
+        (smoke "prompt-lab config door"
+               (lambda () (gethash "engine" (json-of :get (door "config")))))
+        (when (smoke "prompt-lab session door opens a session"
+                     (lambda ()
+                       (let ((answer (json-of :post (door "session") :json (table))))
+                         (setq session (gethash "session" answer)
+                               owner (gethash "owner" answer))
+                         (and (stringp session) (stringp owner)))))
+          (smoke "prompt-lab model door compiles and loads a model"
+                 (lambda ()
+                   (let ((answer (json-of :post (door "model") :headers (owner-headers)
+                                          :json (table "session" session "source" *smoke-model*))))
+                     (or (eq (gethash "ok" answer) t)
+                         (error "the model door refused it: ~a" (gethash "text" answer))))))
+          (smoke "prompt-lab state door reads the model back"
+                 (lambda ()
+                   (let ((state (json-of :get (format nil "~a?session=~a" (door "state") session)
+                                         :headers (owner-headers))))
+                     (and (eq (gethash "model_defined" state) t)
+                          (eq (gethash "editable" state) t)
+                          (search "define-object model" (gethash "model_source" state))))))
+          (smoke "prompt-lab viewer draws the model"
+                 (lambda ()
+                   (page-ok? (format nil "~a/viewer?session=~a&owner=~a" prefix session owner)))))))))
+
 (let* ((all (all-system-names))
        (systems (remove-if (lambda (s) (assoc s *not-loaded*)) all)))
   (format t "~&~a system~:p found; loading ~a: ~{~(~a~)~^ ~}~%"
@@ -104,5 +261,13 @@ thing this check should report instead."
           (- (length systems) (length *failures*)) (length systems))
   (when *failures*
     (format t "~&FAILED: ~{~(~a~)~^ ~}~%" (mapcar #'car *failures*)))
+  (let ((loaded (remove-if (lambda (s) (assoc s *failures*)) systems)))
+    (format t "~&~%Smoke run through what loaded, on port ~a~%" (http-port))
+    (smoke-pages loaded)
+    (when (member :x3dom-page loaded) (smoke-x3dom-page))
+    (when (member :prompt-lab loaded) (smoke-prompt-lab)))
+  (setq *smoke-failures* (nreverse *smoke-failures*))
+  (format t "~&~%Smoke run: ~a failure~:p.~%" (length *smoke-failures*))
+  (dolist (f *smoke-failures*) (format t "~&FAILED: ~a~%" (first f)))
   (finish-output)
-  (uiop:quit (if *failures* 1 0)))
+  (uiop:quit (if (or *failures* *smoke-failures*) 1 0)))

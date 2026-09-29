@@ -6,7 +6,8 @@
 # License, or (at your option) any later version.  Distributed WITHOUT
 # ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-# GitLab CI for genworks/demos: one job, a COLD LOAD of the demos.
+# GitLab CI for genworks/demos: one job, a COLD LOAD of the demos and
+# a SMOKE RUN through them.
 #
 # Every push starts the web server and then loads demos-common and
 # every demo system through Quicklisp on the published free Gendl
@@ -17,7 +18,12 @@
 # job.  A warm development image, where the packages already exist,
 # cannot catch a file that sorts ahead of package.lisp or a dependency
 # nobody declared; that is how every production demo went dark on
-# 2026-09-11, and this is the check that would have caught it.
+# 2026-09-11, and this is the check that would have caught it.  Then
+# every demo that loaded is published and its page fetched from the
+# image's own server, and the prompt lab is driven through its doors
+# (a session, a hand-written model compiled and loaded, the viewer
+# drawing it) with no agent and no network; any failed page fails the
+# job.  The header of ci/cold-load.lisp has the details.
 #
 # Nothing is built, pushed or deployed here: demos reach the stack
 # hosts through the repos deploy script, not through CI.  A pull-only
