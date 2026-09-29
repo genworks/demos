@@ -31,4 +31,5 @@
              #:*max-prompts-per-address*
              #:*turnstile-site-key*
              #:*turnstile-verify-url*
-             #:*turnstile-secret-file*))
+             #:*turnstile-secret-file*
+             #:*browsing?*))

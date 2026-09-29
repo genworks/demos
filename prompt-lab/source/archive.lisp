@@ -49,7 +49,10 @@ there is no archive."
     (merge-pathnames (format nil "~a/~a/" (utc-day created) id) *archive-root*)))
 
 (defun archive-directory (session)
-  (archive-directory-for (session-id session) (session-created session)))
+  "SESSION's archive directory; nil for a replay, which only reads the
+archive (browse.lisp)."
+  (unless (session-replay? session)
+    (archive-directory-for (session-id session) (session-created session))))
 
 (defun same-text-file? (a b)
   (and (probe-file a) (probe-file b)

@@ -72,6 +72,39 @@ multiplication sign in it arrived as mojibake before this."
 (defun no-such-session (req ent)
   (respond-json req ent (h "error" "No such session.") net.aserve:*response-not-found*))
 
+
+;;
+;; Whose session it is.  The session door hands the opening browser the
+;; session's owner key; the page sends it back as X-Prompt-Lab-Owner
+;; (the viewer's iframe, which cannot send a header, as owner=).  Only
+;; the owner prompts, edits, reloads or pays; anyone else who has the
+;; URL watches, read-only, when *browsing?* allows it.
+;;
+
+(defun request-owner-key (req &optional json)
+  (flet ((key (value) (and (stringp value) (plusp (length value)) value)))
+    (or (key (net.aserve:header-slot-value req :x-prompt-lab-owner))
+        (and json (key (gethash "owner" json)))
+        (key (query-value req "owner")))))
+
+(defun owner? (session key &optional address)
+  "True when KEY is SESSION's owner key.  A session opened before owners
+were minted has none; the address that opened it stands in, by the same
+/64 the guards count."
+  (let ((owner (session-owner session)))
+    (cond ((session-replay? session) nil)
+          (owner (and (stringp key) (string= key owner)))
+          (t (let ((opened (session-address session)))
+               (and (stringp address) (stringp opened)
+                    (string= (address-key address) (address-key opened))))))))
+
+(defun owner-request? (req session &optional json)
+  (owner? session (request-owner-key req json) (client-address req)))
+
+(defun not-yours (req ent)
+  (refuse req ent net.aserve:*response-forbidden*
+          "This session belongs to the visitor who opened it; you can watch it, not change it.  Start a session of your own to build."))
+
 (defvar *response-too-many-requests* (net.aserve::make-resp 429 "Too Many Requests")
   "AllegroServe ships no 429; this is ours.")
 
@@ -108,15 +141,18 @@ gate's budgets are what bind."
 (defun model-body (session)
   "The model file's source after its header (the in-package line): what
 the page's editor shows, and what write-model takes back."
-  (let ((file (session-model-file session)))
-    (if (probe-file file)
-        (let* ((text (uiop:read-file-string file :external-format :utf-8))
-               (start (search "(in-package" text))
-               (eol (and start (position #\Newline text :start start))))
-          (if eol
-              (string-left-trim '(#\Newline #\Return) (subseq text (1+ eol)))
-              text))
-        "")))
+  (file-model-body (session-model-file session)))
+
+(defun file-model-body (file)
+  "A model FILE's source after its header; the empty string without one."
+  (if (probe-file file)
+      (let* ((text (uiop:read-file-string file :external-format :utf-8))
+             (start (search "(in-package" text))
+             (eol (and start (position #\Newline text :start start))))
+        (if eol
+            (string-left-trim '(#\Newline #\Return) (subseq text (1+ eol)))
+            text))
+      ""))
 
 (defun viewer-url (session)
   (format nil "~a/viewer?session=~a" *url-prefix* (session-id session)))
@@ -194,9 +230,22 @@ it: the scheme and host the proxies forwarded."
           (proto (or (header (net.aserve:header-slot-value req :x-forwarded-proto)) "http")))
       (format nil "~a://~a~a?session=~a" proto host *url-prefix* (session-id session)))))
 
-(defun session-state (session)
+(defun log-vector (log)
+  "A session's log, (time kind text) entries, as the page reads it."
+  (map 'vector #'(lambda (entry)
+                   (destructuring-bind (time kind text) entry
+                     (h "time" (epoch-seconds time)
+                        "kind" (string-downcase kind)
+                        "text" text)))
+       log))
+
+(defun session-state (session &key (owner? t))
+  "Everything the page shows about SESSION.  For a watcher (OWNER? nil)
+the owner's own things are left out: the wallet and the spend, the model
+file's place and the terminal opened on it."
   (let ((usage (session-usage session)))
     (h "session" (session-id session)
+       "editable" (if owner? t 'yason:false)
        "busy" (if (session-busy? session) t 'yason:false)
        "prompts_used" (prompts-used session)
        "prompts_allowed" *max-prompts-per-session*
@@ -210,19 +259,15 @@ it: the scheme and host the proxies forwarded."
                   "run" (or (getf (session-meter session) :run) 0)
                   "credits" (round (or (getf (session-meter session) :credits) 0)))
        "engine" (engine-name)
-       "spend" (spend-state session)
-       "log" (map 'vector #'(lambda (entry)
-                              (destructuring-bind (time kind text) entry
-                                (h "time" (epoch-seconds time)
-                                   "kind" (string-downcase kind)
-                                   "text" text)))
-                  (session-log session))
+       "created" (epoch-seconds (session-created session))
+       "spend" (and owner? (spend-state session))
+       "log" (log-vector (session-log session))
        "model_defined" (if (model-defined? session) t 'yason:false)
-       "model_file" (namestring (session-model-file session))
+       "model_file" (and owner? (namestring (session-model-file session)))
        "model_source" (model-body session)
        "viewer_url" (viewer-url session)
        ;; nil encodes as null; an empty vector would be the empty array
-       "console_url" (console-url session))))
+       "console_url" (and owner? (console-url session)))))
 
 
 ;;
@@ -239,7 +284,8 @@ behind this room and the sibling lab on the other engine, if any."
                            "engine" (engine-name)
                            "engine_label" (engine-label)
                            "sibling_url" (car *sibling-lab*)
-                           "sibling_label" (cdr *sibling-lab*))))
+                           "sibling_label" (cdr *sibling-lab*)
+                           "browsing" (if *browsing?* t 'yason:false))))
 
 (defun session-door (req ent)
   "POST <prefix>/api/session {wallet?}: open a session; answers its id.
@@ -261,7 +307,10 @@ One address opens at most *max-sessions-per-address* a day."
           (log-event session :note "Session ~a opened.  Describe what to build." (session-id session))
           (refresh-balance! session)
           (save-session! session)
-          (respond-json req ent (h "session" (session-id session) "spend" (spend-state session)))))))
+          ;; the owner key goes to this browser once, here, and nowhere else
+          (respond-json req ent (h "session" (session-id session)
+                                   "owner" (session-owner session)
+                                   "spend" (spend-state session)))))))
 
 (defun topup-door (req ent)
   "POST <prefix>/api/topup {session, amount_cents, embedded?}: a Stripe
@@ -280,6 +329,7 @@ page, or {client_secret, publishable_key, wallet} for the in-page form."
                (first verdict))
              (reason () (or (second verdict) "Complete the human check first.")))
     (cond ((null session) (no-such-session req ent))
+          ((not (owner-request? req session json)) (not-yours req ent))
           ((not (integerp amount)) (refuse req ent "Say how much."))
           ;; a public Checkout for small amounts draws card testers: a
           ;; fresh Turnstile token before every purchase, as before every
@@ -322,6 +372,7 @@ spend state with the outcome."
          (wallet (and json (gethash "wallet" json)))
          (checkout (and json (gethash "checkout" json))))
     (cond ((null session) (no-such-session req ent))
+          ((not (owner-request? req session json)) (not-yours req ent))
           ((not (wallet-id? wallet)) (refuse req ent "No wallet named."))
           (t
            (setf (session-wallet session) wallet)
@@ -339,11 +390,14 @@ spend state with the outcome."
                                         "spend" (spend-state session)))))))))
 
 (defun state-door (req ent)
-  "GET <prefix>/api/state?session=<id>: everything the page shows."
+  "GET <prefix>/api/state?session=<id>: everything the page shows.  The
+owner's request keeps the session alive; a watcher's does not, and a
+watcher is refused when *browsing?* is off."
   (let ((session (requested-session req)))
-    (if session
-        (respond-json req ent (session-state (touch session)))
-        (no-such-session req ent))))
+    (cond ((null session) (no-such-session req ent))
+          ((owner-request? req session) (respond-json req ent (session-state (touch session))))
+          (*browsing?* (respond-json req ent (session-state session :owner? nil)))
+          (t (refuse req ent net.aserve:*response-forbidden* "This session is private.")))))
 
 (defun prompt-door (req ent)
   "POST <prefix>/api/prompt {session, prompt}: start the agent on the
@@ -353,6 +407,7 @@ prompt in a thread of its own; the page follows along through the state door."
          (prompt (and json (gethash "prompt" json)))
          (address (client-address req)))
     (cond ((null session) (no-such-session req ent))
+          ((not (owner? session (request-owner-key req json) address)) (not-yours req ent))
           ((not (and (stringp prompt)
                      (plusp (length (string-trim '(#\space #\tab #\newline #\return) prompt)))))
            (refuse req ent "Say what to build."))
@@ -384,6 +439,7 @@ model file, written, compiled and loaded like the agent's."
          (session (requested-session req json))
          (source (and json (gethash "source" json))))
     (cond ((null session) (no-such-session req ent))
+          ((not (owner-request? req session json)) (not-yours req ent))
           ((not (stringp source)) (refuse req ent "No source given."))
           ((session-busy? session) (refuse req ent "Wait for the agent to finish first."))
           (t (multiple-value-bind (blocks error?) (write-model (touch session) source)
@@ -398,6 +454,7 @@ it is on disk, after an edit made in the terminal."
   (let* ((json (request-json req))
          (session (requested-session req json)))
     (cond ((null session) (no-such-session req ent))
+          ((not (owner-request? req session json)) (not-yours req ent))
           ((session-busy? session) (refuse req ent "Wait for the agent to finish first."))
           ((not (probe-file (session-model-file session))) (refuse req ent "There is no model file yet."))
           (t (multiple-value-bind (blocks error?) (load-model-file (touch session))
@@ -425,7 +482,20 @@ opens; the tree, the menus and the headset button are the sluice's own."
 
    (session-id (cdr (assoc "session" (the query-toplevel) :test #'string-equal)))
 
-   (session (let ((id (the session-id))) (and (stringp id) (find-session id))))
+   ;; ?replay=<id> instead: an archived session's model, compiled again
+   ;; by the replay door (browse.lisp)
+   (replay-id (cdr (assoc "replay" (the query-toplevel) :test #'string-equal)))
+
+   (session (let ((id (the session-id)) (replay (the replay-id)))
+              (cond ((stringp id) (find-session id))
+                    ((stringp replay) (find-replay replay)))))
+
+   ;; the owner's page names its key (owner=) on the iframe; only the
+   ;; owner's draws are metered -- a watcher's cost the owner nothing
+   (owner-viewing? (let ((session (the session)))
+                     (and session
+                          (owner? session (cdr (assoc "owner" (the query-toplevel)
+                                                      :test #'string-equal))))))
 
    ;; root-object-type is not overridden here but SET at instantiation
    ;; (below): it is the sluice's own settable input, and on a Genworks
@@ -456,7 +526,8 @@ opens; the tree, the menus and the headset button are the sluice's own."
     ;; drawing the model runs it: metered like a check (meter.lisp); a
     ;; refusal is not enforced here -- the page's doors already are
     (let ((session (the session)))
-      (when session (ignore-errors (meter! session :run (model-volume session)))))
+      (when (and session (the owner-viewing?))
+        (ignore-errors (meter! session :run (model-volume session)))))
     ;; hidden lines removed by default: the wireframe reads as a solid
     ;; object rather than a cage (the remover is fast since 2026-09-27)
     (ignore-errors (the viewport (set-slot! :hidden-lines :remove)))
@@ -473,8 +544,8 @@ opens; the tree, the menus and the headset button are the sluice's own."
 
 (defun publish-prompt-lab! (&key host)
   "Publish the page at *url-prefix*, its doors under <prefix>/api/ (config,
-session, state, prompt, model, reload) and the viewer at <prefix>/viewer,
-on every server."
+session, state, prompt, model, reload, topup, confirm; sessions, archive,
+archived, replay) and the viewer at <prefix>/viewer, on every server."
   (gwl:with-all-servers (server)
     (net.aserve:publish-file :path *url-prefix* :server server :host host
                              :file (namestring *page-file*) :content-type "text/html; charset=utf-8")
@@ -486,6 +557,11 @@ on every server."
     (net.aserve:publish :path (door-path "reload") :server server :host host :function #'reload-door)
     (net.aserve:publish :path (door-path "topup") :server server :host host :function #'topup-door)
     (net.aserve:publish :path (door-path "confirm") :server server :host host :function #'confirm-door)
+    ;; browsing other sessions (browse.lisp)
+    (net.aserve:publish :path (door-path "sessions") :server server :host host :function #'sessions-door)
+    (net.aserve:publish :path (door-path "archive") :server server :host host :function #'archive-door)
+    (net.aserve:publish :path (door-path "archived") :server server :host host :function #'archived-door)
+    (net.aserve:publish :path (door-path "replay") :server server :host host :function #'replay-door)
     (publish-gwl-app (format nil "~a/viewer" *url-prefix*) 'viewer :server server :host host))
   (start-reaper!)
   *url-prefix*)

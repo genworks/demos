@@ -26,6 +26,14 @@
   (last-used (get-universal-time))
   ;; The visitor's address as the session door saw it (guards.lisp).
   (address nil)
+  ;; The secret the session door hands the browser that opened the
+  ;; session: only a request carrying it may prompt, edit or pay here;
+  ;; everyone else watches (browse.lisp).  Nil on a session opened
+  ;; before owners were minted, whose own address stands in for it.
+  (owner nil)
+  ;; True for a replay: an archived session's model compiled again to be
+  ;; drawn, never archived or metered (browse.lisp).
+  (replay? nil)
   ;; The agent's conversation, append-only (thinking blocks included, as
   ;; returned), as yason hash tables.
   (messages nil)
@@ -54,7 +62,18 @@
 (defun new-session-id ()
   (format nil "~(~{~2,'0x~}~)" (loop repeat 6 collect (random 256 (make-random-state t)))))
 
-(defun make-session (&key (id (new-session-id)) address wallet)
+(defun new-owner-key ()
+  "32 hex digits from the kernel's random source, else from random."
+  (let ((octets (or (ignore-errors
+                     (with-open-file (in "/dev/urandom" :element-type '(unsigned-byte 8))
+                       (let ((v (make-array 16 :element-type '(unsigned-byte 8))))
+                         (read-sequence v in)
+                         v)))
+                    (let ((state (make-random-state t)))
+                      (loop repeat 16 collect (random 256 state))))))
+    (format nil "~(~{~2,'0x~}~)" (coerce octets 'list))))
+
+(defun make-session (&key (id (new-session-id)) address wallet (owner (new-owner-key)))
   "Create a session: a fresh package defined like gdl-user, and a directory
 under *workspace-root*.  Returns the session."
   (let* ((keyword (intern (string-upcase (format nil "pl-~a" id)) :keyword))
@@ -62,7 +81,8 @@ under *workspace-root*.  Returns the session."
                          (find-package keyword)))
          (directory (merge-pathnames (format nil "~a/" id) *workspace-root*))
          (session (make-session-internal :id id :package-name (package-name package)
-                                         :directory directory :address address :wallet wallet)))
+                                         :directory directory :address address :wallet wallet
+                                         :owner owner)))
     (ensure-directories-exist directory)
     (bt:with-lock-held (*sessions-lock*)
       (setf (gethash id *sessions*) session))
@@ -111,6 +131,7 @@ transcript and model file to the archive (archive.lisp).  Never signals."
         (h "version" 1
            "id" (session-id session)
            "address" (session-address session)
+           "owner" (session-owner session)
            "wallet" (session-wallet session)
            "created" (session-created session)
            "last_used" (session-last-used session)
@@ -168,7 +189,9 @@ is on disk for it."
                            (yason:parse in)))))))
       (when (hash-table-p json)
         (let ((session (make-session :id id :address (gethash "address" json)
-                                     :wallet (let ((w (gethash "wallet" json))) (and (stringp w) w)))))
+                                     :wallet (let ((w (gethash "wallet" json))) (and (stringp w) w))
+                                     ;; nil for a session older than owners
+                                     :owner (let ((o (gethash "owner" json))) (and (stringp o) o)))))
           (flet ((number-or (key default) (let ((v (gethash key json))) (if (realp v) v default)))
                  (number-or-nil (key) (let ((v (gethash key json))) (and (realp v) v))))
             (setf (session-created session) (number-or "created" (get-universal-time))
@@ -268,7 +291,7 @@ a no-op when one is running."
     (setf *reaper-thread*
           (bt:make-thread #'(lambda ()
                               (loop (sleep *reaper-interval*)
-                                    (handler-case (progn (reap-sessions!) (prune-addresses!))
+                                    (handler-case (progn (reap-sessions!) (reap-replays!) (prune-addresses!))
                                       (error (condition)
                                         (format *error-output* "~&prompt-lab reaper: ~a~%" condition)))))
                           :name "prompt-lab reaper")))

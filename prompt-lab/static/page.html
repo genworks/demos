@@ -45,6 +45,22 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   details.fine { font-size: 0.78rem; color: #4b5563; }
   details.fine summary { cursor: pointer; color: #6b7280; }
+  .banner { padding: 0.6rem 0.75rem; border-radius: 0.375rem; background: #fefce8; border: 1px solid #fde68a; color: #713f12; font-size: 0.85rem; }
+  .banner a { color: #4338ca; }
+  header a.current { color: #fff; font-weight: 600; }
+  main.browse { display: block; overflow: auto; padding: 1.25rem 1rem 2rem; }
+  .browse-inner { max-width: 56rem; margin: 0 auto; }
+  .browse-inner h1 { font-size: 1.15rem; margin: 0 0 0.25rem; }
+  .browse-inner h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; margin: 1.25rem 0 0.4rem; }
+  ul.sessions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+  ul.sessions a { display: block; padding: 0.6rem 0.8rem; background: #fff; border: 1px solid #e5e7eb; border-radius: 0.375rem; color: inherit; text-decoration: none; }
+  ul.sessions a:hover { border-color: #a5b4fc; background: #fafaff; }
+  ul.sessions .title { display: block; overflow-wrap: anywhere; }
+  ul.sessions .title.none { color: #9ca3af; font-style: italic; }
+  ul.sessions .meta { display: flex; gap: 0.35rem 0.75rem; flex-wrap: wrap; margin-top: 0.2rem; font-size: 0.75rem; color: #6b7280; }
+  .pill { padding: 0 0.45rem; border-radius: 9999px; background: #e5e7eb; color: #374151; }
+  .pill.live { background: #dcfce7; color: #166534; }
+  .pill.mine { background: #e0e7ff; color: #3730a3; }
 </style>
 </head>
 <body>
@@ -54,13 +70,24 @@
   <span id="engine" class="tag engine" title="the engine behind this room" hidden></span>
   <span>describe a part; a modeling agent builds it as a parametric Gendl model you can inspect and edit</span>
   <span class="spacer"></span>
+  <a id="browse-live" href="?browse=live" hidden>live sessions</a>
+  <a id="browse-archive" href="?browse=archive" hidden>archive</a>
   <a id="sibling" href="#" hidden></a>
   <a id="viewer-tab" href="#" target="_blank" rel="noopener" hidden>viewer in its own tab</a>
   <a id="console-tab" href="#" target="_blank" rel="noopener" hidden>source in Emacs</a>
   <a id="new-session" href="#">new session</a>
 </header>
-<main>
+<main id="browse-main" class="browse" hidden>
+  <div class="browse-inner">
+    <h1 id="browse-title"></h1>
+    <p id="browse-note" class="muted"></p>
+    <div id="browse-list"></div>
+  </div>
+</main>
+<main id="lab-main">
   <aside>
+    <div id="readonly-banner" class="banner" hidden></div>
+
     <form id="prompt-form">
       <h2>What should it build?</h2>
       <textarea id="prompt" rows="4" maxlength="2000" placeholder="A bracket 120 by 80 mm, 6 mm thick, with four 8 mm mounting holes..." required></textarea>
@@ -101,8 +128,12 @@
 
     <div>
       <h2>Model file</h2>
+      <div id="versions-row" class="row" style="margin-bottom:0.4rem" hidden>
+        <label class="muted" for="versions">Version</label>
+        <select id="versions"></select>
+      </div>
       <textarea id="source" class="code" spellcheck="false" placeholder="The model's source appears here once it is built. Edit it and save to see your change."></textarea>
-      <div class="row" style="margin-top:0.5rem">
+      <div id="save-row" class="row" style="margin-top:0.5rem">
         <button id="save" class="quiet" type="button" disabled>Save and reload</button>
         <span id="source-state" class="muted"></span>
       </div>
@@ -112,6 +143,7 @@
     <details class="fine">
       <summary>About this page</summary>
       <p>An experiment, offered as is, with no guarantees about what gets built. Your prompts and the generated code are logged. Generated code is yours under the GNU Affero General Public License, like Gendl itself. Each session allows a handful of prompts; take a copy of the model file if you want to keep it.</p>
+      <p id="about-browsing" hidden>Sessions are open to view: other visitors can browse your prompts, the agent's replies and the model, live and later in the archive, but only this browser can prompt, edit or buy credits in the sessions it opened.</p>
     </details>
   </aside>
   <section class="viewer">
@@ -124,6 +156,20 @@
   var base = location.pathname.replace(/\/+$/, '');
   var params = new URLSearchParams(location.search);
   var session = params.get('session');
+  // ?archive=<id>: an archived session, read-only; ?browse=live|archive:
+  // the listings.  Anything else is the lab itself.
+  var archiveId = params.get('archive'), browse = params.get('browse');
+  // The owner keys of the sessions this browser opened (id -> key): the
+  // session door hands one over, and only a request carrying it may
+  // prompt, edit or pay; without it a session is watched, read-only.
+  var owners = {};
+  try { owners = JSON.parse(localStorage.getItem('prompt-lab-owners') || '{}') || {}; } catch (e) {}
+  function ownerKey() { return session ? owners[session] || null : null; }
+  function keepOwner(id, key) {
+    owners[id] = key;
+    try { localStorage.setItem('prompt-lab-owners', JSON.stringify(owners)); } catch (e) {}
+  }
+  var editable = true;
   // The wallet: an id the gate mints at the first top-up, kept in this
   // browser; it names the visitor's credit on every build.
   var wallet = null;
@@ -265,11 +311,21 @@
     if (turnstileWidget !== null && window.turnstile) window.turnstile.reset(turnstileWidget);
   }
 
+  var siblingUrl = null, engineHere = null;
+
   function loadConfig() {
     return fetch(base + '/api/config').then(function (r) { return r.json(); }).then(function (config) {
+      engineHere = config.engine || null;
       // which engine this room runs, and the lab on the other one
       if (config.engine_label) { $('engine').textContent = config.engine_label; $('engine').hidden = false; }
-      if (config.sibling_url) { $('sibling').href = config.sibling_url; $('sibling').textContent = config.sibling_label || 'the other lab'; $('sibling').hidden = false; }
+      if (config.sibling_url) { siblingUrl = config.sibling_url; $('sibling').href = config.sibling_url; $('sibling').textContent = config.sibling_label || 'the other lab'; $('sibling').hidden = false; }
+      if (config.browsing) {
+        $('browse-live').hidden = $('browse-archive').hidden = $('about-browsing').hidden = false;
+        if (browse === 'live') $('browse-live').className = 'current';
+        if (browse === 'archive' || archiveId) $('browse-archive').className = 'current';
+      }
+      // nothing to build on a listing or an archived session: no widget
+      if (browse || archiveId) return;
       turnstileKey = config.turnstile_site_key || null;
       if (!turnstileKey) return;
       $('build').disabled = true;
@@ -283,8 +339,16 @@
   }
 
   function api(path, body) {
-    var options = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {};
+    var headers = body ? { 'Content-Type': 'application/json' } : {};
+    if (ownerKey()) headers['X-Prompt-Lab-Owner'] = ownerKey();
+    var options = body ? { method: 'POST', headers: headers, body: JSON.stringify(body) } : { headers: headers };
     return fetch(base + '/api/' + path + (body ? '' : '?session=' + encodeURIComponent(session)), options)
+      .then(function (r) { return r.json().then(function (j) { j._status = r.status; return j; }); });
+  }
+
+  // A door that names no session (the listings, the archive).
+  function getJSON(path) {
+    return fetch(base + '/api/' + path)
       .then(function (r) { return r.json().then(function (j) { j._status = r.status; return j; }); });
   }
 
@@ -299,6 +363,7 @@
     return api('session', { wallet: wallet }).then(function (r) {
       if (r.error) { throw new Error(r.error); }
       session = r.session;
+      if (r.owner) keepOwner(session, r.owner);
       renderSpend(r.spend);
       history.replaceState(null, '', base + '?session=' + session);
     });
@@ -309,8 +374,7 @@
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
-  function render(state) {
-    var log = state.log || [];
+  function renderLog(log) {
     var list = $('log');
     for (var i = logCount; i < log.length; i++) {
       var li = document.createElement('li');
@@ -323,6 +387,33 @@
     }
     if (log.length > logCount) list.scrollTop = list.scrollHeight;
     logCount = log.length;
+  }
+
+  // Someone else's session, or an archived one: everything that would
+  // change it goes, and a banner says whose it is.
+  function readOnly(html) {
+    editable = false;
+    $('prompt-form').hidden = true;
+    $('spend-box').hidden = true;
+    $('save-row').hidden = true;
+    $('console-tab').hidden = true;
+    $('source').readOnly = true;
+    $('source').placeholder = 'No model file yet.';
+    $('readonly-banner').innerHTML = html;
+    $('readonly-banner').hidden = false;
+  }
+
+  function formatDate(seconds) {
+    return seconds ? new Date(seconds * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  }
+
+  function render(state) {
+    var log = state.log || [];
+    renderLog(log);
+    if (state.editable === false && editable) {
+      readOnly('You are watching someone else’s session, opened ' + escapeHtml(formatDate(state.created))
+        + '. It is read-only and follows along as they build. <a href="' + base + '">Start your own</a>.');
+    }
 
     $('busy').hidden = !state.busy;
     var capped = !state.prompts_unlimited && state.prompts_used >= state.prompts_allowed;
@@ -336,7 +427,7 @@
     $('usage').textContent = ((u.input || u.output) ? 'tokens: ' + u.input + ' in, ' + u.output + ' out, ' + u.cache_read + ' cached' : '')
       + ((m.compile || m.run) ? ((u.input || u.output) ? ' \u00b7 ' : '') + 'symbols: ' + m.compile + ' compiled, ' + m.run + ' run'
          + (m.credits ? ' (' + credits(m.credits) + ' credits)' : '') : '');
-    renderSpend(state.spend);
+    if (state.spend) renderSpend(state.spend);
 
     if (state.model_source !== lastSource) {
       lastSource = state.model_source;
@@ -356,11 +447,139 @@
     if (state.model_defined && (completed !== builds || $('viewer').hidden || !viewerLoaded)) {
       viewerLoaded = true;
       builds = completed;
-      $('viewer').src = viewerUrl + '&t=' + Date.now();
+      // the owner's key rides on the iframe (it cannot send a header):
+      // only the owner's draws are metered
+      $('viewer').src = viewerUrl + (editable && ownerKey() ? '&owner=' + encodeURIComponent(ownerKey()) : '') + '&t=' + Date.now();
       $('viewer').hidden = false;
       $('viewer-empty').hidden = true;
     }
-    schedule(state.busy ? 2000 : 8000);
+    // a watcher polls more gently
+    schedule(state.busy ? (editable ? 2000 : 4000) : (editable ? 8000 : 15000));
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+
+  //
+  // An archived session: its log, each version of its model file, and
+  // the model drawn in a replay (compiled again on the server).
+  //
+
+  function loadArchived(version) {
+    return getJSON('archived?id=' + encodeURIComponent(archiveId) + (version ? '&version=' + version : ''))
+      .then(function (a) {
+        if (a._status !== 200) { readOnly(escapeHtml(a.error || 'This archived session could not be read.')); return null; }
+        $('source').value = a.model_source || '';
+        return a;
+      });
+  }
+
+  function showArchive() {
+    $('viewer-empty').textContent = 'Loading the archived session…';
+    loadArchived().then(function (a) {
+      if (!a) { $('viewer-empty').textContent = 'Nothing to show.'; return; }
+      readOnly('An archived session, opened ' + escapeHtml(formatDate(a.created)) + ' on the '
+        + escapeHtml(a.engine) + ' engine. Read-only.'
+        + (a.live ? ' It is still live: <a href="' + base + '?session=' + encodeURIComponent(a.id) + '">follow it</a>.' : '')
+        + ' <a href="' + base + '">Start your own</a>.');
+      renderLog(a.log || []);
+      var u = a.usage || {}, m = a.meter || {};
+      $('usage').textContent = (u.input || u.output ? 'tokens: ' + u.input + ' in, ' + u.output + ' out, ' + u.cache_read + ' cached' : '')
+        + (m.compile || m.run ? ((u.input || u.output) ? ' · ' : '') + 'symbols: ' + m.compile + ' compiled, ' + m.run + ' run' : '');
+      if (a.versions > 1) {
+        var select = $('versions');
+        for (var v = 1; v <= a.versions; v++) {
+          var o = document.createElement('option');
+          o.value = v; o.textContent = v + (v === a.versions ? ' (last)' : '');
+          select.appendChild(o);
+        }
+        select.value = a.versions;
+        select.addEventListener('change', function () { loadArchived(select.value); });
+        $('versions-row').hidden = false;
+      }
+      if (!a.replayable) {
+        $('viewer-empty').innerHTML = !a.model_source ? 'This session left no model.'
+          : siblingUrl && a.engine !== engineHere
+            ? '<span>This model was built on the other engine. <a style="pointer-events:auto" href="' + siblingUrl + '?archive=' + encodeURIComponent(a.id) + '">Draw it there</a>.</span>'
+            : 'This model cannot be drawn here.';
+        return;
+      }
+      $('viewer-empty').textContent = 'Building the model to draw it… a large one takes a while.';
+      return fetch(base + '/api/replay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: a.id }) })
+        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          if (r.error || !r.ok) { $('viewer-empty').textContent = r.error || ('The model did not build again: ' + (r.text || '')); return; }
+          $('viewer-tab').href = r.viewer_url; $('viewer-tab').hidden = false;
+          $('viewer').src = r.viewer_url + '&t=' + Date.now();
+          $('viewer').hidden = false;
+          $('viewer-empty').hidden = true;
+        });
+    }).catch(function (e) { $('viewer-empty').textContent = 'Could not load the archived session: ' + e; });
+  }
+
+
+  //
+  // The listings: live sessions, and the archive by day.
+  //
+
+  function sessionItem(s, href) {
+    var li = document.createElement('li');
+    var a = document.createElement('a');
+    a.href = href;
+    var title = document.createElement('span');
+    title.className = 'title' + (s.title ? '' : ' none');
+    title.textContent = s.title || (s.model ? 'a model written by hand' : 'no prompt yet');
+    a.appendChild(title);
+    var meta = document.createElement('span');
+    meta.className = 'meta';
+    function pill(text, cls) { var p = document.createElement('span'); p.className = 'pill' + (cls ? ' ' + cls : ''); p.textContent = text; meta.appendChild(p); }
+    function text(t) { var p = document.createElement('span'); p.textContent = t; meta.appendChild(p); }
+    if (owners[s.id]) pill('yours', 'mine');
+    if (s.busy) pill('building now', 'live');
+    else if (s.live) pill('live', 'live');
+    pill(s.engine === 'solid' ? 'solid' : 'gendl');
+    text(s.prompts + (s.prompts === 1 ? ' prompt' : ' prompts'));
+    text('opened ' + formatDate(s.created));
+    if (s.last_used && s.last_used !== s.created) text('last active ' + formatDate(s.last_used));
+    a.appendChild(meta);
+    li.appendChild(a);
+    return li;
+  }
+
+  function showBrowse() {
+    $('lab-main').hidden = true;
+    $('browse-main').hidden = false;
+    var archive = browse === 'archive';
+    document.title = archive ? 'Prompt lab archive' : 'Prompt lab: live sessions';
+    $('browse-title').textContent = archive ? 'The archive' : 'Live sessions';
+    $('browse-note').textContent = archive
+      ? 'Every session opened here, newest first. Open one to read its log and each version of its model, and to see the model drawn.'
+      : 'Sessions open now, most recently active first. Open one to watch it, read-only; only the visitor who opened a session can prompt or edit it.';
+    getJSON(archive ? 'archive' : 'sessions').then(function (r) {
+      var box = $('browse-list');
+      if (r._status !== 200) { box.textContent = r.error || 'The list could not be read.'; return; }
+      var sessions = r.sessions || [];
+      if (!sessions.length) { box.textContent = archive ? 'The archive is empty.' : 'No session is open right now.'; return; }
+      var ul = null, day = null;
+      sessions.forEach(function (s) {
+        var d = archive ? new Date((s.created || 0) * 1000).toLocaleDateString([], { dateStyle: 'full' }) : '';
+        if (!ul || d !== day) {
+          day = d;
+          if (archive) { var h = document.createElement('h3'); h.textContent = d; box.appendChild(h); }
+          ul = document.createElement('ul'); ul.className = 'sessions'; box.appendChild(ul);
+        }
+        ul.appendChild(sessionItem(s, base + (archive ? '?archive=' : '?session=') + encodeURIComponent(s.id)));
+      });
+      if (archive && r.total > sessions.length) {
+        var p = document.createElement('p'); p.className = 'muted';
+        p.textContent = 'The newest ' + sessions.length + ' of ' + r.total + '.';
+        box.appendChild(p);
+      }
+    }).catch(function (e) { $('browse-list').textContent = 'Could not reach the lab: ' + e; });
   }
 
   function schedule(ms) {
@@ -371,8 +590,14 @@
   function poll() {
     if (!session) return;
     api('state').then(function (state) {
+      if (state._status === 403) {
+        readOnly(escapeHtml(state.error || 'This session is private.') + ' <a href="' + base + '">Start your own</a>.');
+        return;
+      }
       if (state._status === 404) {
         showError('prompt-error', 'This session is gone (the server restarted, or it expired). Start a new one.');
+        // its record is in the archive, when browsing is on
+        if (!$('browse-archive').hidden) $('prompt-error').insertAdjacentHTML('beforeend', ' <a href="' + base + '?archive=' + encodeURIComponent(session) + '">Read it in the archive</a>.');
         $('build').disabled = true;
         return;
       }
@@ -427,6 +652,8 @@
     if (chosenAmount) startHostedTopup(chosenAmount);
   });
 
+  if (browse) { loadConfig().then(showBrowse); return; }
+  if (archiveId) { loadConfig().then(showArchive); return; }
   loadConfig();
   if (topupCancelled) { note('The purchase was cancelled; nothing was charged.'); history.replaceState(null, '', base + (session ? '?session=' + session : '')); }
   if (checkout) confirmTopup().then(function () { if (session) poll(); });

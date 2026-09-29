@@ -31,6 +31,23 @@ on a dev ship."
 transcript and each version of its model file are kept for review
 (archive.lisp), out of the reaper's reach.  Nil keeps no archive.")
 
+(defparameter *browsing?* t
+  "Boolean. Whether visitors may browse sessions that are not their own
+(browse.lisp): the live ones and the archived ones listed, each opened
+read-only at its URL, an archived model drawn in a replay.  Nil keeps
+every session private to the browser that opened it.")
+
+(defparameter *browse-limit* 200
+  "Integer. Sessions one listing shows, newest first.")
+
+(defparameter *replay-root*
+  (namestring (merge-pathnames "prompt-lab-replays/" (uiop:temporary-directory)))
+  "String. Directory under which an archived session's model is compiled
+again to be drawn (a replay, browse.lisp): scratch, rebuilt on demand.")
+
+(defparameter *max-replays* 12
+  "Integer. Replays held at once; the least recently used goes first.")
+
 (defparameter *result-limit* 4000
   "Integer. Characters of printed result or output handed back to the agent
 from one tool call; longer text is cut and marked.")

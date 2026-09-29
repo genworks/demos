@@ -76,7 +76,8 @@ SYMBOLS symbols, and keep what the gate answers about the balance.
 Values: true when booked, or when there is nothing to book or no gate to
 book it (the lab works without one); nil and the gate's reason when it
 refused -- the credits are spent -- so the caller can refuse the act."
-  (if (or (not *meter?*) (not (integerp symbols)) (zerop symbols))
+  ;; a replay (browse.lisp) redraws a model someone already paid for
+  (if (or (not *meter?*) (session-replay? session) (not (integerp symbols)) (zerop symbols))
       t
       (handler-case
           (multiple-value-bind (json status)
