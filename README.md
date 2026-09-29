@@ -9,8 +9,14 @@ model in a session of its own, and the visitor sees it in a viewer
 beside the model's source, which they may edit and reload.  The
 agent's calls to the language model go through a gate on the
 deploying stack's reverse proxy, which holds the API key; no key
-lives with this code.  Its own `CLAUDE.md` says how it is put
-together and how a stack publishes it.
+lives with this code.
+
+## Issues
+
+Problems with the prompt lab or any demo -- a model it built wrong, a
+page that misbehaves, a suggestion -- are welcome as issues at
+<https://github.com/genworks/demos/issues>.  That repository is a live
+mirror of this one.
 
 ## License
 

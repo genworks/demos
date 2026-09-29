@@ -23,8 +23,8 @@
 # hosts through the repos deploy script, not through CI.  A pull-only
 # job needs no Docker Hub credentials.
 #
-# Runner: the amd64 DOCKER executor (tag "amd64-docker", on balaram
-# beside the shell runner that carries plain "amd64"): the job runs
+# Runner: the amd64 DOCKER executor (tag "amd64-docker", beside the
+# shell runner that carries plain "amd64"): the job runs
 # inside the Gendl image itself, as the image's own user, with the
 # checkout at $CI_PROJECT_DIR.  This is also the standing proof that
 # the published Gendl images work as CI images under a docker

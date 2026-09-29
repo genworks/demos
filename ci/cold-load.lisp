@@ -17,7 +17,8 @@
 ;;;; and any WARNING signalled while a system loads fails the job.  A
 ;;;; warm development image, where the packages already exist, cannot
 ;;;; catch these; this is the check the 2026-09-11 demos-common outage
-;;;; wanted (see CLAUDE.md, "Every system carries source/file-ordering.isc").
+;;;; wanted: a system without source/file-ordering.isc loads its files
+;;;; alphabetically, and one that sorts ahead of package.lisp breaks.
 ;;;;
 ;;;; Locally, with DEMOS_DIR naming a checkout:
 ;;;;   cd /opt/gendl && DEMOS_DIR=/path/to/demos \
@@ -43,8 +44,6 @@
   '((:naca-nurbs . "needs surf/SMLib (enterprise GDL); the gdl image publishes it")
     (:gear . "profile.lisp's arc-curve is surf's (enterprise GDL); the gdl image publishes it")
     (:gorg . "base-framework.lisp hardcodes *system-home* to one user's old home directory")
-    (:prasad . "publish.lisp publishes to net.aserve:*wserver*, unbound in today's Gendl (gwl:*http-server*)")
-    (:timer . "depends on cl-smtp, which the image does not carry; then publish.lisp hits net.aserve:*wserver* like prasad")
     (:bench . "planking.gdl reads an undeclared *model-a*, and lumber.gdl defines its own package :lumber over the lumber system's")
     (:pui . "initialize.lisp warns as it loads that its images directory is missing")
     (:deck . "depends on pui and bench")

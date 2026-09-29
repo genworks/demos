@@ -109,8 +109,8 @@ through the addresses of one allocation."
 ;; token verified before the agent runs.  Verifying takes the widget's
 ;; SECRET, which may not live on a host whose visitors hold a console:
 ;; the default verifier is the gate's Turnstile door beside the
-;; Messages door (<*messages-url*>/turnstile), which adds the secret on
-;; sally and relays Cloudflare's answer.  A dev ship with a secret file
+;; Messages door (<*messages-url*>/turnstile), which adds the secret at
+;; the gate and relays Cloudflare's answer.  A dev ship with a secret file
 ;; of its own may name Cloudflare's siteverify directly instead.
 ;;
 
