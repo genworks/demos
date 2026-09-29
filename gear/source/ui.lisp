@@ -14,6 +14,10 @@
 
 (defparameter *cad-download-path* "/demo/gear/download")
 
+;; The stateless export's path, declared in publish.lisp; defined here
+;; because the page links to it and this file loads first.
+(defparameter *cad-export-path* "/demo/gear/cad")
+
 (define-object gear-ui (demos-common:demo-ui-mixin
                         session-control-mixin base-html-page)
 

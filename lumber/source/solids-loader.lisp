@@ -19,5 +19,7 @@
 (when (and (find-package :surf)
            (let ((symbol (find-symbol-ci "extruded-solid" :surf)))
              (and symbol (find-class symbol nil))))
-  (load (merge-pathnames "solids.lisp"
-                         (or *load-truename* *load-pathname*))))
+  ;; Found through the system's own source directory: under ASDF on
+  ;; Allegro, *load-truename* is this file's fasl in the output cache,
+  ;; where no solids.lisp lives.
+  (load (asdf:system-relative-pathname :lumber "source/solids.lisp")))

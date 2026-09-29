@@ -21,7 +21,8 @@
                    :directory (butlast (pathname-directory base) 2)
                    :defaults base)))
 
-(defparameter *cad-download-path* "/demo/naca-nurbs/download")
+;; *cad-download-path* ("/demo/naca-nurbs/download") is defined in
+;; ui.lisp, which loads first and links to it.
 
 ;; The stateless CAD export (2026-09-11): the airfoil family built from
 ;; query parameters alone, no minted instance, so an API caller (or an

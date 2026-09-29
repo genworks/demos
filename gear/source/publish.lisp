@@ -23,7 +23,8 @@
 
 (in-package :gear)
 
-(defparameter *cad-export-path* "/demo/gear/cad")
+;; *cad-export-path* ("/demo/gear/cad") is defined in ui.lisp, which
+;; loads first and links to it.
 
 (define-object meshed-mate (base-object)
   :documentation (:description "The driver's mate, built as its own

@@ -17,6 +17,11 @@
 
 (in-package :naca-nurbs)
 
+;; Where a visitor's own instance downloads from; published in
+;; publish.lisp, defined here because the page links to it and this
+;; file loads first.
+(defparameter *cad-download-path* "/demo/naca-nurbs/download")
+
 (define-object ui (demos-common:demo-ui-mixin
                    session-control-mixin base-html-page)
 
