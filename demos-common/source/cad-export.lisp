@@ -1,4 +1,4 @@
-;; Copyright © 2026 Gornskew Enterprises
+;; Copyright © 2026 Genworks International
 ;;
 ;; This program is free software: you can redistribute it and/or modify
 ;; it under the terms of the GNU Affero General Public License as
@@ -106,7 +106,7 @@ closed-source application on Genworks GDL takes (not exercised today:
 the user, 2026-09-11, keeps the demos open).")
 
 (defparameter *cad-export-open-license-line*
-  "Copyright (c) 2026 Gornskew Enterprises. This record accompanies a result for verification; the source it includes is the demo's own, under the GNU Affero General Public License v3.0 (https://www.gnu.org/licenses/agpl-3.0.html)."
+  "Copyright (c) 2026 Genworks International. This record accompanies a result for verification; the source it includes is the demo's own, under the GNU Affero General Public License v3.0 (https://www.gnu.org/licenses/agpl-3.0.html)."
   "The notice an OPEN export's trace record carries: the demos are
 AGPL, so the record says so.")
 
