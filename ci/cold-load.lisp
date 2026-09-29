@@ -38,7 +38,13 @@
 
 (in-package :gdl-user)
 
-;;; First, before any form below is READ: the QL package must exist.
+;;; First the web server: a deployment's services-init runs after it is
+;;; up, the older applications here publish as they load, and on
+;;; Genworks GDL it is start-gendl! that initializes the engine and
+;;; sets the home load-quicklisp looks in.
+(gendl:start-gendl!)
+
+;;; Then, before any form below is READ: the QL package must exist.
 (load-quicklisp)
 
 (defparameter *demos-dir*
@@ -47,28 +53,51 @@
     (uiop:ensure-directory-pathname dir)))
 
 ;;; Systems this job does not load, each with its reason.  The first
-;;; two are enterprise demos: the gdl image publishes them, and this
-;;; image has no surf.  The rest are the older applications the repo
-;;; still carries (projects.org, "Reorganize & modernize demos"); each
-;;; either cannot load on today's Gendl or warns as it loads, and a
-;;; warning fails this job.  Delete a line the day its reason is gone.
+;;; two need surf and SMLib: skipped on the free image, loaded on
+;;; Genworks GDL, which carries them.  The test is the SMLIB package,
+;;; aboard only on Genworks GDL (the free image has a SURF package of
+;;; its own, so that one decides nothing).  The rest are the older
+;;; applications the repo still carries; each either cannot load on
+;;; today's engine or warns as it loads, and a warning fails this job.
+;;; Delete a line the day its reason is gone.
+;;;
+;;; The same file runs on CCL (Gendl) and on Allegro in modern mode
+;;; (Genworks GDL), where symbol names are lower case: every package
+;;; and symbol below is named by the reader (a keyword or #:name), never
+;;; by an upper-case string.
 (defparameter *not-loaded*
-  '((:naca-nurbs . "needs surf/SMLib (enterprise GDL); the gdl image publishes it")
-    (:gear . "profile.lisp's arc-curve is surf's (enterprise GDL); the gdl image publishes it")
-    (:bench . "planking.gdl reads an undeclared *model-a*, and lumber.gdl defines its own package :lumber over the lumber system's")
-    (:pui . "initialize.lisp warns as it loads that its images directory is missing")
-    (:deck . "depends on pui and bench")
-    (:house . "depends on deck, pui and bench, and its own initialize.lisp warns like pui's")))
+  (append
+   (unless (find-package :smlib)
+     '((:naca-nurbs . "needs surf/SMLib, which this image does not carry (the Genworks GDL job loads it)")
+       (:gear . "profile.lisp's arc-curve is surf's, which this image does not carry (the Genworks GDL job loads it)")))
+   '((:bench . "planking.gdl reads an undeclared *model-a*, and lumber.gdl defines its own package :lumber over the lumber system's")
+     (:pui . "initialize.lisp warns as it loads that its images directory is missing")
+     (:deck . "depends on pui and bench")
+     (:house . "depends on deck, pui and bench, and its own initialize.lisp warns like pui's"))))
+
+(defun system-keyword (name)
+  "NAME, an .asd file's name, as the keyword the reader makes of it."
+  (let ((*package* (find-package :keyword)))
+    (read-from-string name)))
 
 (defun all-system-names ()
   "Every system named by an .asd file one level below the checkout,
 demos-common first since everything else depends on it."
-  (let ((names (mapcar (lambda (p) (intern (string-upcase (pathname-name p)) :keyword))
+  (let ((names (mapcar (lambda (p) (system-keyword (pathname-name p)))
                        (directory (merge-pathnames "*/*.asd" *demos-dir*)))))
     (cons :demos-common
           (sort (remove :demos-common (remove-duplicates names)) #'string<))))
 
 (defvar *failures* nil "((system message ...) ...) in load order.")
+
+(defun outside-dependencies (system)
+  "The systems SYSTEM's .asd depends on that this checkout does not
+define, as ASDF names them."
+  (let ((ours (mapcar (lambda (s) (string-downcase (symbol-name s))) (all-system-names))))
+    (remove-if (lambda (name) (member name ours :test #'string-equal))
+               (remove-if-not #'stringp
+                              (mapcar (lambda (d) (if (symbolp d) (string-downcase (symbol-name d)) d))
+                                      (asdf:system-depends-on (asdf:find-system system)))))))
 
 (defun load-one (system)
   "Load SYSTEM, recording every warning and any error against it.
@@ -78,11 +107,18 @@ the Quicklisp dist over the network, which is exactly the kind of
 thing this check should report instead."
   (let ((problems nil))
     (handler-case
-        (handler-bind ((warning
-                         (lambda (w)
-                           (push (format nil "~a: ~a" (type-of w) w) problems)
-                           (muffle-warning w))))
-          (let ((*compile-verbose* nil) (*load-verbose* nil))
+        (let ((*compile-verbose* nil) (*load-verbose* nil))
+          ;; Third-party libraries first, their warnings muffled: an
+          ;; image may compile them cold here (Allegro does), and a
+          ;; library's style warning is not this repository's to fix.
+          ;; Their errors still fail the system.
+          (handler-bind ((warning #'muffle-warning))
+            (dolist (dependency (outside-dependencies system))
+              (asdf:load-system dependency)))
+          (handler-bind ((warning
+                           (lambda (w)
+                             (push (format nil "~a: ~a" (type-of w) w) problems)
+                             (muffle-warning w))))
             (asdf:load-system system)))
       (error (e)
         (push (format nil "ERROR ~a: ~a" (type-of e) e) problems)))
@@ -96,10 +132,6 @@ thing this check should report instead."
 (format t "~&Image: ~a ~a, Gendl ~a~%"
         (lisp-implementation-type) (lisp-implementation-version) *gendl-version*)
 
-;;; A deployment's services-init runs after the web server is up, and
-;;; the older applications here publish as they load.
-(gendl:start-gendl!)
-
 (pushnew (namestring *demos-dir*) ql:*local-project-directories* :test #'equalp)
 (ql:register-local-projects)
 
@@ -110,10 +142,20 @@ thing this check should report instead."
 ;;; (system package publish-function path): each demo page, published
 ;;; with no host so it answers on localhost.
 (defparameter *smoke-pages*
-  '((:brick-wall "BRICK-WALL-DEMO" "PUBLISH-BRICK-WALL!" "/demo/brick-wall")
-    (:bus "GENWORKS.DEMOS.BUS" "PUBLISH-BUS!" "/demo/bus")
-    (:robot "ROBOT-DEMO" "PUBLISH-ROBOT!" "/demo/robot")
-    (:staircase "STAIRCASE-DEMO" "PUBLISH-STAIRCASE!" "/demo/staircase")))
+  '((:brick-wall :brick-wall-demo :publish-brick-wall! "/demo/brick-wall")
+    (:bus :genworks.demos.bus :publish-bus! "/demo/bus")
+    (:robot :robot-demo :publish-robot! "/demo/robot")
+    (:staircase :staircase-demo :publish-staircase! "/demo/staircase")
+    ;; surf's two, on Genworks GDL only (see *not-loaded*)
+    (:gear :gear :publish-gear! "/demo/gear")
+    (:naca-nurbs :naca-nurbs :publish-ui! "/demo/naca-nurbs")))
+
+;;; (system query): the stateless CAD export each of those publishes
+;;; beside its page -- a STEP file for the query, and the free trace
+;;; record at <path>/trace.
+(defparameter *smoke-cad*
+  '((:gear "/demo/gear/cad" "teeth=20")
+    (:naca-nurbs "/demo/naca-nurbs/cad" "digits=2412")))
 
 ;;; What the prompt lab's model door is given: a small model in the
 ;;; shape its agent writes -- the object named MODEL, inputs for the
@@ -159,7 +201,7 @@ the body, the status, the final path."
         :content-type (and json "application/json")
         ;; yason arrives with the prompt lab: named, not read, since this
         ;; file is read before anything is loaded
-        :content (and json (with-output-to-string (s) (uiop:symbol-call "YASON" "ENCODE" json s))))
+        :content (and json (with-output-to-string (s) (uiop:symbol-call :yason :encode json s))))
     (declare (ignore response-headers))
     (values body status (if uri (net.uri:uri-path uri) path))))
 
@@ -176,7 +218,7 @@ the body, the status, the final path."
   (multiple-value-bind (body status) (http method path :json json :headers headers)
     (unless (eql status 200)
       (error "~a answered ~a: ~a" path status (subseq body 0 (min 200 (length body)))))
-    (uiop:symbol-call "YASON" "PARSE" body)))
+    (uiop:symbol-call :yason :parse body)))
 
 (defun table (&rest plist)
   (let ((table (make-hash-table :test #'equal)))
@@ -191,6 +233,18 @@ the body, the status, the final path."
                (lambda ()
                  (uiop:symbol-call package function)
                  (page-ok? path))))))
+  (dolist (entry *smoke-cad*)
+    (destructuring-bind (system path query) entry
+      (when (member system loaded)
+        (smoke (format nil "~(~a~) STEP export ~a.stp?~a" system path query)
+               (lambda ()
+                 (multiple-value-bind (body status) (http :get (format nil "~a.stp?~a" path query))
+                   (or (and (eql status 200) (search "ISO-10303-21" body :end2 (min 200 (length body))))
+                       (error "answered ~a: ~a" status (subseq body 0 (min 200 (length body))))))))
+        (smoke (format nil "~(~a~) trace record ~a/trace" system path)
+               (lambda ()
+                 (multiple-value-bind (body status) (http :get (format nil "~a/trace" path))
+                   (and (eql status 200) (plusp (length body)))))))))
   (when (intersection loaded (mapcar #'first *smoke-pages*))
     (smoke "shared stylesheet /demo/css/demos-style.css"
            (lambda ()
@@ -199,29 +253,29 @@ the body, the status, the final path."
   (when (member :demos-common loaded)
     (smoke "portal /"
            (lambda ()
-             (uiop:symbol-call "DEMOS-COMMON" "PUBLISH-PORTAL!")
+             (uiop:symbol-call :demos-common :publish-portal!)
              (page-ok? "/")))))
 
 (defun smoke-x3dom-page ()
   (smoke "x3dom-page writes a page for a box"
          (lambda ()
            (let ((file (merge-pathnames "demos-smoke/box.html" (uiop:temporary-directory))))
-             (uiop:symbol-call "X3DOM-PAGE" "WRITE-X3DOM-PAGE"
+             (uiop:symbol-call :x3dom-page :write-x3dom-page
                                (make-object 'box :length 10 :width 20 :height 30) file)
              (let ((text (uiop:read-file-string file)))
                (and (search "<Scene>" text) (search "</html>" text)))))))
 
 (defun smoke-prompt-lab ()
-  (flet ((lab (name) (find-symbol name "PROMPT-LAB")))
+  (flet ((lab (name) (find-symbol (symbol-name name) :prompt-lab)))
     ;; no agent, no gate, no network: the gate's doors fail at once
-    (setf (symbol-value (lab "*MESSAGES-URL*")) "http://127.0.0.1:9/llm/messages"
-          (symbol-value (lab "*METER?*")) nil
-          (symbol-value (lab "*RENDER-TOOL?*")) nil)
-    (let ((prefix (symbol-value (lab "*URL-PREFIX*")))
+    (setf (symbol-value (lab '#:*messages-url*)) "http://127.0.0.1:9/llm/messages"
+          (symbol-value (lab '#:*meter?*)) nil
+          (symbol-value (lab '#:*render-tool?*)) nil)
+    (let ((prefix (symbol-value (lab '#:*url-prefix*)))
           (session nil) (owner nil))
       (flet ((door (name) (format nil "~a/api/~a" prefix name))
              (owner-headers () (list (cons "X-Prompt-Lab-Owner" owner))))
-        (smoke "prompt-lab publish" (lambda () (uiop:symbol-call "PROMPT-LAB" "PUBLISH-PROMPT-LAB!") t))
+        (smoke "prompt-lab publish" (lambda () (uiop:symbol-call :prompt-lab :publish-prompt-lab!) t))
         (smoke (format nil "prompt-lab page ~a" prefix) (lambda () (page-ok? prefix)))
         (smoke "prompt-lab config door"
                (lambda () (gethash "engine" (json-of :get (door "config")))))
