@@ -1,0 +1,76 @@
+/*
+ * Copyright (c) 2026 Genworks International
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.  Distributed WITHOUT
+ * ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+ */
+
+/* prompt-lab-blueprint.css -- a skin: the drawing office's blueprint.
+ *
+ * White line on a blue ground, lettered in capitals.  It is here as
+ * much to show the protocol as for its own sake: everything up to the
+ * line "beyond the tokens" is tokens and nothing else, and that part
+ * alone is a whole skin (SKIN-API.md).
+ */
+
+:root {
+  --pl-skin-api: 1;
+  --pl-skin-label: "Blueprint";
+  color-scheme: dark;
+
+  --pl-bg: #0a2f5c;
+  --pl-panel: #0d3a70;
+  --pl-panel-alt: #114684;
+  --pl-line: #d9e8ff;
+  --pl-line-soft: #3d6aa6;
+  --pl-ink: #eef5ff;
+  --pl-ink-dim: #b4cdf0;
+  --pl-ink-dimmer: #86a9d8;
+
+  --pl-label-bg: #d9e8ff;
+  --pl-label-ink: #0a2f5c;
+
+  --pl-accent: #ffffff;
+  --pl-accent-ink: #0a2f5c;
+  --pl-link: #ffffff;
+  --pl-hover-bg: #114684;
+  --pl-hover-line: #d9e8ff;
+  --pl-focus: #ffffff;
+
+  --pl-status-pass: #9fe3b4;
+  --pl-status-warn: #ffd479;
+  --pl-status-fail: #ff9d9d;
+  --pl-status-busy: #ffffff;
+
+  --pl-font: "DejaVu Sans Mono", "Bitstream Vera Sans Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --pl-font-label: var(--pl-font);
+  --pl-label-weight: 700;
+  --pl-label-case: uppercase;
+  --pl-label-tracking: 0.08em;
+
+  --pl-shadow-raised: 4px 4px 0 rgba(0, 0, 0, 0.45);
+
+  /* the drawing's black lines, turned to white ones; hues kept */
+  --pl-viewport-bg: #0a2f5c;
+  --pl-viewport-filter: invert(1) hue-rotate(180deg);
+}
+
+/* --- beyond the tokens --------------------------------------------------
+   Ordinary rules, which a skin may write but need not.  They name the
+   lab's own classes, and those carry no promise: a skin that stops
+   above this line outlives any change to the page.  This one is kept
+   with the page, so it may reach in -- for the grid a drawing sheet is
+   ruled with, on the ground the model is drawn on. */
+
+.pane.viewer,
+body.pl-viewer main > div {
+  background-image:
+    linear-gradient(rgba(217, 232, 255, 0.10) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(217, 232, 255, 0.10) 1px, transparent 1px),
+    linear-gradient(rgba(217, 232, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(217, 232, 255, 0.05) 1px, transparent 1px);
+  background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
+}

@@ -11,6 +11,11 @@ agent's calls to the language model go through a gate on the
 deploying stack's reverse proxy, which holds the API key; no key
 lives with this code.
 
+How the lab looks is a **skin**: one CSS file of tokens, dropped into
+`prompt-lab/static/`, dresses the page and the viewer alike, on a desk
+and on a phone.  [prompt-lab/SKIN-API.md](prompt-lab/SKIN-API.md) is
+the contract.
+
 ## Issues
 
 Problems with the prompt lab or any demo -- a model it built wrong, a

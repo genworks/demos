@@ -1,0 +1,130 @@
+/*
+ * Copyright (c) 2026 Genworks International
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.  Distributed WITHOUT
+ * ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+ */
+
+/* prompt-lab-phone.css -- the viewer, when the page is an app on a phone.
+ *
+ * The viewer links this sheet, after prompt-lab-viewer.css, when the
+ * page asks for it (mode=phone on the frame's address), so the first
+ * paint is already the phone's.  It makes the viewer the model with ONE
+ * panel under it: the inputs, or the tree when the page's tabs ask for
+ * the parts (pl-panel-parts on the body).  The menu bar is put away
+ * until it is asked for (pl-menus).  Rows a thumb can hit; fields at a
+ * size no phone zooms in on.
+ *
+ * The page's script sets those classes, and one more: pl-desk, when the
+ * page has gone back to its frame of panes (a phone turned, a window
+ * widened) with this sheet already linked.  Every rule here stands
+ * aside for it.
+ *
+ * Kept in ASCII (escapes for anything beyond it).
+ */
+
+body:not(.pl-desk),
+body:not(.pl-desk) > div,
+body:not(.pl-desk) > div > div,
+body:not(.pl-desk) aside { gap: 0; background: var(--pl-bg); }
+
+body:not(.pl-desk) > div > header { display: none; }
+body.pl-menus:not(.pl-desk) > div > header {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  border-bottom: var(--pl-rule) solid var(--pl-line);
+  font-size: 16px;
+}
+body.pl-menus:not(.pl-desk) #menu a { padding: 10px 10px; }
+body.pl-menus:not(.pl-desk) #menu > ul ul { font-size: 16px; }
+
+body:not(.pl-desk) > div > div { flex-direction: column; }
+body:not(.pl-desk) main {
+  order: 1;
+  flex: 54 1 0%;
+  gap: var(--pl-rule);
+  background: var(--pl-line);
+}
+body:not(.pl-desk) main > div { border-radius: 0; box-shadow: none; }
+body:not(.pl-desk) aside {
+  order: 2;
+  flex: 46 1 0%;
+  flex-direction: column;
+  width: 100%;
+  border-top: var(--pl-rule) solid var(--pl-line);
+}
+body:not(.pl-desk) #tree,
+body:not(.pl-desk) #inspector {
+  flex: 1 1 0%;
+  border-radius: 0;
+  box-shadow: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+body:not(.pl-desk) #tree::before,
+body:not(.pl-desk) #inspector::before { display: none; }
+
+body:not(.pl-desk) #tree { display: none; }
+body.pl-panel-parts:not(.pl-desk) #tree { display: block; }
+body.pl-panel-parts:not(.pl-desk) #inspector { display: none; }
+
+@media (orientation: landscape) {
+  body:not(.pl-desk) > div > div { flex-direction: row; }
+  body:not(.pl-desk) main { flex: 58 1 0%; }
+  body:not(.pl-desk) aside {
+    flex: 42 1 0%;
+    width: auto;
+    border-top: 0;
+    border-left: var(--pl-rule) solid var(--pl-line);
+  }
+}
+
+/* the inputs: one control to a row, name then value */
+body:not(.pl-desk) #inspector { font-size: 15px; }
+body:not(.pl-desk) #inspector [class*="text-["] { font-size: inherit; }
+body:not(.pl-desk) #inspector .font-semibold.truncate { font-size: 15px; }
+body:not(.pl-desk) #inspector .text-gray-500 { font-size: 13px; }
+body:not(.pl-desk) #inspector .px-2 { padding-left: 14px; padding-right: 14px; }
+body:not(.pl-desk) #inspector .py-1,
+body:not(.pl-desk) #inspector .py-1\.5 { padding-top: 8px; padding-bottom: 8px; }
+body:not(.pl-desk) #inspector .py-0\.5 { padding-top: 6px; padding-bottom: 6px; }
+body:not(.pl-desk) #inspector .grid { min-height: 52px; }
+body:not(.pl-desk) #inspector input:not([type="checkbox"]):not([type="range"]),
+body:not(.pl-desk) #inspector select {
+  min-height: 40px;
+  padding: 4px 10px;
+  font-size: 16px;
+}
+body:not(.pl-desk) #inspector input[type="checkbox"] { width: 26px; height: 26px; }
+body:not(.pl-desk) .sluice-slider { height: 4px; margin-top: 14px; margin-bottom: 10px; }
+body:not(.pl-desk) .sluice-slider::-webkit-slider-thumb { width: 24px; height: 24px; }
+body:not(.pl-desk) .sluice-slider::-moz-range-thumb { width: 24px; height: 24px; }
+
+/* the parts: a tree of rows */
+body:not(.pl-desk) #tree { font-size: 16px; }
+body:not(.pl-desk) #tree-root { padding: 6px 12px 12px; }
+body:not(.pl-desk) .sluice-tree li { line-height: 1.3; }
+body:not(.pl-desk) .sluice-tree ul { margin-left: 1.2em; }
+body:not(.pl-desk) .tree-node { display: inline-block; padding: 11px 6px; }
+body:not(.pl-desk) .tree-inspect { margin-left: 2px; padding: 11px 10px; font-size: 15px; opacity: 0.7; }
+body:not(.pl-desk) .expanded,
+body:not(.pl-desk) .directory,
+body:not(.pl-desk) .leaf { margin-right: 2px; padding: 11px 4px; }
+
+/* the viewport's label and button, out of the thumb's way */
+body:not(.pl-desk) main .left-1.top-1 {
+  max-width: 100%;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+body:not(.pl-desk) main .left-1.top-1 span:last-child { overflow: hidden; text-overflow: ellipsis; }
+body.pl-menus:not(.pl-desk) main .left-1.top-1 { display: none; }
+body:not(.pl-desk) main button[id$="-reset-size"] { min-width: 40px; min-height: 40px; font-size: 16px; }

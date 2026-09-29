@@ -9,13 +9,15 @@
 (in-package :prompt-lab)
 
 ;;
-;; The page and its doors.  The page (static/page.html) is one static
-;; document: its script opens or resumes a session, posts prompts,
+;; The page and its doors.  The page (static/page.html) is one
+;; document, the same for every visitor but for the addresses of its
+;; stylesheet and script and the list of skins (skins.lisp).  Its script
+;; (static/prompt-lab.js) opens or resumes a session, posts prompts,
 ;; polls the session's state (the log, the token totals, the model
 ;; file) and reloads the viewer beside it after every build.  The doors
 ;; under <prefix>/api/ are plain aserve publishes with no gwl session
 ;; behind them, cheap and nothing to reap.  The viewer is a gwl app: a
-;; sluice opened on the session's MODEL.
+;; sluice opened on the session's MODEL, dressed in the page's skin.
 ;;
 
 (defparameter *page-file*
@@ -26,6 +28,14 @@
                    :directory (append (butlast (pathname-directory here)) (list "static"))
                    :defaults here))
   "Pathname. The page, beside the source in static/.")
+
+(defun page-door (req ent)
+  "GET <prefix>: the page, filled in (page-text, skins.lisp).  Never kept by
+a cache: it names its stylesheets by their dates."
+  (net.aserve:with-http-response (req ent :content-type "text/html; charset=utf-8")
+    (setf (net.aserve:reply-header-slot-value req :cache-control) "no-cache")
+    (net.aserve:with-http-body (req ent)
+      (write-string (page-text) net.html.generator:*html-stream*))))
 
 
 ;;
@@ -521,11 +531,31 @@ it is on disk, after an edit made in the terminal."
   :documentation
   (:description "A sluice opened on one prompt-lab session's MODEL, reached
 at <prefix>/viewer?session=<id>.  The model's leaves are drawn as the page
-opens; the tree, the menus and the headset button are the sluice's own."
+opens; the tree, the menus and the headset button are the sluice's own.
+It wears the page's skin (skin=<name>), and on a phone (mode=phone) it is
+the model with one panel under it, the inputs or the tree."
    :author "Genworks International")
 
   :computed-slots
   ((title "Prompt lab viewer")
+
+   ;; the skin the page wears, named on the frame's address; nil is the
+   ;; house look
+   (skin (find-skin (cdr (assoc "skin" (the query-toplevel) :test #'string-equal))))
+
+   ;; the page is laid out for a phone: the frame shows the model and,
+   ;; under it, whichever panel the page's tabs ask for
+   (phone? (equal (cdr (assoc "mode" (the query-toplevel) :test #'string-equal)) "phone"))
+
+   ;; after the sluice's own sheets: the tokens, the sheet that lays
+   ;; them onto the sluice, the phone's when the page is one, then the
+   ;; skin.  Only INPUTS of the sluice are overridden here: where its
+   ;; package is locked (a Genworks GDL workshop) its computed slots,
+   ;; body-class among them, are reserved words.
+   (additional-css-links (viewer-css-links (the skin) :phone? (the phone?)))
+
+   ;; on a phone the inspector holds the inputs alone
+   (user-mode?-default (the phone?))
 
    (session-id (cdr (assoc "session" (the query-toplevel) :test #'string-equal)))
 
@@ -597,12 +627,16 @@ opens; the tree, the menus and the headset button are the sluice's own."
   (format nil "~a/api/~a" *url-prefix* name))
 
 (defun publish-prompt-lab! (&key host)
-  "Publish the page at *url-prefix*, its doors under <prefix>/api/ (config,
-session, state, prompt, model, reload, topup, confirm, privacy; sessions, archive,
+  "Publish the page at *url-prefix*, its stylesheets and script under
+<prefix>/static/, its doors under <prefix>/api/ (config, session, state,
+prompt, model, reload, topup, confirm, privacy; sessions, archive,
 archived, replay) and the viewer at <prefix>/viewer, on every server."
   (gwl:with-all-servers (server)
-    (net.aserve:publish-file :path *url-prefix* :server server :host host
-                             :file (namestring *page-file*) :content-type "text/html; charset=utf-8")
+    (net.aserve:publish :path *url-prefix* :server server :host host :function #'page-door
+                        :content-type "text/html; charset=utf-8")
+    (net.aserve:publish-directory :prefix (format nil "~a/static/" *url-prefix*)
+                                  :server server :host host
+                                  :destination (namestring *static-directory*))
     (net.aserve:publish :path (door-path "config") :server server :host host :function #'config-door)
     (net.aserve:publish :path (door-path "session") :server server :host host :function #'session-door)
     (net.aserve:publish :path (door-path "state") :server server :host host :function #'state-door)

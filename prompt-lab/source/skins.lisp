@@ -1,0 +1,209 @@
+;; Copyright © 2026 Genworks International
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Affero General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.  Distributed WITHOUT
+;; ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+(in-package :prompt-lab)
+
+;;
+;; Skins.  The lab's look is a set of TOKENS, CSS custom properties that
+;; static/prompt-lab.css declares, each with its default (the house
+;; look).  A SKIN is one stylesheet, static/prompt-lab-<name>.css, that
+;; redefines tokens; SKIN-API.md beside this system is the contract.
+;;
+;; The lab is two documents, the page and the viewer in its frame, and
+;; each loads three sheets in the same order: the tokens, the sheet that
+;; lays that document out in them (prompt-lab-page.css for the page,
+;; prompt-lab-viewer.css for the sluice), and the skin.  So one file
+;; dresses both.
+;;
+;; Skins are found, not listed: a stylesheet dropped into static/ is on
+;; the page's menu at the next request, with no change here.
+;;
+
+(defparameter *static-directory*
+  ;; from the SOURCE file's place, like *page-file* (page.lisp)
+  (let ((here #.(or *compile-file-truename* *load-truename*)))
+    (make-pathname :name nil :type nil :version nil
+                   :directory (append (butlast (pathname-directory here)) (list "static"))
+                   :defaults here))
+  "Pathname. The directory of the page, its stylesheets and its script.")
+
+(defparameter *house-skin* "workstation"
+  "String. The name of the look the base stylesheet gives on its own.")
+
+(defparameter *default-skin* nil
+  "String or nil. The skin a visitor sees before choosing one; nil is the
+house look.")
+
+(defparameter *skin-aliases* '(("default" . "workstation") ("genera" . "workstation"))
+  "Association list of strings. Names that lead to another skin: retired
+names, so that a saved choice or a bookmark never falls back unexplained.")
+
+(defparameter *reserved-skin-names* '("page" "viewer" "phone")
+  "List of strings. Names a skin may not take: prompt-lab-page.css,
+prompt-lab-viewer.css and prompt-lab-phone.css are the documents' own
+sheets.")
+
+(defun static-file (name)
+  "Pathname or nil. The file NAME in the static directory, when it is there."
+  (probe-file (merge-pathnames name *static-directory*)))
+
+(defun static-url (name)
+  "String. The address of the static file NAME, carrying the file's write
+date: a stylesheet is kept for hours by every cache between the server
+and the visitor, so a changed file needs an address of its own."
+  (let* ((file (static-file name))
+         (date (and file (ignore-errors (file-write-date file)))))
+    (format nil "~a/static/~a~@[?v=~d~]" *url-prefix* name date)))
+
+(defun skin-name? (string)
+  "True when STRING can name a skin: lower-case letters, digits, hyphen,
+underscore and full stop (prompt-lab-<vendor>.<name>.css), nothing else."
+  (and (stringp string)
+       (plusp (length string))
+       (every #'(lambda (char)
+                  (or (char<= #\a char #\z) (digit-char-p char) (find char "-_.")))
+              string)
+       (not (member string *reserved-skin-names* :test #'string=))))
+
+(defun skin-file-name (name)
+  (format nil "prompt-lab-~a.css" name))
+
+(defun skin-label (file name)
+  "String. What the skin calls itself -- the string of its --pl-skin-label
+token -- or NAME with a capital when it declares none."
+  (or (ignore-errors
+       (let* ((text (uiop:read-file-string file :external-format :utf-8))
+              (token (search "--pl-skin-label" text))
+              (open (and token (position #\" text :start token)))
+              (close (and open (position #\" text :start (1+ open))))
+              ;; the declaration ends at its semicolon: a quote beyond it
+              ;; belongs to something else
+              (end (and token (position #\; text :start token))))
+         (when (and close end (< close end) (> close (1+ open)))
+           (subseq text (1+ open) close))))
+      (string-capitalize (substitute #\space #\- name))))
+
+(defun skins ()
+  "List of plists (:name :label :href), the skins in the static directory
+by name.  The house look is not among them: it is the base sheet."
+  (let ((found nil))
+    (dolist (file (directory (merge-pathnames "prompt-lab-*.css" *static-directory*)))
+      ;; the pathname's name, past "prompt-lab-": a namestring would
+      ;; carry an escape before a vendor's full stop on some Lisps
+      (let* ((base (pathname-name file))
+             (name (and (> (length base) (length "prompt-lab-"))
+                        (subseq base (length "prompt-lab-")))))
+        (when (skin-name? name)
+          (push (list :name name
+                      :label (skin-label file name)
+                      :href (static-url (skin-file-name name)))
+                found))))
+    (sort found #'string< :key #'(lambda (skin) (getf skin :name)))))
+
+(defun find-skin (name)
+  "Plist or nil. The skin NAME, through the aliases; nil for the house look,
+for a name that is no skin's, and for anything that is not a name."
+  (when (stringp name)
+    (let ((name (or (cdr (assoc name *skin-aliases* :test #'string=)) name)))
+      (and (skin-name? name)
+           (not (string= name *house-skin*))
+           (find name (skins) :key #'(lambda (skin) (getf skin :name)) :test #'string=)))))
+
+(defun viewer-css-links (skin &key phone?)
+  "List of strings. The stylesheets the viewer adds to the sluice's own: the
+tokens, the sheet that lays them onto the sluice, the phone's when PHONE?,
+then SKIN's (a plist from find-skin, or nil for the house look)."
+  (append (list (static-url "prompt-lab.css")
+                (static-url "prompt-lab-viewer.css"))
+          (and phone? (list (static-url "prompt-lab-phone.css")))
+          (and skin (list (getf skin :href)))))
+
+
+;;
+;; The page.  static/page.html is the document, with four places for
+;; this side to fill in: the addresses of its two sheets and its script,
+;; and what the script needs to know before it asks any door.
+;;
+
+(defun page-boot ()
+  "String. JSON for the page's script: where the static files are, and the
+skins there are."
+  (let ((json (encode (h "prefix" *url-prefix*
+                         ;; the viewer's phone sheet, for a frame that
+                         ;; was opened on a desk and finds itself on a phone
+                         "phone_css" (static-url "prompt-lab-phone.css")
+                         "house" *house-skin*
+                         "default_skin" (let ((skin (find-skin *default-skin*)))
+                                          (if skin (getf skin :name) *house-skin*))
+                         "aliases" (let ((table (make-hash-table :test #'equal)))
+                                     (loop for (from . to) in *skin-aliases*
+                                           do (setf (gethash from table) to))
+                                     table)
+                         "skins" (map 'vector #'(lambda (skin)
+                                                  (h "name" (getf skin :name)
+                                                     "label" (getf skin :label)
+                                                     "href" (getf skin :href)))
+                                      (skins))))))
+    ;; inside a script element: nothing in it may close the element, and
+    ;; a character beyond ASCII (a skin's label) goes as its escape
+    (with-output-to-string (out)
+      (loop for char across json
+            for code = (char-code char)
+            do (cond ((char= char #\<) (write-string "\\u003c" out))
+                     ((< code 128) (write-char char out))
+                     ((< code #x10000) (format out "\\u~4,'0x" code))
+                     (t (let ((rest (- code #x10000)))
+                          (format out "\\u~4,'0x\\u~4,'0x"
+                                  (+ #xD800 (ash rest -10))
+                                  (+ #xDC00 (logand rest #x3FF))))))))))
+
+(defun ascii-only (text)
+  "String. TEXT with every character beyond ASCII as an HTML character
+reference, so that the page reads the same whatever encoding a server
+writes it in.  The page's script is a file of its own for that reason: a
+reference means nothing inside a script."
+  (if (every #'(lambda (char) (< (char-code char) 128)) text)
+      text
+      (with-output-to-string (out)
+        (loop for char across text
+              do (if (< (char-code char) 128)
+                     (write-char char out)
+                     (format out "&#~d;" (char-code char)))))))
+
+(defun static-signature ()
+  "List. The static files with their write dates: the page is filled in
+again when any of them changes."
+  (mapcar #'(lambda (file) (list (pathname-name file) (pathname-type file)
+                                 (ignore-errors (file-write-date file))))
+          (append (directory (merge-pathnames "*.css" *static-directory*))
+                  (directory (merge-pathnames "*.js" *static-directory*))
+                  (directory (merge-pathnames "*.html" *static-directory*)))))
+
+(defvar *page-cache* nil
+  "Cons of the static signature and the page filled in under it, or nil.")
+
+(defun fill-page (text)
+  (ascii-only
+   (reduce #'(lambda (text place)
+               (replace-substring text (car place) (cdr place)))
+           (list (cons "{{tokens-css}}" (static-url "prompt-lab.css"))
+                 (cons "{{page-css}}" (static-url "prompt-lab-page.css"))
+                 (cons "{{script}}" (static-url "prompt-lab.js"))
+                 (cons "{{boot}}" (page-boot)))
+           :initial-value text)))
+
+(defun page-text ()
+  "String. The page, filled in; read again when a static file has changed."
+  (let ((signature (list *url-prefix* *default-skin* (static-signature)))
+        (cache *page-cache*))
+    (if (and cache (equal (car cache) signature))
+        (cdr cache)
+        (let ((text (fill-page (uiop:read-file-string (merge-pathnames "page.html" *static-directory*)
+                                                      :external-format :utf-8))))
+          (setq *page-cache* (cons signature text))
+          text))))

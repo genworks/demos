@@ -1,0 +1,84 @@
+/*
+ * Copyright (c) 2026 Genworks International
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.  Distributed WITHOUT
+ * ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+ */
+
+/* prompt-lab.css -- the prompt lab's tokens, each with its default.
+ *
+ * This file is the whole list: what a skin may redefine is what is
+ * declared here, and SKIN-API.md says what each one promises.  It is
+ * loaded first in BOTH of the lab's documents -- the page, and the
+ * viewer in its frame -- ahead of the sheet that lays each one out
+ * (prompt-lab-page.css, prompt-lab-viewer.css) and of the skin.
+ *
+ * The defaults ARE the house look, "workstation": a 1980s Lisp
+ * workstation's screen.  Black ink on a near-white ground; panes tiled
+ * edge to edge and ruled off in single pixels; labels in reverse
+ * video; what is under the pointer boxed rather than tinted; nothing
+ * rounded, nothing shaded, and no colour but for what has gone wrong.
+ *
+ * A skin is a file beside this one, prompt-lab-<name>.css, holding a
+ * :root block like the one below with the tokens it changes.
+ */
+
+:root {
+  --pl-skin-api: 1;
+  --pl-skin-label: "Workstation";
+  color-scheme: light;
+
+  /* surface */
+  --pl-bg: #f7f6f2;             /* the ground behind everything */
+  --pl-panel: #ffffff;          /* a pane's interior */
+  --pl-panel-alt: #f1f0ea;      /* a second surface: wells, headings inside a pane */
+  --pl-line: #101010;           /* rules between and around panes */
+  --pl-line-soft: #c9c8c0;      /* rules inside a pane, between rows */
+  --pl-ink: #101010;            /* text */
+  --pl-ink-dim: #4a4a46;        /* secondary text */
+  --pl-ink-dimmer: #6f6e68;     /* and a step dimmer: times, counts */
+
+  /* labels: pane titles, the title block, the documentation line */
+  --pl-label-bg: #101010;
+  --pl-label-ink: #ffffff;
+
+  /* action */
+  --pl-accent: #101010;         /* the ground of the one button that matters; what is selected */
+  --pl-accent-ink: #ffffff;     /* text on it */
+  --pl-link: #101010;           /* a link, and a value that can be followed */
+  --pl-hover-bg: transparent;   /* under the pointer: a fill ... */
+  --pl-hover-line: #101010;     /* ... or a box drawn around the thing, or both */
+  --pl-focus: #101010;          /* the pane that has the keyboard, and focus rings */
+
+  /* status -- meaning, not appearance */
+  --pl-status-pass: #4a4a46;    /* built */
+  --pl-status-warn: #8a6100;    /* a tool's complaint */
+  --pl-status-fail: #b00018;    /* stopped; an error */
+  --pl-status-busy: #101010;    /* working */
+
+  /* type */
+  --pl-font: "Geneva", "DejaVu Sans", "Bitstream Vera Sans", Verdana, "Helvetica Neue", Helvetica, sans-serif;
+  --pl-font-mono: "DejaVu Sans Mono", "Bitstream Vera Sans Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --pl-font-label: var(--pl-font);
+  --pl-size: 13px;              /* the desk's text size; a phone sets its own */
+  --pl-label-weight: 700;
+  --pl-label-case: none;        /* text-transform of labels and commands */
+  --pl-label-tracking: 0;       /* and their letter-spacing */
+
+  /* shape */
+  --pl-rule: 1px;               /* the weight of a rule */
+  --pl-gap: 1px;                /* between panes ... */
+  --pl-seam: var(--pl-line);    /* ... and what shows there: the rule itself when panes
+                                   tile, the ground when they float */
+  --pl-radius: 0px;             /* corners: panes, fields, buttons */
+  --pl-radius-pill: 0px;        /* tags, pills, label strips */
+  --pl-shadow: none;            /* under a pane */
+  --pl-shadow-raised: 4px 4px 0 var(--pl-line);   /* under what floats: a menu, a dialog */
+
+  /* the viewer */
+  --pl-viewport-bg: #ffffff;    /* the ground the model is drawn on */
+  --pl-viewport-filter: none;   /* a CSS filter over the line drawing: a dark skin inverts it */
+}

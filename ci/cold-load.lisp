@@ -277,6 +277,25 @@ the body, the status, the final path."
              (owner-headers () (list (cons "X-Prompt-Lab-Owner" owner))))
         (smoke "prompt-lab publish" (lambda () (uiop:symbol-call :prompt-lab :publish-prompt-lab!) t))
         (smoke (format nil "prompt-lab page ~a" prefix) (lambda () (page-ok? prefix)))
+        (smoke "prompt-lab page names its stylesheets, every place filled in"
+               (lambda ()
+                 (let ((body (http :get prefix)))
+                   (when (search "{{" body) (error "a place in the page was left unfilled"))
+                   (dolist (name '("prompt-lab.css" "prompt-lab-page.css" "prompt-lab.js") t)
+                     (unless (search (format nil "~a/static/~a" prefix name) body)
+                       (error "the page does not name ~a" name))))))
+        (smoke "prompt-lab stylesheets, script and skins"
+               (lambda ()
+                 (let ((skins (mapcar (lambda (skin) (format nil "prompt-lab-~a.css" (getf skin :name)))
+                                      (uiop:symbol-call :prompt-lab :skins))))
+                   (unless skins (error "no skin was found beside the page"))
+                   (dolist (name (append '("prompt-lab.css" "prompt-lab-page.css" "prompt-lab-viewer.css"
+                                           "prompt-lab-phone.css" "prompt-lab.js")
+                                         skins)
+                                 t)
+                     (multiple-value-bind (body status) (http :get (format nil "~a/static/~a" prefix name))
+                       (unless (and (eql status 200) (plusp (length body)))
+                         (error "~a/static/~a answered ~a" prefix name status)))))))
         (smoke "prompt-lab config door"
                (lambda () (gethash "engine" (json-of :get (door "config")))))
         (when (smoke "prompt-lab session door opens a session"
@@ -300,7 +319,23 @@ the body, the status, the final path."
                           (search "define-object model" (gethash "model_source" state))))))
           (smoke "prompt-lab viewer draws the model"
                  (lambda ()
-                   (page-ok? (format nil "~a/viewer?session=~a&owner=~a" prefix session owner)))))))))
+                   (page-ok? (format nil "~a/viewer?session=~a&owner=~a" prefix session owner))))
+          (smoke "prompt-lab viewer wears a skin, and the phone's sheet when asked"
+                 (lambda ()
+                   (let* ((skin (getf (first (uiop:symbol-call :prompt-lab :skins)) :name))
+                          (body (http :get (format nil "~a/viewer?session=~a&skin=~a&mode=phone"
+                                                   prefix session skin))))
+                     (dolist (name (list "prompt-lab.css" "prompt-lab-viewer.css" "prompt-lab-phone.css"
+                                         (format nil "prompt-lab-~a.css" skin))
+                                   t)
+                       (unless (search (format nil "~a/static/~a" prefix name) body)
+                         (error "the viewer does not link ~a" name))))))
+          (smoke "prompt-lab viewer without a skin links none, whatever it is asked for"
+                 (lambda ()
+                   (let ((body (http :get (format nil "~a/viewer?session=~a&skin=..%2Fpage" prefix session))))
+                     (and (search "prompt-lab-viewer.css" body)
+                          (not (search "prompt-lab-phone.css" body))
+                          (not (search "prompt-lab-page.css" body)))))))))))
 
 (let* ((all (all-system-names))
        (systems (remove-if (lambda (s) (assoc s *not-loaded*)) all)))

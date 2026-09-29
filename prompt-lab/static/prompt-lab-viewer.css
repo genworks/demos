@@ -1,0 +1,256 @@
+/*
+ * Copyright (c) 2026 Genworks International
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.  Distributed WITHOUT
+ * ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+ */
+
+/* prompt-lab-viewer.css -- the lab's tokens laid onto the viewer.
+ *
+ * The viewer in the page's frame is a sluice, Gendl's object browser: a
+ * document of its own, with its own stylesheets, laid out with utility
+ * classes.  This sheet is loaded after those (and after prompt-lab.css,
+ * the tokens) and says what each part of the sluice is in the lab's
+ * terms: its panes are panes, its menu bar is a command menu, its
+ * greys are the lab's ground, rules and inks.  The skin comes after,
+ * and so dresses the viewer with the same tokens as the page.
+ *
+ * Only the lab's viewer links this sheet, so nothing here reaches a
+ * sluice opened anywhere else, and the rules need no class to hang on.
+ * The sluice's utilities are in a cascade layer; rules outside any
+ * layer, as these are, win over them whatever their specificity.
+ *
+ * On a phone the viewer links prompt-lab-phone.css as well, after this.
+ *
+ * Kept in ASCII (escapes for anything beyond it).
+ */
+
+body {
+  background: var(--pl-seam);
+  color: var(--pl-ink);
+  font-family: var(--pl-font);
+}
+
+
+/* --- the sluice's greys, in the lab's terms ----------------------------- */
+
+body .bg-white,
+body .bg-gray-50,
+body .bg-white\/80,
+body .odd\:bg-white,
+body .even\:bg-gray-50 { background-color: var(--pl-panel); }
+body .bg-gray-100 { background-color: var(--pl-bg); }
+body .bg-gray-200 { background-color: var(--pl-panel-alt); }
+
+body .text-gray-900,
+body .text-gray-700,
+body .text-slate-700 { color: var(--pl-ink); }
+body .text-gray-600,
+body .text-gray-500 { color: var(--pl-ink-dim); }
+body .text-gray-400 { color: var(--pl-ink-dimmer); }
+body .text-red-700 { color: var(--pl-status-fail); }
+/* a value that leads somewhere: the link's ink, and underlined, since a
+   skin's link may be the colour of its text */
+body .text-blue-700,
+body .text-blue-800 { color: var(--pl-link); text-decoration: underline; text-underline-offset: 2px; }
+
+body .border-gray-300 { border-color: var(--pl-line); }
+body .border-gray-200 { border-color: var(--pl-line-soft); }
+body .rounded,
+body .rounded-md { border-radius: var(--pl-radius); }
+body .shadow { box-shadow: none; }
+body .font-mono { font-family: var(--pl-font-mono); }
+
+
+/* --- the frame: panes with seams between them --------------------------- */
+
+body > div,
+body > div > div,
+body aside,
+body main {
+  gap: var(--pl-gap);
+  background: var(--pl-seam);
+}
+body aside { border: 0; }
+body #tree,
+body #inspector {
+  border: 0;
+  padding-top: 0;
+  background: var(--pl-panel);
+  border-radius: var(--pl-radius);
+  box-shadow: var(--pl-shadow);
+}
+body main > div {
+  border: 0;
+  background: var(--pl-viewport-bg);
+  border-radius: var(--pl-radius);
+  box-shadow: var(--pl-shadow);
+  overflow: hidden;
+}
+
+/* each pane's label, in its corner */
+body #tree::before,
+body #inspector::before {
+  display: block;
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 5;
+  width: max-content;
+  margin-bottom: 2px;
+  padding: 2px 8px;
+  background: var(--pl-label-bg);
+  color: var(--pl-label-ink);
+  font: var(--pl-label-weight) 12px/1.4 var(--pl-font-label);
+  text-transform: var(--pl-label-case);
+  letter-spacing: var(--pl-label-tracking);
+  border-radius: 0 0 var(--pl-radius) 0;
+}
+body #tree::before { content: "Tree"; }
+body #inspector::before { content: "Inspector"; }
+
+/* the viewport's own label, and the button in its corner */
+body main .left-1.top-1 {
+  left: 0;
+  top: 0;
+  padding: 2px 8px;
+  border-radius: 0 0 var(--pl-radius) 0;
+  background: var(--pl-label-bg);
+  color: var(--pl-label-ink);
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  font: 12px/1.4 var(--pl-font-label);
+  text-transform: var(--pl-label-case);
+  letter-spacing: var(--pl-label-tracking);
+}
+body main .left-1.top-1 span {
+  color: inherit;
+  text-decoration: none;
+}
+body main .left-1.top-1 .font-semibold { font-weight: var(--pl-label-weight); }
+body main button[id$="-reset-size"] {
+  border: var(--pl-rule) solid var(--pl-line);
+  border-radius: var(--pl-radius);
+  background: var(--pl-panel);
+  color: var(--pl-ink);
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+body main button[id$="-reset-size"]:hover { background: var(--pl-accent); color: var(--pl-accent-ink); }
+
+/* the drawing: lines on the viewport's ground.  The sluice gives the
+   drawing a ground of its own, in its style attribute; it goes, so that
+   the pane's shows and a skin's filter turns the lines alone. */
+body main svg {
+  background-color: transparent !important;
+  filter: var(--pl-viewport-filter);
+}
+
+
+/* --- the menu bar: a command menu --------------------------------------- */
+
+body > div > header {
+  background: var(--pl-panel);
+  font-size: 13px;
+}
+body #menu,
+body #menu ul,
+body #menu li,
+body #menu a {
+  font-family: var(--pl-font-label);
+  text-transform: var(--pl-label-case);
+  letter-spacing: var(--pl-label-tracking);
+}
+body #menu > ul { padding: 0 6px; }
+body #menu > ul > li,
+body #menu > ul > li > a {
+  background: transparent;
+  color: var(--pl-ink);
+  font-weight: var(--pl-label-weight);
+}
+body #menu a { padding: 3px 6px; color: var(--pl-ink); }
+body #menu a.inactive { color: var(--pl-ink-dimmer); }
+body #menu .menu-image { height: 20px; width: auto; }
+body #menu > ul ul {
+  border: var(--pl-rule) solid var(--pl-line);
+  border-radius: var(--pl-radius);
+  background: var(--pl-panel);
+  box-shadow: var(--pl-shadow-raised);
+  opacity: 1;
+  font-size: 13px;
+  font-weight: 400;
+}
+body #menu ul li ul li,
+body #menu ul li ul li > a {
+  background: var(--pl-panel);
+  color: var(--pl-ink);
+}
+body #menu ul li.visible > a,
+body #menu ul li.visible,
+body #menu.hoverable ul li:hover > a,
+body #menu.hoverable ul li:hover {
+  background: var(--pl-accent) !important;
+  color: var(--pl-accent-ink) !important;
+}
+body #menu ul li ul .li-selected { color: var(--pl-ink); font-weight: 700; }
+body #menu.hoverable ul li:hover > a.li-selected { color: var(--pl-accent-ink); }
+body #menu ul ul hr { border: 0; border-top: var(--pl-rule) solid var(--pl-line-soft); }
+body .li-heading,
+body #menu.hoverable .li-heading:hover { background: var(--pl-panel-alt); color: var(--pl-ink); }
+body #menu input {
+  border: var(--pl-rule) solid var(--pl-line);
+  border-radius: var(--pl-radius);
+  background: var(--pl-panel);
+  color: var(--pl-ink);
+}
+
+
+/* --- the tree ----------------------------------------------------------- */
+
+body #tree { font-size: 13px; }
+body #tree-root { padding: 0 10px 6px; }
+body .expanded,
+body .directory,
+body .leaf { color: var(--pl-ink-dim); }
+/* what the pointer is on is boxed */
+body .tree-node {
+  padding: 0 3px;
+  outline: var(--pl-rule) solid transparent;
+  outline-offset: -1px;
+  border-radius: var(--pl-radius);
+}
+/* a node's colour is its own, in its style attribute; the usual black
+   is the lab's ink instead, or a dark skin would hide the tree */
+body .tree-node[style*="#000000"] { color: var(--pl-ink) !important; }
+body .tree-node:hover {
+  background: var(--pl-hover-bg);
+  outline-color: var(--pl-hover-line);
+}
+body .tree-inspect { color: var(--pl-ink-dim); }
+
+
+/* --- the inspector ------------------------------------------------------ */
+
+body #inspector { font-size: 12px; }
+body #inspector input:not([type="checkbox"]):not([type="range"]),
+body #inspector select {
+  border: var(--pl-rule) solid var(--pl-line);
+  border-radius: var(--pl-radius);
+  background: var(--pl-panel);
+  color: var(--pl-ink);
+  font-family: var(--pl-font-mono);
+}
+body #inspector input:focus,
+body #inspector select:focus {
+  border-color: var(--pl-focus);
+  outline: var(--pl-rule) solid var(--pl-focus);
+}
+body #inspector input[type="checkbox"] { accent-color: var(--pl-accent); }
+body .sluice-slider { background: var(--pl-line-soft); border-radius: var(--pl-radius-pill); }
+body .sluice-slider::-webkit-slider-thumb { background: var(--pl-accent); border-radius: var(--pl-radius-pill); }
+body .sluice-slider::-moz-range-thumb { background: var(--pl-accent); border-radius: var(--pl-radius-pill); }

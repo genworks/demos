@@ -1,0 +1,64 @@
+/*
+ * Copyright (c) 2026 Genworks International
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.  Distributed WITHOUT
+ * ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+ */
+
+/* prompt-lab-plain.css -- a skin: the look of an ordinary web
+ * application of the 2020s, which the lab wore before it had skins.
+ *
+ * Tokens and nothing else.  It shows the other half of the protocol
+ * from the house look: panes that FLOAT on the ground rather than tile
+ * it (a gap, with the ground showing in the seam), rounded corners, a
+ * shadow, a fill under the pointer instead of a box, and one colour
+ * for what can be pressed.
+ */
+
+:root {
+  --pl-skin-api: 1;
+  --pl-skin-label: "Plain";
+  color-scheme: light;
+
+  --pl-bg: #eef0f4;
+  --pl-panel: #ffffff;
+  --pl-panel-alt: #f3f4f6;
+  --pl-line: #d1d5db;
+  --pl-line-soft: #e5e7eb;
+  --pl-ink: #111827;
+  --pl-ink-dim: #4b5563;
+  --pl-ink-dimmer: #6b7280;
+
+  --pl-label-bg: #1f2937;
+  --pl-label-ink: #f9fafb;
+
+  --pl-accent: #4f46e5;
+  --pl-accent-ink: #ffffff;
+  --pl-link: #4338ca;
+  --pl-hover-bg: #eef2ff;
+  --pl-hover-line: transparent;
+  --pl-focus: #4f46e5;
+
+  --pl-status-pass: #059669;
+  --pl-status-warn: #d97706;
+  --pl-status-fail: #dc2626;
+  --pl-status-busy: #4f46e5;
+
+  --pl-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --pl-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --pl-font-label: var(--pl-font);
+  --pl-size: 14px;
+  --pl-label-weight: 600;
+
+  --pl-gap: 8px;
+  --pl-seam: var(--pl-bg);
+  --pl-radius: 8px;
+  --pl-radius-pill: 9999px;
+  --pl-shadow: 0 1px 3px rgba(17, 24, 39, 0.12);
+  --pl-shadow-raised: 0 10px 30px rgba(17, 24, 39, 0.22);
+
+  --pl-viewport-bg: #f8fafc;
+}
