@@ -43,7 +43,6 @@
 (defparameter *not-loaded*
   '((:naca-nurbs . "needs surf/SMLib (enterprise GDL); the gdl image publishes it")
     (:gear . "profile.lisp's arc-curve is surf's (enterprise GDL); the gdl image publishes it")
-    (:gorg . "base-framework.lisp hardcodes *system-home* to one user's old home directory")
     (:bench . "planking.gdl reads an undeclared *model-a*, and lumber.gdl defines its own package :lumber over the lumber system's")
     (:pui . "initialize.lisp warns as it loads that its images directory is missing")
     (:deck . "depends on pui and bench")
@@ -51,8 +50,7 @@
 
 (defun all-system-names ()
   "Every system named by an .asd file one level below the checkout,
-demos-common first since everything else depends on it.  The attic
-is not scanned: what is there is retired."
+demos-common first since everything else depends on it."
   (let ((names (mapcar (lambda (p) (intern (string-upcase (pathname-name p)) :keyword))
                        (directory (merge-pathnames "*/*.asd" *demos-dir*)))))
     (cons :demos-common
