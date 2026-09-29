@@ -19,7 +19,8 @@
 (when (and (find-package :surf)
            (let ((symbol (find-symbol-ci "extruded-solid" :surf)))
              (and symbol (find-class symbol nil))))
-  ;; Found through the system's own source directory: under ASDF on
-  ;; Allegro, *load-truename* is this file's fasl in the output cache,
-  ;; where no solids.lisp lives.
-  (load (asdf:system-relative-pathname :lumber "source/solids.lisp")))
+  ;; Beside this file's SOURCE, as the implementation records it
+  ;; (glisp:source-pathname): *load-truename* is the fasl, which under
+  ;; ASDF on Allegro sits in the output cache where no solids.lisp
+  ;; lives.  No ASDF at run time, so a runtime build need not carry it.
+  (load (merge-pathnames "solids.lisp" (glisp:source-pathname))))

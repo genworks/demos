@@ -6,8 +6,8 @@
 # License, or (at your option) any later version.  Distributed WITHOUT
 # ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-# GitLab CI for genworks/demos: one job, a COLD LOAD of the demos and
-# a SMOKE RUN through them.
+# GitLab CI for genworks/demos: a COLD LOAD of the demos and a SMOKE
+# RUN through them, on each engine.
 #
 # Every push starts the web server and then loads demos-common and
 # every demo system through Quicklisp on the published free Gendl
@@ -25,11 +25,15 @@
 # drawing it) with no agent and no network; any failed page fails the
 # job.  The header of ci/cold-load.lisp has the details.
 #
-# Nothing is built, pushed or deployed here: demos reach the stack
-# hosts through the repos deploy script, not through CI.  A pull-only
-# job needs no Docker Hub credentials.
+# The same script runs twice, once per engine: cold-load on the free
+# Gendl image (CCL), cold-load-gdl on Genworks GDL (Allegro), where
+# gear and naca-nurbs, which need its surfaces and solids, load and
+# are smoked too.
 #
-# Runner: the amd64 DOCKER executor (tag "amd64-docker", beside the
+# Nothing is built, pushed or deployed here: demos reach the stack
+# hosts through the repos deploy script, not through CI.
+#
+# Runner for cold-load: the amd64 DOCKER executor (tag "amd64-docker", beside the
 # shell runner that carries plain "amd64"): the job runs
 # inside the Gendl image itself, as the image's own user, with the
 # checkout at $CI_PROJECT_DIR.  This is also the standing proof that
@@ -56,3 +60,26 @@ cold-load:
     - rm -rf /tmp/demos && cp -r "$CI_PROJECT_DIR" /tmp/demos
     - cd /opt/gendl
     - DEMOS_DIR=/tmp/demos ./gdl/program/gdl-ccl -n -b --load /tmp/demos/ci/cold-load.lisp
+
+# Genworks GDL: the rolling betatest image, which is private, so this
+# job runs on the amd64 SHELL runner, whose own Docker login pulls it,
+# and starts the image by hand -- the arrangement of the gdl pipeline's
+# quick-test.  The checkout is mounted read-only and copied inside.  A
+# hung run leaves its container behind (--rm acts only on exit), so the
+# name is cleared first and the run is capped.  Interim: a long-running
+# CI ship is to take this over.
+cold-load-gdl:
+  stage: load
+  tags:
+    - amd64
+  variables:
+    GIT_DEPTH: "1"
+    GDL_IMAGE: genworks/gdl:devo-non-smp-betatest
+  script:
+    - docker pull "$GDL_IMAGE"
+    - docker rm -f demos-cold-load-gdl >/dev/null 2>&1 || true
+    - >
+      timeout 1500 docker run --rm --name demos-cold-load-gdl
+      -v "$CI_PROJECT_DIR":/src:ro --entrypoint bash "$GDL_IMAGE"
+      -c 'cp -r /src /tmp/demos && cd /opt/genworks-gdl && DEMOS_DIR=/tmp/demos ./gdl/program/gdl -batch -L /tmp/demos/ci/cold-load.lisp'
+      || { status=$?; docker rm -f demos-cold-load-gdl >/dev/null 2>&1 || true; exit $status; }
