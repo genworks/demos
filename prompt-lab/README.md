@@ -55,6 +55,25 @@ build, by anyone, draws on, that anyone may add to up to a limit, and
 that stops the lab at zero until someone does.  The page shows
 whichever the gate says it keeps; the reference instance keeps a pot.
 
+## Prompts from a script or an agent
+
+The page is one client of the lab's doors, and a script or an agent
+may be another.  `POST <prefix>/api/session` with `{}` opens a session
+and answers its id and its owner key; `POST <prefix>/api/prompt` with
+`{"session": ..., "prompt": ...}` and the key in an
+`X-Prompt-Lab-Owner` header starts a build; `GET
+<prefix>/api/state?session=...` follows it: the log, the model's
+source, the viewer's address.
+
+Where an instance puts a human check in front of the prompt door, a
+prompt that carries no check token is taken on a small daily
+allowance -- so many from one address, so many from all together
+(`*max-automated-prompts-per-day*`, `*max-automated-prompts-per-address*`
+in `parameters.lisp`; none at all when the first is nil) -- and spends
+the same modeling credits as anyone's.  An interesting model built
+that way is as welcome as any other; the allowance is there so that
+a day of abuse stays small.
+
 ## Running it
 
 Load the system into a Gendl image that has the `sluice` application

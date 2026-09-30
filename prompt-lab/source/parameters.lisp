@@ -103,6 +103,18 @@ instance that serves visitors.")
   "Integer or nil. Prompts one visitor address may run in a UTC day, across
 its sessions; nil for no limit.  Two full sessions' worth.")
 
+(defparameter *max-automated-prompts-per-day* 24
+  "Integer or nil. Prompts a UTC day the lab takes WITHOUT the human check,
+from all addresses together, where a human check stands at the prompt
+door (guards.lisp): the lane for a script or an agent that comes to
+build.  They spend the same credits as everyone's prompts; this figure
+and the one below bound what a day of abuse can take.  Nil or 0: no such
+lane, and every prompt passes the human check.")
+
+(defparameter *max-automated-prompts-per-address* 6
+  "Integer or nil. Of those, the prompts one address may run in a UTC day
+(an IPv6 address counts by its /64); nil for no limit of its own.")
+
 (defparameter *turnstile-site-key* nil
   "String or nil. The Cloudflare Turnstile site key (public) the page
 renders its widget with; nil renders no widget and the prompt door asks

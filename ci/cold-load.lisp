@@ -442,8 +442,36 @@ the body, the status, the final path."
                        (or (and (eql status 429) (search "pot" body))
                            (error "the prompt door answered ~a: ~a" status
                                   (subseq body 0 (min 200 (length body)))))))))
+          ;; behind a human check the pot is everybody's and the prompt
+          ;; caps stand aside; and a prompt that carries no check token
+          ;; rides the automated lane's allowance, a token is verified
+          ;; (here: at a gate that is not there, so it fails), and the
+          ;; allowance runs out.  The site key is pretended.
+          (setf (symbol-value (lab '#:*pot*)) (list :credits 500 :max 9900 :room 9400 :topup? nil :amounts nil :key "")
+                (symbol-value (lab '#:*turnstile-site-key*)) "smoke-site-key"
+                (symbol-value (lab '#:*max-automated-prompts-per-day*)) 1)
+          (smoke "prompt-lab lifts the prompt caps at a pot behind a human check, and takes automated prompts on an allowance"
+                 (lambda ()
+                   (flet ((state () (json-of :get (format nil "~a?session=~a" (door "state") session)
+                                             :headers (owner-headers)))
+                          (prompt (&rest more)
+                            (http :post (door "prompt") :headers (owner-headers)
+                                                        :json (apply #'table "session" session "prompt" "A plate." more))))
+                     (unless (eq (gethash "prompts_unlimited" (state)) t)
+                       (error "the caps still bind at a pot behind a human check"))
+                     (multiple-value-bind (body status) (prompt "turnstile" "a-token")
+                       (unless (eql status 403) (error "a token no gate can verify was answered ~a: ~a" status body)))
+                     (multiple-value-bind (body status) (prompt)
+                       (unless (and (eql status 202) (search "automated" body))
+                         (error "a prompt with no token was answered ~a: ~a" status body)))
+                     ;; the agent stops at once: there is no gate to call
+                     (loop repeat 40 while (eq (gethash "busy" (state)) t) do (sleep 0.25))
+                     (multiple-value-bind (body status) (prompt)
+                       (or (and (eql status 429) (search "without the human check" body))
+                           (error "the second prompt with no token was answered ~a: ~a" status body))))))
           (setf (symbol-value (lab '#:*pot*)) nil
-                (symbol-value (lab '#:*pot-asked*)) 0)
+                (symbol-value (lab '#:*pot-asked*)) 0
+                (symbol-value (lab '#:*turnstile-site-key*)) nil)
           (smoke "prompt-lab viewer draws the model"
                  (lambda ()
                    (page-ok? (format nil "~a/viewer?session=~a&owner=~a" prefix session owner))))

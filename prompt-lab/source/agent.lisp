@@ -153,18 +153,28 @@ ship has moved to gate mode) all mean the same thing -- no key here."
 (defun post-json (url body &key headers (seconds *call-seconds*))
   "POST BODY (a UTF-8 string) to URL with HEADERS (an alist of name and
 value).  Returns (values status text response-headers), a refusal's
-body included; signals when the host cannot be reached."
+body included; signals when the host cannot be reached, or has not
+answered within SECONDS."
   (multiple-value-bind (answer status response-headers)
-      (net.aserve.client:do-http-request url
-        :method :post
-        :content (babel:string-to-octets body :encoding :utf-8)
-        :content-type "application/json"
-        :accept "application/json"
-        :headers headers
-        :format :binary
-        :keep-alive nil
-        :timeout seconds
-        :ssl-args (let ((host (url-host url))) (and host (list :server-name host))))
+      ;; The client's own :timeout is not honoured on every Lisp: on CCL a
+      ;; peer that accepts the connection and never answers held the calling
+      ;; thread for good, and with it whatever that thread was serving -- a
+      ;; tool call, a page's poll.  So the call runs under a timer of our
+      ;; own as well, which does get the thread back there.
+      (handler-case
+          (bt:with-timeout ((+ seconds 2))
+            (net.aserve.client:do-http-request url
+              :method :post
+              :content (babel:string-to-octets body :encoding :utf-8)
+              :content-type "application/json"
+              :accept "application/json"
+              :headers headers
+              :format :binary
+              :keep-alive nil
+              :timeout seconds
+              :ssl-args (let ((host (url-host url))) (and host (list :server-name host)))))
+        (bt:timeout ()
+          (error "~a did not answer within ~a seconds." (or (url-host url) url) seconds)))
     (values status
             (cond ((stringp answer) answer)
                   ((null answer) "")

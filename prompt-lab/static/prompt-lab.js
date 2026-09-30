@@ -743,7 +743,7 @@
     $('build').disabled = state.busy || capped || !turnstileReady();
     $('quota').textContent = state.busy ? 'working\u2026'
       : !turnstileReady() ? 'checking you are human\u2026'
-      : state.prompts_unlimited ? (state.pot ? 'no prompt cap: you have added to the pot' : 'prompts draw on your credits')
+      : state.prompts_unlimited ? (state.pot ? 'prompts draw on the community pot' : 'prompts draw on your credits')
       : (state.prompts_allowed - state.prompts_used) + ' of ' + state.prompts_allowed
         + (state.pot ? ' prompts left in this session' : ' free prompts left');
     $('usage').textContent = usageText(state.usage, state.meter, true);

@@ -66,7 +66,8 @@ through the addresses of one allocation."
 (defun address-limit (kind)
   (ecase kind
     (:sessions *max-sessions-per-address*)
-    (:prompts *max-prompts-per-address*)))
+    (:prompts *max-prompts-per-address*)
+    (:automated *max-automated-prompts-per-address*)))
 
 (defun address-record (key)
   "Today's record for KEY (fresh when there is none or it is yesterday's)."
@@ -74,12 +75,13 @@ through the addresses of one allocation."
         (today (day-key)))
     (if (and record (equal (getf record :day) today))
         record
-        (setf (gethash key *address-counts*) (list :day today :sessions 0 :prompts 0)))))
+        (setf (gethash key *address-counts*)
+              (list :day today :sessions 0 :prompts 0 :automated 0)))))
 
 (defun address-count (address kind)
-  "How many KIND (:sessions or :prompts) ADDRESS has had today."
+  "How many KIND (:sessions, :prompts or :automated) ADDRESS has had today."
   (bt:with-lock-held (*address-lock*)
-    (getf (address-record (address-key address)) kind)))
+    (or (getf (address-record (address-key address)) kind) 0)))
 
 (defun address-over-limit? (address kind)
   "True when a limit is set for KIND and ADDRESS has reached it today."
@@ -88,8 +90,69 @@ through the addresses of one allocation."
 
 (defun count-address! (address kind)
   (bt:with-lock-held (*address-lock*)
-    (let ((record (address-record (address-key address))))
-      (incf (getf record kind)))))
+    (let* ((key (address-key address))
+           (record (address-record key)))
+      ;; a record from before a kind existed has no place for it yet
+      (setf (getf record kind) (1+ (or (getf record kind) 0)))
+      (setf (gethash key *address-counts*) record)
+      (getf record kind))))
+
+
+;;
+;; The automated lane.  Where a human check stands at the prompt door, a
+;; script or an agent that comes to build has no way through it; some of
+;; what such callers ask for is worth having, so a prompt that carries NO
+;; check token is let in on an allowance of its own: so many a day from
+;; one address, and so many a day from all addresses together.  Those
+;; prompts spend the same credits as everyone's, and the two figures are
+;; what bound what a day of abuse can take -- the second holds against a
+;; caller that changes its address.  A prompt that carries a token is
+;; checked as ever and counts against neither.
+;;
+
+(defvar *automated-day* (cons "" 0)
+  "Cons of a UTC day and the automated prompts taken on it, all addresses.")
+
+(defun automated-count ()
+  (bt:with-lock-held (*address-lock*)
+    (if (equal (car *automated-day*) (day-key)) (cdr *automated-day*) 0)))
+
+(defun automated-lane? ()
+  "True when the lab takes prompts without the human check at all."
+  (and (integerp *max-automated-prompts-per-day*) (plusp *max-automated-prompts-per-day*)))
+
+(defun automated-room? (address)
+  "Values: true when ADDRESS may run one more prompt without the human
+check today; else nil and the reason."
+  (cond ((not (automated-lane?))
+         (values nil "Complete the human check first."))
+        ((>= (automated-count) *max-automated-prompts-per-day*)
+         (values nil (format nil "This lab takes ~a prompts a day without the human check, and today's are taken.  Come back tomorrow, or build from the page in a browser."
+                             *max-automated-prompts-per-day*)))
+        ((address-over-limit? address :automated)
+         (values nil (format nil "This address has run its ~a prompts without the human check for today.  Come back tomorrow, or build from the page in a browser."
+                             *max-automated-prompts-per-address*)))
+        (t (values t nil))))
+
+(defun count-automated! (address)
+  (count-address! address :automated)
+  (bt:with-lock-held (*address-lock*)
+    (let ((today (day-key)))
+      (if (equal (car *automated-day*) today)
+          (incf (cdr *automated-day*))
+          (setq *automated-day* (cons today 1))))))
+
+(defun admit-prompt (token address)
+  "Whether a prompt from ADDRESS carrying check TOKEN (or none) may run.
+Values: true or nil; the reason when not; and :automated when it is let
+in without the human check, on the automated lane's allowance -- the
+caller counts it (count-automated!) once the prompt has started."
+  (cond ((not (turnstile-required?)) (values t nil nil))
+        ((and (stringp token) (plusp (length token)))
+         (multiple-value-bind (ok? reason) (verify-turnstile token address)
+           (values ok? reason nil)))
+        (t (multiple-value-bind (room? reason) (automated-room? address)
+             (values room? reason (and room? :automated))))))
 
 (defun prune-addresses! ()
   "Forget every address whose record is not today's.  Returns how many."

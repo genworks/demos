@@ -30,6 +30,9 @@
              #:*render-tool?*
              #:*max-sessions-per-address*
              #:*max-prompts-per-address*
+             #:*max-automated-prompts-per-day*
+             #:*max-automated-prompts-per-address*
+             #:*own-lab*
              #:*turnstile-site-key*
              #:*turnstile-verify-url*
              #:*turnstile-secret-file*

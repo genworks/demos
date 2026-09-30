@@ -34,10 +34,19 @@
 ;; reach it.
 ;;
 
-(defvar *external-lock* (bt:make-lock "prompt-lab external agent")
-  "Held around each tool an external agent runs: the lab's own loop runs
-a turn's tools one after another, and an agent that asks for several at
-once gets the same.")
+(defvar *external-locks* (make-hash-table :test #'equal)
+  "Session id -> the lock held around each tool an external agent runs in
+that session: the lab's own loop runs a turn's tools one after another,
+and an agent that asks for several at once gets the same.  One lock a
+session, so a tool that is slow in one keeps no other waiting.")
+
+(defvar *external-locks-lock* (bt:make-lock "prompt-lab external locks"))
+
+(defun external-lock (session)
+  (bt:with-lock-held (*external-locks-lock*)
+    (or (gethash (session-id session) *external-locks*)
+        (setf (gethash (session-id session) *external-locks*)
+              (bt:make-lock (format nil "prompt-lab external ~a" (session-id session)))))))
 
 (defun external-off (req ent)
   (refuse req ent net.aserve:*response-not-found* "This lab takes no external agent."))
@@ -173,7 +182,7 @@ Messages API's shape) as MCP content."
 loop logs it.  Returns the MCP result."
   (log-event session :tool "~a" name)
   (multiple-value-bind (blocks error?)
-      (bt:with-lock-held (*external-lock*)
+      (bt:with-lock-held ((external-lock session))
         (handler-case (run-tool session name (and (hash-table-p arguments)
                                                   (alexandria:hash-table-alist arguments)))
           (error (condition)
