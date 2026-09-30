@@ -28,6 +28,10 @@ built wrong, or a page that misbehaves are welcome at
   tools the agent is given (write, read, evaluate, check, render, the
   docs), the metering of compiles and runs, and the guards at the
   door.  `parameters.lisp` holds what an instance sets.
+- `editor/` -- the model file's editor: CodeMirror taught Lisp, with
+  colours, folding by s-expression and Emacs's keys for moving by
+  one; built into `static/editor.js`
+  ([editor/README.md](editor/README.md)).
 - `external/` -- a script that stands in for the agent loop during
   development (below).
 - `static/` -- one HTML document laid out twice (a workstation's tiled

@@ -303,7 +303,7 @@ the body, the status, the final path."
                                             (mapcar (lambda (name) (format nil "~a/static/~a" prefix name))
                                                     '("prompt-lab.css" "prompt-lab-page.css"
                                                       "prompt-lab-viewer.css" "prompt-lab-phone.css"
-                                                      "prompt-lab.js"))
+                                                      "prompt-lab.js" "editor.js"))
                                             (and split (list split))
                                             skins)
                                     t)

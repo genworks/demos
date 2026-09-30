@@ -144,8 +144,12 @@
             <select id="versions"></select>
           </span>
           <span id="source-state" class="muted"></span>
+          <span id="fold-row" class="row" hidden>
+            <button id="fold-all" type="button" data-doc="Fold every form to its first line: the file as an outline.">Fold</button>
+            <button id="unfold-all" type="button" data-doc="Open every folded form again.">Unfold</button>
+          </span>
         </header>
-        <textarea id="source" class="code" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="The model's source appears here." data-doc="The model's source, once it is built.  Edit it, then Save and Reload to see your change."></textarea>
+        <textarea id="source" class="code" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Model file" placeholder="The model's source appears here." data-doc="The model's source, once it is built.  Edit it, then Save and Reload to see your change." data-editor-doc="The model's source.  The arrows at the left fold a form to its first line; Ctrl-Alt-F, B, U and D move by s-expression.  Edit it, then Save and Reload."></textarea>
         <div id="save-row" class="row pane-foot">
           <button id="save" type="button" data-doc="Write the file, compile it and load it; the viewer follows." disabled>Save and Reload</button>
         </div>
@@ -207,6 +211,7 @@
 </dialog>
 
 {{split-script}}
+{{editor-script}}
 <script src="{{script}}"></script>
 </body>
 </html>

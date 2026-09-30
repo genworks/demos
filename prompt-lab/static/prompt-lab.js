@@ -89,13 +89,43 @@
     }
   }
 
+  //
+  // The model file's box.  A plain textarea as the page arrives; the
+  // structured editor (static/editor.js, built from ../editor) is mounted
+  // over it once its script has loaded: colours, folding by s-expression,
+  // matched parentheses.  Everything else here speaks to `source` and
+  // does not care which it is.
+  //
+
+  var editor = null;
+  var source = {
+    get: function () { return editor ? editor.value : $('source').value; },
+    set: function (text) { if (editor) editor.value = text; else $('source').value = text; },
+    lock: function (flag) { $('source').readOnly = !!flag; if (editor) editor.setReadOnly(!!flag); },
+    hint: function (text) { $('source').placeholder = text; if (editor) editor.setPlaceholder(text); }
+  };
+
+  function edited() {
+    sourceDirty = true;
+    $('save').disabled = false;
+    $('source-state').textContent = 'edited';
+  }
+
+  function mountEditor() {
+    if (editor || !window.PromptLabEditor) return;
+    try { editor = window.PromptLabEditor.mount($('source'), { onEdit: edited }); } catch (e) { editor = null; return; }
+    lab.editor = editor;        // within reach of a console, and of a test
+    document.body.classList.add('has-editor');
+    $('fold-row').hidden = false;
+  }
+
   // The lab answers, or it does not.
   function reach(there) {
     if (unreachable === !there) return;
     unreachable = !there;
     document.body.classList.toggle('unreachable', unreachable);
     $('offline-banner').hidden = !unreachable;
-    $('source').readOnly = unreachable || !editable;
+    source.lock(unreachable || !editable);
     if (unreachable) {
       status('No Connection');
       $('build').disabled = true;
@@ -121,7 +151,7 @@
     renderLog(last.log || []);
     $('usage').textContent = usageText(last.usage, last.meter, true);
     $('status-session').textContent = 'Session ' + last.session;
-    $('source').value = last.model_source || '';
+    source.set(last.model_source || '');
     lastSource = last.model_source;
     if (last.model_defined) $('viewer-empty').textContent = 'The model is drawn by the lab\'s engine. It will be here when the lab answers.';
   }
@@ -137,7 +167,7 @@
     $('usage').textContent = '';
     $('status-session').textContent = '';
     $('welcome').hidden = false;
-    $('source').value = '';
+    source.set('');
     lastSource = null;
     history.replaceState(null, '', pageUrl(''));
   }
@@ -593,8 +623,8 @@
     $('spend-box').hidden = true;
     $('save-row').hidden = true;
     $('console-tab').hidden = true;
-    $('source').readOnly = true;
-    $('source').placeholder = 'No model file yet.';
+    source.lock(true);
+    source.hint('No model file yet.');
     $('welcome').hidden = true;
     $('readonly-banner').innerHTML = html;
     $('readonly-banner').hidden = false;
@@ -643,7 +673,7 @@
 
     if (state.model_source !== lastSource) {
       lastSource = state.model_source;
-      if (!sourceDirty) $('source').value = state.model_source || '';
+      if (!sourceDirty) source.set(state.model_source || '');
     }
     $('save').disabled = state.busy || !sourceDirty;
 
@@ -699,7 +729,7 @@
     return getJSON('archived?id=' + encodeURIComponent(archiveId) + (version ? '&version=' + version : ''))
       .then(function (a) {
         if (a._status !== 200) { readOnly(escapeHtml(a.error || 'This archived session could not be read.')); return null; }
-        $('source').value = a.model_source || '';
+        source.set(a.model_source || '');
         return a;
       });
   }
@@ -876,16 +906,14 @@
     }
   });
 
-  $('source').addEventListener('input', function () {
-    sourceDirty = true;
-    $('save').disabled = false;
-    $('source-state').textContent = 'edited';
-  });
+  $('source').addEventListener('input', edited);
+  $('fold-all').addEventListener('click', function () { if (editor) editor.foldAll(); });
+  $('unfold-all').addEventListener('click', function () { if (editor) editor.unfoldAll(); });
 
   $('save').addEventListener('click', function () {
     showError('source-error', '');
     $('save').disabled = true;
-    api('model', { session: session, source: $('source').value }).then(function (r) {
+    api('model', { session: session, source: source.get() }).then(function (r) {
       if (r.error) { showError('source-error', r.error); $('save').disabled = false; return; }
       sourceDirty = false;
       $('source-state').textContent = r.ok ? 'saved and loaded' : 'saved; see the log';
@@ -984,6 +1012,10 @@
   function layoutChanged() { syncFrame(); fit($('prompt')); if (!phone()) sheet(false); }
   if (phoneQuery.addEventListener) phoneQuery.addEventListener('change', layoutChanged);
   else if (phoneQuery.addListener) phoneQuery.addListener(layoutChanged);
+
+  // the editor's script is deferred: it has run by the time the document is parsed
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountEditor);
+  else mountEditor();
 
   watchPointer(document);
   showDocumentation('');

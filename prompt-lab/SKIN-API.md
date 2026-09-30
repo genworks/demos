@@ -58,6 +58,25 @@ Where both have a skin of one name, it is the sluice's.
 The human check and the card form are other people's frames, and
 follow `color-scheme` at most.
 
+## The model file's colours
+
+The model file is shown in an editor that colours Lisp (`editor/`,
+built into `static/editor.js`).  Its ground, gutter and rules are the
+tokens above.  The colours of the code are tokens of the lab's own,
+which a skin MAY say and none has to: unsaid, each is a fixed hue
+leaned toward `--pl-ink`, so it reads on a light ground and on a dark
+one.
+
+| token | colours |
+|---|---|
+| `--pl-code-keyword` | `define-object`, `the`, `let`, `defun` and their kin, at the head of a form |
+| `--pl-code-section` | a define-object's sections: `:input-slots`, `:computed-slots`, `:objects` ... |
+| `--pl-code-atom` | keywords, `nil` and `t` |
+| `--pl-code-number` | numbers |
+| `--pl-code-string` | strings |
+| `--pl-code-comment` | comments (default `--pl-ink-dimmer`) |
+| `--pl-code-paren` | parentheses (default `--pl-ink-dimmer`) |
+
 ## A sluice older than its skins
 
 The lab runs on whatever Gendl image serves it, and an image built

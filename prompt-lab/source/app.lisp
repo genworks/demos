@@ -132,6 +132,7 @@ it may ask for."
                 (tokens-url)
                 (static-url "prompt-lab-page.css")
                 (static-url "prompt-lab.js"))
+          (and (static-file "editor.js") (list (static-url "editor.js")))
           (let ((split (split-url))) (and split (list split)))
           (mapcar #'(lambda (skin) (getf skin :href)) (skins))
           (mapcar #'(lambda (icon) (static-url (first icon)))

@@ -310,6 +310,12 @@ again when any of them changes, and the worker keeps a new cache."
                  (cons "{{split-script}}"
                        (let ((url (split-url)))
                          (if url (format nil "<script src=\"~a\" defer></script>" url) "")))
+                 ;; the model file's editor (built from ../editor); the
+                 ;; page's plain textarea serves without it
+                 (cons "{{editor-script}}"
+                       (if (static-file "editor.js")
+                           (format nil "<script src=\"~a\" defer></script>" (static-url "editor.js"))
+                           ""))
                  (cons "{{page-css}}" (static-url "prompt-lab-page.css"))
                  (cons "{{script}}" (static-url "prompt-lab.js"))
                  (cons "{{manifest}}" (format nil "~a/manifest.webmanifest" *url-prefix*))
