@@ -1,0 +1,300 @@
+;;;; -*- Mode: Lisp; Package: pod-line-demo -*-
+
+;; Copyright © 2026 Genworks International
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Affero General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.  Distributed WITHOUT
+;; ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+;;;;
+;;;; The whole line: a neighbourhood on rail, then the same pods crossing
+;;;; open country on twin track cables to the next neighbourhood's rail.
+;;;; The neighbourhood began as a model built in the prompt lab; the
+;;;; cables, and the track and bogie that serve both, grew from the
+;;;; question whether it could go the distance.
+;;;;
+;;;; THE NUMBERS ARE A SKETCH OF THE METHOD, NOT A DESIGN.  The rope's
+;;;; weight and strength are rules of thumb, the safety factor and the
+;;;; gradient limit are inputs to be set from the standard that governs,
+;;;; and wind is not considered at all.
+
+(in-package :pod-line-demo)
+
+(define-object pod-line (track-mixin base-object)
+  :documentation (:description "A neighbourhood on rail, then the same pods crossing
+open country on twin track cables to the next neighbourhood's rail.
+The tower height is not an input: it follows from the span, the
+tension, the pods allowed on a span and the clearance asked for."
+                  :author "Genworks International")
+  :input-slots
+  (("Main cable span between towers, mm" span-length 150000)
+   ("Number of main spans" span-count 2)
+   ("Approach span between a rail end and the first tower, mm" approach-length 60000)
+   ("Horizontal tension in each of the two cables, kN" cable-tension-kn 200)
+   ("Cable diameter, mm; the rail's running heads match it" cable-diameter 32)
+   ("Between the two cables, and the rail's two running heads, mm" gauge 500)
+   ("Mass of a loaded pod with its bogie, kg" pod-mass-kg 800)
+   ("Pods let onto one span at a time" pods-per-span 2)
+   ("Clearance kept under a pod, mm" clearance 5000)
+   ("Pods on the cables: 0 to 1 is the approach span, 1 to 2 the first main span"
+    cable-pod-positions (list 0.5 1.5 2.0 2.35))
+   ("0 = docked under the bogie, 1 = lowered to the ground" cable-pod-drops (list 0 0 0 1.0))
+   (cable-pod-colors (list :steel-blue :green-sea :steel-blue :orange-mandarin))
+   ("Length of neighbourhood main rail" line-length 40000)
+   ("Height of track axis above ground" beam-center-z 6500)
+   ("Rail shown at the far neighbourhood, mm" far-rail-length 20000)
+   ("Coldest night to hottest day, K" temperature-range 60)
+   ("Least breaking force over greatest tension" required-safety-factor 3.15)
+   ("Steepest cable the drive is to climb, rise over run" gradient-limit 0.15))
+
+  :computed-slots
+  ((input-controls (list :span-length (list :min 100000 :max 600000 :step 10000)
+                         :span-count (list :kind :integer :min 1 :max 6)
+                         :approach-length (list :min 40000 :max 200000 :step 5000)
+                         :cable-tension-kn (list :min 80 :max 400 :step 10)
+                         :cable-diameter (list :min 24 :max 60 :step 2)
+                         :gauge (list :min 400 :max 800 :step 50)
+                         :pod-mass-kg (list :min 400 :max 1500 :step 50)
+                         :pods-per-span (list :kind :integer :min 1 :max 6)
+                         :clearance (list :min 3000 :max 8000 :step 250)))
+   (head-radius (half (the cable-diameter)))
+
+   ;; The cable, from rules of thumb for full-locked coil rope of
+   ;; 1570 N/mm2 wire: about 0.69 d2 of steel in the section.
+   (gravity 9.81)
+   (cable-mass-per-m (* 0.0056 (expt (the cable-diameter) 2)))
+   (unit-weight (/ (* (the cable-mass-per-m) (the gravity)) 1000.0))
+   (breaking-force (* 975.0 (expt (the cable-diameter) 2)))
+   (tension (* 1000.0 (the cable-tension-kn)))
+   (pod-load (* 0.5 (the pod-mass-kg) (the gravity)))
+   (hang-depth (- (the reference-pod nominal-bottom)))
+
+   ;; The design case: every pod allowed on a span standing at its middle.
+   (self-sag (/ (* (the unit-weight) (expt (the span-length) 2)) (* 8 (the tension))))
+   (pod-sag (/ (* (the pods-per-span) (the pod-load) (the span-length)) (* 4 (the tension))))
+   (design-sag (+ (the self-sag) (the pod-sag)))
+   (support-z (+ (the clearance) (the hang-depth) (the design-sag)))
+   (design-gradient
+    (let ((pods (/ (* (the pods-per-span) (the pod-load)) (the tension))))
+      (max (+ (/ (* (the unit-weight) (the span-length)) (* 2 (the tension))) pods)
+           (+ (/ (- (the support-z) (the beam-center-z)) (the approach-length))
+              (/ (* (the unit-weight) (the approach-length)) (* 2 (the tension)))
+              pods))))
+   ;; The shortest approach span that climbs from the rail to the first
+   ;; saddle within the gradient limit; nil when no length does.
+   (least-approach
+    (let* ((a (/ (the unit-weight) (* 2 (the tension))))
+           (b (- (the gradient-limit)
+                 (/ (* (the pods-per-span) (the pod-load)) (the tension))))
+           (c (- (the support-z) (the beam-center-z)))
+           (root (- (expt b 2) (* 4 a c))))
+      (when (and (plusp b) (not (minusp root)))
+        (/ (- b (sqrt root)) (* 2 a)))))
+   (design-tension (* (the tension) (sqrt (1+ (expt (the design-gradient) 2)))))
+   (safety-factor (/ (the breaking-force) (the design-tension)))
+
+   ;; The line as drawn.
+   (start-x (half (the line-length)))
+   (cable-run (+ (twice (the approach-length)) (* (the span-count) (the span-length))))
+   (end-x (+ (the start-x) (the cable-run)))
+   (supports (append
+              (list (make-point (the start-x) 0 (the beam-center-z)))
+              (loop for i from 0 to (the span-count)
+                    collect (make-point (+ (the start-x) (the approach-length)
+                                           (* i (the span-length)))
+                                        0 (the support-z)))
+              (list (make-point (the end-x) 0 (the beam-center-z)))))
+   (spans (1- (length (the supports))))
+   (span-runs (append (list (the approach-length))
+                      (make-list (the span-count) :initial-element (the span-length))
+                      (list (the approach-length))))
+   (span-starts (loop for run in (the span-runs)
+                      for start = 0 then (+ start previous)
+                      for previous = run
+                      collect start))
+   (wheelbase (the reference-pod wheelbase))
+   ;; Where each pod's bogie sits, and how steeply: (centre slope).
+   (pod-seats (mapcar #'(lambda (position) (the (seat-at (the (station-of position)))))
+                      (the cable-pod-positions)))
+   ;; For the undrawn pods: at every support, and a little to either
+   ;; side, where the whole bogie stands on one half of a shoe.
+   (passage-seats (loop for support in (append (the span-starts) (list (the cable-run)))
+                        append (loop for offset in '(-400 0 400)
+                                     collect (the (seat-at (+ support offset))))))
+   ;; The main spans keep the clearance asked for.  The approach spans
+   ;; start from the rail, which has its own; they must not dip below it.
+   (least-clearance (- (loop for index from 1 to (the span-count)
+                             minimize (the (span index) lowest-z))
+                       (the hang-depth)))
+   (approach-dip (- (the beam-center-z)
+                    (min (the (span 0) lowest-z)
+                         (the (span (1- (the spans))) lowest-z))))
+   (tensioner-travel (* 12.0e-6 (the cable-run) (the temperature-range)))
+   (longest-lowering (- (the support-z) (the hang-depth)))
+
+   ;; Every bogie and pod against everything that holds the track up:
+   ;; the pods as drawn, and an undrawn one standing at every support.
+   (clashes (find-clashes (append (list-elements (the cable-pod))
+                                  (list-elements (the passage-pod))
+                                  (the neighbourhood pods))
+                          (append (list-elements (the tower))
+                                  (list (the near-anchor) (the far-anchor) (the far-rail))
+                                  (list-elements (the far-pole))
+                                  (the neighbourhood structures))))
+
+   (checks (list :tension (>= (the safety-factor) (the required-safety-factor))
+                 :gradient (<= (the design-gradient) (the gradient-limit))
+                 :clearance (>= (the least-clearance) (- (the clearance) 1))
+                 :approach (<= (the approach-dip) 1)
+                 :passage (null (the clashes))))
+
+   ;; What the model has to say for itself, as (topic finding verdict):
+   ;; the verdict is :ok or :fails, or nil where nothing is judged.
+   (findings
+    (flet ((verdict (key) (if (getf (the checks) key) :ok :fails)))
+      (list (list "The line"
+                  (format nil "~d m of cable: ~d main span~:p of ~d m, approach spans of ~d m"
+                          (round (the cable-run) 1000) (the span-count)
+                          (round (the span-length) 1000) (round (the approach-length) 1000))
+                  nil)
+            (list "The cable"
+                  (format nil "~d mm, ~,1f kg/m, breaking force ~d kN, held at ~d kN"
+                          (the cable-diameter) (the cable-mass-per-m)
+                          (round (the breaking-force) 1000) (round (the cable-tension-kn)))
+                  nil)
+            (list "Sag at mid-span"
+                  (format nil "~,2f m: ~,2f m the cable's own, ~,2f m under ~d pod~:p"
+                          (/ (the design-sag) 1000) (/ (the self-sag) 1000)
+                          (/ (the pod-sag) 1000) (the pods-per-span))
+                  nil)
+            (list "Saddle height"
+                  (format nil "~,1f m: ~,1f m clearance, ~,1f m of pod, ~,1f m of sag"
+                          (/ (the support-z) 1000) (/ (the clearance) 1000)
+                          (/ (the hang-depth) 1000) (/ (the design-sag) 1000))
+                  nil)
+            (list "Tension"
+                  (format nil "safety factor ~,2f against ~,2f asked"
+                          (the safety-factor) (the required-safety-factor))
+                  (verdict :tension))
+            (list "Gradient"
+                  (format nil "steepest cable ~,1f % against ~,1f % allowed; ~a"
+                          (* 100 (the design-gradient)) (* 100 (the gradient-limit))
+                          (if (the least-approach)
+                              (format nil "the shortest approach span within it is ~d m"
+                                      (ceiling (the least-approach) 1000))
+                              "no approach span climbs to these saddles within it"))
+                  (verdict :gradient))
+            (list "Clearance"
+                  (format nil "least under a pod on the main spans as drawn, ~,2f m"
+                          (/ (the least-clearance) 1000))
+                  (verdict :clearance))
+            (list "Approach spans"
+                  (format nil "dip ~,2f m below the rail they leave"
+                          (/ (max 0 (the approach-dip)) 1000))
+                  (verdict :approach))
+            (list "Passage"
+                  (format nil "a bogie at every pole, tower and anchor, and the pods as drawn: ~d clash~:*~[es~;~:;es~]"
+                          (length (the clashes)))
+                  (verdict :passage))
+            (list "Tensioner travel"
+                  (format nil "~,2f m over ~d K" (/ (the tensioner-travel) 1000)
+                          (the temperature-range))
+                  nil)
+            (list "Longest lowering"
+                  (format nil "~,1f m, from a saddle to the ground"
+                          (/ (the longest-lowering) 1000))
+                  nil)))))
+
+  :functions
+  (("Distance along the ground from the near rail end to POSITION, which
+counts in spans."
+    station-of
+    (position)
+    (let ((index (max 0 (min (floor position) (1- (the spans))))))
+      (+ (nth index (the span-starts))
+         (* (- position index) (nth index (the span-runs))))))
+   ("The point of the track axis at STATION: on the cables, or on the rail
+at either end of them."
+    axis-point-at
+    (station)
+    (if (< 0 station (the cable-run))
+        (let ((index (position-if #'(lambda (start) (<= start station))
+                                  (the span-starts) :from-end t)))
+          (the (span index)
+               (point-at (/ (- station (nth index (the span-starts)))
+                            (nth index (the span-runs))))))
+        (make-point (+ (the start-x) station) 0 (the beam-center-z))))
+   ("Centre and slope of a bogie at STATION, each axle standing on the track."
+    seat-at
+    (station)
+    (let ((rear (the (axis-point-at (- station (half (the wheelbase))))))
+          (front (the (axis-point-at (+ station (half (the wheelbase)))))))
+      (list (midpoint rear front)
+            (/ (- (get-z front) (get-z rear)) (the wheelbase))))))
+
+  :hidden-objects
+  ((reference-pod :type 'pod-unit
+                  :gauge (the gauge) :head-radius (the head-radius)
+                  :gradient-limit (the gradient-limit))
+   (passage-pod :type 'pod-unit :sequence (:size (length (the passage-seats)))
+                :center (first (nth (the-child index) (the passage-seats)))
+                :slope (second (nth (the-child index) (the passage-seats)))
+                :orientation (alignment :right (make-vector 1 0 0) :top (make-vector 0 0 1))
+                :gauge (the gauge) :head-radius (the head-radius)
+                :gradient-limit (the gradient-limit)))
+
+  :objects
+  ((neighbourhood :type 'neighbourhood
+                  :line-length (the line-length)
+                  :gauge (the gauge) :head-radius (the head-radius)
+                  :gradient-limit (the gradient-limit)
+                  :beam-center-z (the beam-center-z))
+   (near-anchor :type 'anchor-station
+                :cable-point (first (the supports))
+                :gauge (the gauge) :head-radius (the head-radius)
+                :outward 1)
+   (far-anchor :type 'anchor-station
+               :cable-point (lastcar (the supports))
+               :gauge (the gauge) :head-radius (the head-radius)
+               :outward -1 :tensioner? t)
+   (tower :type 'span-tower :sequence (:size (1+ (the span-count)))
+          :cable-point (nth (1+ (the-child index)) (the supports))
+          :slope-in (the (span (the-child index)) (slope-at 1))
+          :slope-out (the (span (1+ (the-child index))) (slope-at 0))
+          :gauge (the gauge) :head-radius (the head-radius))
+   (span :type 'cable-span :sequence (:size (the spans))
+         :start (nth (the-child index) (the supports))
+         :end (nth (1+ (the-child index)) (the supports))
+         :tension (the tension) :unit-weight (the unit-weight)
+         :pod-load (the pod-load)
+         :pod-fractions (let ((index (the-child index)))
+                          (loop for position in (the cable-pod-positions)
+                                when (= (min (floor position) (1- (the spans))) index)
+                                  collect (- position index)))
+         :gauge (the gauge))
+   (cable-pod :type 'pod-unit :sequence (:size (length (the cable-pod-positions)))
+              :center (first (nth (the-child index) (the pod-seats)))
+              :slope (second (nth (the-child index) (the pod-seats)))
+              :orientation (alignment :right (make-vector 1 0 0) :top (make-vector 0 0 1))
+              :gauge (the gauge) :head-radius (the head-radius)
+              :gradient-limit (the gradient-limit)
+              :drop-fraction (or (nth (the-child index) (the cable-pod-drops)) 0)
+              :pod-color (or (nth (the-child index) (the cable-pod-colors)) :steel-blue))
+   (far-rail :type 'rail-segment
+             :start (make-point (the end-x) 0 (the beam-center-z))
+             :end (make-point (+ (the end-x) (the far-rail-length)) 0 (the beam-center-z))
+             :gauge (the gauge) :head-radius (the head-radius))
+   (far-pole :type 'utility-pole :sequence (:size 2)
+             :base-x (+ (the end-x) 4000 (* (the-child index) 12000))
+             :base-y -1200
+             :beam-point (make-point (+ (the end-x) 4000 (* (the-child index) 12000))
+                                     0 (the beam-center-z))
+             :gauge (the gauge) :head-radius (the head-radius))
+   (ground :type 'box
+           :width (+ (the cable-run) (the far-rail-length)) :length 9000 :height 50
+           :center (make-point (+ (the start-x)
+                                  (half (+ (the cable-run) (the far-rail-length))))
+                               0 -25)
+           :display-controls (list :color :dark-olive-green))))

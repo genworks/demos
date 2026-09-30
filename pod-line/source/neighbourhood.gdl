@@ -1,0 +1,153 @@
+;;;; -*- Mode: Lisp; Package: pod-line-demo -*-
+
+;; Copyright © 2026 Genworks International
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Affero General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.  Distributed WITHOUT
+;; ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+;;;;
+;;;; The neighbourhood: a main rail run like a utility line past homes.
+;;;; A personally owned pod leaves the main line on its home's spur and
+;;;; is lowered by its winch to a ground pad, for step-free boarding.
+
+(in-package :pod-line-demo)
+
+(define-object home-lot (track-mixin base-object)
+  :documentation (:description "A house with its own spur off the main line,
+two yard poles, a switch, a landing pad and the owner's pod.")
+  :input-slots
+  (junction-x beam-center-z
+   (bend 4500) (setback 13000) (park-back 1800) (pole-offset 1200)
+   (house-width 7000) (house-length 8000) (house-height 3200) (roof-rise 2000)
+   (pad-thickness 150) (pod-color :firebrick) (drop-fraction 1.0))
+  :computed-slots
+  ((bz (the beam-center-z))
+   (p0 (make-point (the junction-x) 0 (the bz)))
+   (p1 (make-point (+ (the junction-x) (the bend)) (the bend) (the bz)))
+   (p2 (make-point (+ (the junction-x) (the bend)) (the setback) (the bz)))
+   (pad-x (+ (the junction-x) (the bend)))
+   (pad-y (- (the setback) (the park-back)))
+   (house-right (- (the pad-x) 2200))
+   (house-left (- (the house-right) (the house-width)))
+   (house-front (- (the pad-y) (half (the house-length)))))
+  :hidden-objects
+  ((passage-pod :type 'pod-unit
+                :center (the p2)
+                :orientation (alignment :right (make-vector 0 1 0) :top (make-vector 0 0 1))
+                :gauge (the gauge) :head-radius (the head-radius)
+                :gradient-limit (the gradient-limit)))
+  :objects
+  ((spur-a :type 'rail-segment :start (the p0) :end (the p1)
+           :gauge (the gauge) :head-radius (the head-radius))
+   (spur-b :type 'rail-segment :start (the p1) :end (the p2)
+           :gauge (the gauge) :head-radius (the head-radius))
+   (switch :type 'box :width 1200 :length (+ (twice (the outer-half)) 200)
+           :height (+ (- (the girder-top) (the girder-bottom)) 100)
+           :center (translate-along-vector (the p0) (make-vector 0 0 1)
+                                           (half (+ (the girder-top) (the girder-bottom))))
+           :display-controls (list :color :goldenrod))
+   (yard-pole :type 'utility-pole :sequence (:size 2)
+              :base-x (+ (the pad-x) (the pole-offset))
+              :base-y (if (zerop (the-child index)) (the bend) (the setback))
+              :beam-point (if (zerop (the-child index)) (the p1) (the p2))
+              :gauge (the gauge) :head-radius (the head-radius))
+   (pad :type 'box :width 3600 :length 4000 :height (the pad-thickness)
+        :center (make-point (the pad-x) (the pad-y) (half (the pad-thickness)))
+        :display-controls (list :color :gray))
+   (house :type 'box
+          :width (the house-width) :length (the house-length) :height (the house-height)
+          :center (make-point (half (+ (the house-left) (the house-right)))
+                              (the pad-y) (half (the house-height)))
+          :display-controls (list :color :feldspar))
+   (roof :type 'global-polygon-projection
+         :vertex-list (list (make-point (- (the house-left) 300) (the house-front) (the house-height))
+                            (make-point (+ (the house-right) 300) (the house-front) (the house-height))
+                            (make-point (half (+ (the house-left) (the house-right)))
+                                        (the house-front)
+                                        (+ (the house-height) (the roof-rise)))
+                            (make-point (- (the house-left) 300) (the house-front) (the house-height)))
+         :projection-vector (make-vector 0 1 0)
+         :projection-depth (the house-length)
+         :display-controls (list :color :sienna))
+   (front-door :type 'box :width 40 :length 1000 :height 2100
+               :center (make-point (+ (the house-right) 20) (the pad-y) 1050)
+               :display-controls (list :color :green-hunter))
+   (walk :type 'box :width 2200 :length 1200 :height 60
+         :center (make-point (- (the pad-x) 2900) (the pad-y) 30)
+         :display-controls (list :color :grey-light))
+   (pod :type 'pod-unit
+        :center (make-point (the pad-x) (the pad-y) (the bz))
+        :orientation (alignment :right (make-vector 0 1 0) :top (make-vector 0 0 1))
+        :gauge (the gauge) :head-radius (the head-radius)
+        :gradient-limit (the gradient-limit)
+        :ground-z (the pad-thickness)
+        :drop-fraction (the drop-fraction)
+        :pod-color (the pod-color))))
+
+(define-object neighbourhood (track-mixin base-object)
+  :documentation (:description "A main rail on utility poles run past homes, each
+with its spur, a lane under the line and one pod under way.")
+  :input-slots
+  (("Length of main line shown" line-length 40000)
+   ("Main-line pole spacing, like utility poles" pole-spacing 12000)
+   ("Height of track axis above ground" beam-center-z 6500)
+   ("Pole distance from track axis" pole-offset 1200)
+   ("Main-line x where each home spur branches" home-junctions (list -13000 3000))
+   ("Colour of each owner's pod" home-pod-colors (list :firebrick :orange-mandarin))
+   ("0 = pod up at travel height, 1 = on its ground pad" home-drop-fractions (list 1.0 0.5))
+   ("Position of a pod travelling on the main line" travel-pod-x 14000)
+   ("Width of the lane under the line" road-width 3500))
+
+  :computed-slots
+  ((pole-count (1+ (floor (- (the line-length) 4000) (the pole-spacing))))
+   ;; The pods as drawn, and an undrawn one standing at every pole.
+   (pods (append (list (the travelling-pod))
+                 (list-elements (the passage-pod))
+                 (loop for home in (list-elements (the home))
+                       collect (the-object home pod)
+                       collect (the-object home passage-pod))))
+   (structures (append (list (the main-rail))
+                       (list-elements (the main-pole))
+                       (loop for home in (list-elements (the home))
+                             append (list (the-object home spur-a)
+                                          (the-object home spur-b))
+                             append (list-elements (the-object home yard-pole))))))
+
+  :hidden-objects
+  ((passage-pod :type 'pod-unit :sequence (:size (the pole-count))
+                :center (the (main-pole (the-child index)) beam-point)
+                :orientation (alignment :right (make-vector 1 0 0) :top (make-vector 0 0 1))
+                :gauge (the gauge) :head-radius (the head-radius)
+                :gradient-limit (the gradient-limit)))
+
+  :objects
+  ((main-rail :type 'rail-segment
+              :start (make-point (- (half (the line-length))) 0 (the beam-center-z))
+              :end (make-point (half (the line-length)) 0 (the beam-center-z))
+              :gauge (the gauge) :head-radius (the head-radius))
+   (main-pole :type 'utility-pole :sequence (:size (the pole-count))
+              :base-x (+ (- (half (the line-length))) 2000 (* (the-child index) (the pole-spacing)))
+              :base-y (- (the pole-offset))
+              :beam-point (make-point (+ (- (half (the line-length))) 2000
+                                         (* (the-child index) (the pole-spacing)))
+                                      0 (the beam-center-z))
+              :gauge (the gauge) :head-radius (the head-radius))
+   (road :type 'box :width (the line-length) :length (the road-width) :height 50
+         :center (make-point 0 (+ 500 (half (the road-width))) -25)
+         :display-controls (list :color :grey-slate-dark))
+   (home :type 'home-lot :sequence (:size (length (the home-junctions)))
+         :junction-x (nth (the-child index) (the home-junctions))
+         :pod-color (nth (the-child index) (the home-pod-colors))
+         :drop-fraction (nth (the-child index) (the home-drop-fractions))
+         :beam-center-z (the beam-center-z)
+         :gauge (the gauge) :head-radius (the head-radius)
+         :gradient-limit (the gradient-limit))
+   (travelling-pod :type 'pod-unit
+                   :center (make-point (the travel-pod-x) 0 (the beam-center-z))
+                   :orientation (alignment :right (make-vector 1 0 0) :top (make-vector 0 0 1))
+                   :gauge (the gauge) :head-radius (the head-radius)
+                   :gradient-limit (the gradient-limit)
+                   :pod-color :steel-blue)))

@@ -1,0 +1,200 @@
+;;;; -*- Mode: Lisp; Package: pod-line-demo -*-
+
+;; Copyright © 2026 Genworks International
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Affero General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.  Distributed WITHOUT
+;; ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+;;;;
+;;;; Web UI on the shared demo chrome (demos-common:demo-ui-mixin):
+;;;; this file keeps only the pod line's page content, form controls,
+;;;; and model hookup.  session-control-mixin keeps public instances
+;;;; mortal: without it every visit and every crawler hit mints an
+;;;; immortal instance.
+;;;;
+;;;; The page speaks metres; the model is in millimetres.
+
+(in-package :pod-line-demo)
+
+(define-object pod-line-ui (demos-common:demo-ui-mixin
+                            session-control-mixin base-html-page)
+
+  :documentation
+  (:description "Interactive pod line demo page: parameter form, live
+viewport on the whole line or a part of it, and the design checks the
+model makes of itself."
+   :author "Genworks International")
+
+  :input-slots
+  ((title "Suspended Pod Line Demo")
+   (demo-slug "pod-line")
+   (view-projection-key :pod-line-view)
+   (view-projection-vector (unitize-vector (make-vector 0.6 -1 0.35)))
+
+   (span-length 150 :settable)
+   (span-count 2 :settable)
+   (approach-length 60 :settable)
+   (cable-tension 200 :settable)
+   (cable-diameter 32 :settable)
+   (gauge 500 :settable)
+   (pod-mass 800 :settable)
+   (pods-per-span 2 :settable)
+   (clearance 5 :settable))
+
+  :computed-slots
+  ((source-pane-objects '(pod-line track-mixin rail-segment utility-pole pod-unit
+                          home-lot neighbourhood cable-span saddle-pair span-tower
+                          anchor-station strut box-beam pod-line-ui
+                          demos-common:demo-ui-mixin))
+   (source-pane-functions '(find-clashes oriented-boxes-clash? oriented-box
+                            boxes-clash? leaf-name))
+
+   ;; The line is a kilometre long and a pod two metres wide, so the
+   ;; viewport shows the part the Show menu names.  The pod at a tower
+   ;; or a pole is one of the undrawn ones the passage check stands
+   ;; there.
+   (objects
+    (let ((model (the model)))
+      (ecase (the focus-control value)
+        (:transition
+         (append (list (the-object model neighbourhood) (the-object model near-anchor)
+                       (the-object model (span 0)) (the-object model (tower 0)))
+                 (loop for pod in (list-elements (the-object model cable-pod))
+                       for position in (the-object model cable-pod-positions)
+                       when (< position 1) collect pod)))
+        (:line (list model))
+        (:tower (list (the-object model (tower 0)) (the-object model (passage-pod 4))))
+        (:rail (list (the-object model neighbourhood main-rail)
+                     (the-object model neighbourhood (main-pole 1))
+                     (the-object model neighbourhood (passage-pod 1)))))))
+
+   (body
+    (with-lhtml-string ()
+      (:div :class "max-w-5xl mx-auto p-8"
+        (str (the (page-intro "Suspended Pod Line"
+                              "Personal pods on a rail run like a utility line past homes, carried between neighbourhoods on twin track cables.  One bogie serves both, the towers are sized by the sag, and the model checks that a pod passes every support.")))
+        (str (the (card :title "Parameters"
+                        :content (with-lhtml-string ()
+                                   (:div :class "p-6"
+                                     (str (the control-form)))))))
+        (str (the (card :title "3D View"
+                        :content (with-lhtml-string ()
+                                   (:div :class "p-6 relative" :style "height: 600px;"
+                                     (str (the viewport-area div)))))))
+        (str (the checks-section div))
+        (str (the (card :title "Source Code"
+                        :subtitle "The complete Gendl source for this demo: object definitions reconstituted live from the in-memory definitions serving this page, the passage check's functions via the Lisp's own source records."
+                        :content (the source-code-panes)))))))
+
+   ;; Ajax-refreshable section: with live-on-change parameters, this
+   ;; card re-renders on every model rebuild (see checks-section).
+   (checks-card
+    (the (card :title "Design Checks"
+               :subtitle "A sketch of the method, not a design: the rope's weight and strength are rules of thumb, and wind is not considered."
+               :content (with-lhtml-string ()
+                          (:div :class "overflow-x-auto"
+                            (str (the findings-table)))))))
+
+   (findings-table
+    (with-lhtml-string ()
+      (:table :class "min-w-full table-fixed divide-y divide-gray-200"
+        (:tbody :class "divide-y divide-gray-100"
+          (dolist (finding (the model findings))
+            (destructuring-bind (topic text verdict) finding
+              (htm
+               (:tr :class "hover:bg-gray-50"
+                 (:td :class "px-6 py-3 w-40 text-sm font-medium text-gray-900"
+                      (str topic))
+                 (:td :class "px-6 py-3 text-sm text-gray-700"
+                      (str text))
+                 (:td :class "px-6 py-3 w-24 text-right"
+                      (when verdict
+                        (htm (:span :class (if (eql verdict :ok)
+                                               "inline-flex rounded-full px-2 py-0.5 text-xs font-semibold bg-green-100 text-green-800"
+                                               "inline-flex rounded-full px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-800")
+                                    (str (if (eql verdict :ok) "ok" "fails"))))))))))))))
+
+   (control-form
+    (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
+      (str (the (param-field "Span (m)"            (the span-length-control))))
+      (str (the (param-field "Main Spans"          (the span-count-control))))
+      (str (the (param-field "Approach Span (m)"   (the approach-length-control))))
+      (str (the (param-field "Clearance (m)"       (the clearance-control))))
+      (str (the (param-field "Cable Tension (kN)"  (the cable-tension-control))))
+      (str (the (param-field "Cable Diameter (mm)" (the cable-diameter-control))))
+      (str (the (param-field "Gauge (mm)"          (the gauge-control))))
+      (str (the (param-field "Show"                (the focus-control))))
+      (str (the (param-field "Pod Mass (kg)"       (the pod-mass-control))))
+      (str (the (param-field "Pods per Span"       (the pods-per-span-control)))))))
+
+  :objects
+  ((span-length-control :type 'number-form-control
+                        :default (the span-length)
+                        :ajax-submit-on-change? t
+                        :domain :number :min 100 :max 600 :step 10)
+
+   (span-count-control :type 'number-form-control
+                       :default (the span-count)
+                       :ajax-submit-on-change? t
+                       :domain :number :min 1 :max 6 :step 1)
+
+   (approach-length-control :type 'number-form-control
+                            :default (the approach-length)
+                            :ajax-submit-on-change? t
+                            :domain :number :min 40 :max 200 :step 5)
+
+   (clearance-control :type 'number-form-control
+                      :default (the clearance)
+                      :ajax-submit-on-change? t
+                      :domain :number :min 3 :max 8 :step 0.25)
+
+   (cable-tension-control :type 'number-form-control
+                          :default (the cable-tension)
+                          :ajax-submit-on-change? t
+                          :domain :number :min 80 :max 400 :step 10)
+
+   (cable-diameter-control :type 'number-form-control
+                           :default (the cable-diameter)
+                           :ajax-submit-on-change? t
+                           :domain :number :min 24 :max 60 :step 2)
+
+   (gauge-control :type 'number-form-control
+                  :default (the gauge)
+                  :ajax-submit-on-change? t
+                  :domain :number :min 400 :max 800 :step 50)
+
+   (pod-mass-control :type 'number-form-control
+                     :default (the pod-mass)
+                     :ajax-submit-on-change? t
+                     :domain :number :min 400 :max 1500 :step 50)
+
+   (pods-per-span-control :type 'number-form-control
+                          :default (the pods-per-span)
+                          :ajax-submit-on-change? t
+                          :domain :number :min 1 :max 6 :step 1)
+
+   (focus-control :type 'menu-form-control
+                  :default :transition
+                  :size 1
+                  :ajax-submit-on-change? t
+                  :choice-plist '(:transition "Rail to cable"
+                                  :line "The whole line"
+                                  :tower "A pod at a tower"
+                                  :rail "A pod at a pole"))
+
+   (model :type 'pod-line
+          :span-length (* 1000 (the span-length-control value))
+          :span-count (the span-count-control value)
+          :approach-length (* 1000 (the approach-length-control value))
+          :clearance (* 1000 (the clearance-control value))
+          :cable-tension-kn (the cable-tension-control value)
+          :cable-diameter (the cable-diameter-control value)
+          :gauge (the gauge-control value)
+          :pod-mass-kg (the pod-mass-control value)
+          :pods-per-span (the pods-per-span-control value))
+
+   (checks-section :type 'base-html-div
+                   :inner-html (the checks-card))))

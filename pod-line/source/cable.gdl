@@ -1,0 +1,230 @@
+;;;; -*- Mode: Lisp; Package: pod-line-demo -*-
+
+;; Copyright © 2026 Genworks International
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Affero General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.  Distributed WITHOUT
+;; ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+;;;;
+;;;; The cable line: twin track cables between towers for the long
+;;;; runs, and the stations where they take over from the rail.
+
+(in-package :pod-line-demo)
+
+(define-object strut (base-object)
+  :documentation (:description "Round member from START to END.")
+  :input-slots
+  (start end (radius 40) (color :dim-gray))
+  :objects
+  ((rod :type 'cylinder
+        :radius (the radius)
+        :length (3d-distance (the start) (the end))
+        :center (midpoint (the start) (the end))
+        :orientation (alignment :rear (unitize-vector
+                                       (subtract-vectors (the end) (the start))))
+        :display-controls (list :color (the color)))))
+
+(define-object cable-span (base-object)
+  :documentation (:description "Twin track cables hung between two supports, which
+may stand at different heights.  The shape follows the general cable
+theorem: the sag below the chord is the bending moment of the simply
+supported beam carrying the same loads, divided by the horizontal
+tension.  Tension, weight and pod load are those of ONE cable.")
+  :input-slots
+  (start end
+   ("Horizontal tension in one cable, N" tension)
+   ("Weight of one cable per length, N/mm" unit-weight)
+   ("Where pods stand, as fractions of the span" pod-fractions nil)
+   ("One pod's weight on one cable, N" pod-load 0)
+   (gauge 500) (segments 24))
+  :computed-slots
+  ((run (sqrt (+ (expt (- (get-x (the end)) (get-x (the start))) 2)
+                 (expt (- (get-y (the end)) (get-y (the start))) 2))))
+   (rise (- (get-z (the end)) (get-z (the start))))
+   (heading (unitize-vector (make-vector (- (get-x (the end)) (get-x (the start)))
+                                         (- (get-y (the end)) (get-y (the start)))
+                                         0)))
+   (lateral (cross-vectors (make-vector 0 0 1) (the heading)))
+   (stations (sort (remove-duplicates
+                    (append (loop for i from 0 to (the segments)
+                                  collect (/ i (float (the segments))))
+                            (the pod-fractions))
+                    :test #'(lambda (a b) (< (abs (- a b)) 1.0e-6)))
+                   #'<))
+   (axis-points (mapcar #'(lambda (s) (the (point-at s))) (the stations)))
+   (lowest-z (apply #'min (mapcar #'get-z (the axis-points))))
+   (max-sag (apply #'max (mapcar #'(lambda (s) (the (sag-at s))) (the stations))))
+   (max-slope (max (abs (the (slope-at 0))) (abs (the (slope-at 1)))))
+   (max-tension (* (the tension) (sqrt (1+ (expt (the max-slope) 2))))))
+  :functions
+  ((moment-at
+    (s)
+    (let ((x (* s (the run))) (l (the run)))
+      (+ (* 0.5 (the unit-weight) x (- l x))
+         (loop for f in (the pod-fractions)
+               for a = (* f l)
+               sum (* (the pod-load)
+                      (if (<= x a) (/ (* x (- l a)) l) (/ (* a (- l x)) l)))))))
+   (shear-at
+    (s)
+    (let ((x (* s (the run))) (l (the run)))
+      (+ (* (the unit-weight) (- (half l) x))
+         (loop for f in (the pod-fractions)
+               for a = (* f l)
+               sum (* (the pod-load) (if (< x a) (/ (- l a) l) (- (/ a l))))))))
+   (sag-at (s) (/ (the (moment-at s)) (the tension)))
+   (slope-at (s) (- (/ (the rise) (the run)) (/ (the (shear-at s)) (the tension))))
+   (point-at
+    (s)
+    (let ((on-chord (translate-along-vector (the start) (the heading) (* s (the run)))))
+      (make-point (get-x on-chord) (get-y on-chord)
+                  (- (+ (get-z (the start)) (* s (the rise))) (the (sag-at s)))))))
+  :objects
+  ((cable :type 'global-polyline :sequence (:size 2)
+          :vertex-list (let ((shift (* (- (the-child index) 0.5) (the gauge))))
+                         (mapcar #'(lambda (point)
+                                     (translate-along-vector point (the lateral) shift))
+                                 (the axis-points)))
+          :display-controls (list :color :black :line-thickness 2))))
+
+(define-object saddle-pair (track-mixin base-object)
+  :documentation (:description "Two saddles hung from a beam above the track.  Each
+cable lies in a shoe held from its OUTER side, beyond the wheels, which
+leaves the top of the cable to the wheels and the gap between the cables
+to the bogie's spine.  A shoe is two halves, one along the cable as it
+arrives and one along it as it leaves.  The line runs along +X.")
+  :input-slots
+  (cable-point (beam-rise 900) (saddle-length 1600)
+   ("Rise over run of the cable arriving" slope-in 0)
+   ("Rise over run of the cable leaving" slope-out 0))
+  :computed-slots
+  ((px (get-x (the cable-point)))
+   (py (get-y (the cable-point)))
+   (pz (get-z (the cable-point)))
+   (hanger-offset (+ (half (the gauge)) (half (the wheel-width)) 70))
+   (shoe-inner (- (half (the gauge)) (the head-radius) 10))
+   (shoe-outer (+ (the hanger-offset) 20)))
+  :objects
+  ((hanger :type 'box :sequence (:size 2)
+           :width 120 :length 40
+           :height (+ (the beam-rise) (the head-radius) 50)
+           :center (make-point (the px)
+                               (+ (the py) (* (if (zerop (the-child index)) -1 1)
+                                              (the hanger-offset)))
+                               (- (+ (the pz) (the beam-rise))
+                                  (half (+ (the beam-rise) (the head-radius) 50))))
+           :display-controls (list :color :dim-gray))
+   (shoe :type 'box :sequence (:size 4)
+         :width (half (the saddle-length))
+         :length (- (the shoe-outer) (the shoe-inner)) :height 50
+         :center (let* ((leaving? (oddp (the-child index)))
+                        (slope (if leaving? (the slope-out) (the slope-in)))
+                        (tangent (unitize-vector (make-vector 1 0 slope)))
+                        (normal (cross-vectors tangent (make-vector 0 1 0))))
+                   (translate-along-vector
+                    (translate-along-vector
+                     (translate-along-vector (the cable-point) tangent
+                                             (* (if leaving? 1 -1)
+                                                (/ (the saddle-length) 4)))
+                     normal (- (+ (the head-radius) 25)))
+                    (make-vector 0 1 0)
+                    (* (if (< (the-child index) 2) -1 1)
+                       (half (+ (the shoe-outer) (the shoe-inner))))))
+         :orientation (alignment :right (unitize-vector
+                                         (make-vector 1 0 (if (oddp (the-child index))
+                                                              (the slope-out)
+                                                              (the slope-in))))
+                                 :rear (make-vector 0 1 0))
+         :display-controls (list :color :goldenrod))))
+
+(define-object span-tower (track-mixin base-object)
+  :documentation (:description "Tapered mast beside the line with an arm out over
+the cables, which rest in a pair of saddles hung from the arm.")
+  :input-slots
+  (cable-point (slope-in 0) (slope-out 0)
+   (mast-offset 2400) (arm-rise 900) (base-radius 260) (top-radius 150))
+  :computed-slots
+  ((px (get-x (the cable-point)))
+   (py (get-y (the cable-point)))
+   (mast-y (- (the py) (the mast-offset)))
+   (arm-z (+ (get-z (the cable-point)) (the arm-rise)))
+   (top-z (+ (the arm-z) 300))
+   (arm-length (+ (the mast-offset) (the saddles hanger-offset) 200)))
+  :objects
+  ((mast :type 'cone
+         :radius (the base-radius)
+         :radius-1 (the base-radius) :radius-2 (the top-radius)
+         :length (the top-z)
+         :center (make-point (the px) (the mast-y) (half (the top-z)))
+         :orientation (alignment :rear (make-vector 0 0 1))
+         :display-controls (list :color :wood-dark))
+   (footing :type 'box :width 900 :length 900 :height 300
+            :center (make-point (the px) (the mast-y) 150)
+            :display-controls (list :color :dim-gray))
+   (arm :type 'box :width 220 :length (the arm-length) :height 260
+        :center (make-point (the px) (+ (the mast-y) (half (the arm-length))) (the arm-z))
+        :display-controls (list :color :dim-gray))
+   (saddles :type 'saddle-pair
+            :cable-point (the cable-point)
+            :gauge (the gauge) :head-radius (the head-radius)
+            :slope-in (the slope-in) :slope-out (the slope-out)
+            :beam-rise (the arm-rise))))
+
+(define-object anchor-station (track-mixin base-object)
+  :documentation (:description "Where the rail ends and the cables begin.  The cables
+run on from the girder's running heads and are made fast in its end,
+which hangs from a portal over the track; the portal is guyed back to
+two ground anchors against the cables' pull.  OUTWARD is 1 when the
+cables leave toward +X, -1 toward -X.  With TENSIONER? the station
+carries the counterweights that keep the tension through the seasons.")
+  :input-slots
+  (cable-point (outward 1) (tensioner? nil)
+   (leg-offset 1700) (beam-rise 900) (backstay-run 7000) (backstay-spread 1200))
+  :computed-slots
+  ((px (get-x (the cable-point)))
+   (py (get-y (the cable-point)))
+   (top-z (+ (get-z (the cable-point)) (the beam-rise)))
+   (hanger-height (- (the beam-rise) 130 (the girder-top))))
+  :objects
+  ((leg :type 'cylinder :sequence (:size 2)
+        :radius 160 :length (the top-z)
+        :center (make-point (the px)
+                            (+ (the py) (* (if (zerop (the-child index)) -1 1) (the leg-offset)))
+                            (half (the top-z)))
+        :orientation (alignment :rear (make-vector 0 0 1))
+        :display-controls (list :color :wood-dark))
+   (crossbeam :type 'box :width 260 :length (+ (twice (the leg-offset)) 400) :height 260
+              :center (make-point (the px) (the py) (the top-z))
+              :display-controls (list :color :dim-gray))
+   (girder-hanger :type 'box :sequence (:size 2)
+                  :width 120 :length 40 :height (the hanger-height)
+                  :center (make-point (- (the px) (* (the outward) 60))
+                                      (+ (the py) (* (if (zerop (the-child index)) -1 1)
+                                                     (- (the outer-half) 60)))
+                                      (+ (get-z (the cable-point)) (the girder-top)
+                                         (half (the hanger-height))))
+                  :display-controls (list :color :dim-gray))
+   (anchor-block :type 'box :sequence (:size 2)
+                 :width 1600 :length 1600 :height 600
+                 :center (make-point (- (the px) (* (the outward) (the backstay-run)))
+                                     (+ (the py) (* (if (zerop (the-child index)) -1 1)
+                                                    (+ (the leg-offset) (the backstay-spread))))
+                                     300)
+                 :display-controls (list :color :gray))
+   (backstay :type 'strut :sequence (:size 2)
+             :start (make-point (the px)
+                                (+ (the py) (* (if (zerop (the-child index)) -1 1) (the leg-offset)))
+                                (the top-z))
+             :end (translate-along-vector (the (anchor-block (the-child index)) center)
+                                          (make-vector 0 0 1) 300)
+             :radius 25 :color :black)
+   (counterweight :type 'box :sequence (:size (if (the tensioner?) 2 0))
+                  :width 700 :length 500 :height 2200
+                  :center (make-point (the px)
+                                      (+ (the py) (* (if (zerop (the-child index)) -1 1)
+                                                     (+ (the leg-offset) 500)))
+                                      (* 0.45 (the top-z)))
+                  :display-controls (list :color :goldenrod))))

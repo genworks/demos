@@ -1,0 +1,132 @@
+;;;; -*- Mode: Lisp; Package: pod-line-demo -*-
+
+;; Copyright © 2026 Genworks International
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Affero General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.  Distributed WITHOUT
+;; ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+;;;;
+;;;; The pod and its bogie, the one vehicle of rail and cable alike.
+
+(in-package :pod-line-demo)
+
+(define-object pod-unit (track-mixin base-object)
+  :documentation (:description "Bogie, winch drum, tethers and pod cabin.  CENTER is
+on the track axis; orientation points :right along the line.  Four
+wheels run on the two running heads or cables; a narrow spine comes
+down between them to a pivot, below which winch and pod hang plumb
+whatever the SLOPE of the track.")
+  :input-slots
+  (("Rise over run of the track under the bogie" slope 0)
+   (drop-fraction 0) (ground-z 0)
+   (pod-body-length 1400) (pod-radius 750) (pod-height 1700)
+   (pod-color :steel-blue) (drum-radius 110) (hang-gap 200) (skid-height 100)
+   (wheelbase 600) (spine-width 200) (frame-height 120))
+  :computed-slots
+  ((pitch (atan (the slope)))
+   (along (the (face-normal-vector :right)))
+   (across (the (face-normal-vector :rear)))
+   (plumb (the (face-normal-vector :top)))
+   (tangent (add-vectors (scalar*vector (cos (the pitch)) (the along))
+                         (scalar*vector (sin (the pitch)) (the plumb))))
+   (normal (cross-vectors (the tangent) (the across)))
+   (truck-attitude (alignment :right (the tangent) :rear (the across)))
+   (axle-height (+ (the head-radius) (the wheel-radius)))
+   (spine-top (+ (the axle-height) 40))
+   (spine-bottom (- (+ (the under-track) (half (the frame-height)))))
+   (frame-top (- (the under-track)))
+   (frame-bottom (- (the frame-top) (the frame-height)))
+   (drum-z (- (the frame-bottom) (the drum-radius)))
+   (nominal-pod-top (- (the drum-z) (the drum-radius) (the hang-gap)))
+   (nominal-bottom (- (the nominal-pod-top) (the pod-height) (the skid-height)))
+   (max-drop (- (+ (get-z (the center)) (the nominal-bottom)) (the ground-z)))
+   (drop (* (the drop-fraction) (the max-drop)))
+   (pod-top (- (the nominal-pod-top) (the drop)))
+   (pod-mid (- (the pod-top) (half (the pod-height))))
+   (vertical (alignment :rear (the (face-normal-vector :top))
+                        :right (the (face-normal-vector :right)))))
+  :objects
+  ((wheel :type 'cylinder :sequence (:size 4)
+          :radius (the wheel-radius) :length (the wheel-width)
+          :center (translate-along-vector
+                   (translate-along-vector
+                    (translate-along-vector (the center) (the tangent)
+                                            (* (if (< (the-child index) 2) -1 1)
+                                               (half (the wheelbase))))
+                    (the normal) (the axle-height))
+                   (the across)
+                   (* (if (evenp (the-child index)) -1 1) (half (the gauge))))
+          :display-controls (list :color :black))
+   (axle :type 'cylinder :sequence (:size 2)
+         :radius 30 :length (+ (the gauge) (the wheel-width))
+         :center (translate-along-vector
+                  (translate-along-vector (the center) (the tangent)
+                                          (* (if (zerop (the-child index)) -1 1)
+                                             (half (the wheelbase))))
+                  (the normal) (the axle-height))
+         :display-controls (list :color :dim-gray))
+   (spine :type 'box
+          :width 900 :length (the spine-width)
+          :height (- (the spine-top) (the spine-bottom))
+          :center (translate-along-vector (the center) (the normal)
+                                          (half (+ (the spine-top) (the spine-bottom))))
+          :orientation (the truck-attitude)
+          :display-controls (list :color :grey-slate-dark))
+   (pivot :type 'cylinder
+          :radius 45 :length (+ (the spine-width) 120)
+          :center (translate (the center)
+                             :up (half (+ (the frame-top) (the frame-bottom))))
+          :display-controls (list :color :goldenrod))
+   (winch-frame :type 'box
+                :width (twice (the plumb-reach)) :length 500 :height (the frame-height)
+                :center (translate (the center)
+                                   :up (half (+ (the frame-top) (the frame-bottom))))
+                :display-controls (list :color :grey-slate-dark))
+   (winch-drum :type 'cylinder
+               :radius (the drum-radius) :length 360
+               :center (translate (the center) :up (the drum-z))
+               :display-controls (list :color :goldenrod))
+   (tether :type 'cylinder :sequence (:size 4)
+           :radius 15 :length (- (the drum-z) (the pod-top))
+           :center (translate (the center)
+                              :right (* (if (< (the-child index) 2) -1 1) 0.3 (the pod-body-length))
+                              :rear (* (if (evenp (the-child index)) -1 1) 0.35 (the pod-radius))
+                              :up (half (+ (the drum-z) (the pod-top))))
+           :orientation (the vertical)
+           :display-controls (list :color :black))
+   (dock-plate :type 'box :width 600 :length 600 :height 60
+               :center (translate (the center) :up (+ (the pod-top) 30))
+               :display-controls (list :color :dim-gray))
+   (pod-body :type 'box
+             :width (the pod-body-length) :length (twice (the pod-radius))
+             :height (the pod-height)
+             :center (translate (the center) :up (the pod-mid))
+             :display-controls (list :color (the pod-color)))
+   (pod-end :type 'cylinder :sequence (:size 2)
+            :radius (the pod-radius) :length (the pod-height)
+            :center (translate (the center)
+                               :right (* (- (the-child index) 0.5) (the pod-body-length))
+                               :up (the pod-mid))
+            :orientation (the vertical)
+            :display-controls (list :color (the pod-color)))
+   (side-window :type 'box :sequence (:size 2)
+                :width (* 0.9 (the pod-body-length)) :length 20
+                :height (* 0.35 (the pod-height))
+                :center (translate (the center)
+                                   :rear (* (if (zerop (the-child index)) -1 1)
+                                            (+ (the pod-radius) 10))
+                                   :up (+ (the pod-mid) (* 0.15 (the pod-height))))
+                :display-controls (list :color :dark-slate-blue))
+   (door :type 'box :width 800 :length 30 :height (* 0.85 (the pod-height))
+         :center (translate (the center) :front (+ (the pod-radius) 25)
+                            :up (- (the pod-mid) (* 0.05 (the pod-height))))
+         :display-controls (list :color :teal))
+   (skid :type 'box
+         :width (+ (the pod-body-length) (the pod-radius))
+         :length (* 1.4 (the pod-radius)) :height (the skid-height)
+         :center (translate (the center)
+                            :up (- (the pod-top) (the pod-height) (half (the skid-height))))
+         :display-controls (list :color :dim-gray))))

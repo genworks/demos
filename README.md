@@ -23,6 +23,19 @@ worker that keeps the page itself on the device).  It needs its
 connection all the same: models are built, drawn and saved by the
 lab's engine, and nothing of that is ever answered from a cache.
 
+## The pod line
+
+`pod-line/` began as a model built in the prompt lab: personal pods
+on a rail run like a utility line past homes, each lowered by its
+winch to a pad at its owner's door.  It grew from the question whether
+the line could go the distance on cables.  The rail is a slotted box
+girder and the long runs are twin track cables at the gauge of its
+running heads, so one bogie serves both; the towers are sized by the
+sag; and the model stands a pod at every pole, tower and anchor and
+checks that it passes.  It is a sketch of the method, not a design:
+the rope's weight and strength are rules of thumb, and wind is not
+considered.
+
 ## Issues
 
 Problems with the prompt lab or any demo -- a model it built wrong, a

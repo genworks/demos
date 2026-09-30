@@ -1,0 +1,134 @@
+;;;; -*- Mode: Lisp; Package: pod-line-demo -*-
+
+;; Copyright © 2026 Genworks International
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Affero General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.  Distributed WITHOUT
+;; ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+;;;;
+;;;; The rail, and the running geometry it shares with the cables and
+;;;; the bogie.  One rule holds for both kinds of track: it is held
+;;;; from OUTSIDE and the pod hangs through the MIDDLE, so a bogie
+;;;; passes every pole, saddle and anchor.
+;;;;
+;;;; Units throughout: millimetres, newtons, kilograms.  The line runs
+;;;; along +X.
+
+(in-package :pod-line-demo)
+
+(define-object track-mixin ()
+  :documentation (:description "The running geometry that rail, cable and bogie share.
+The track axis runs midway between the two running heads at the height
+of their centres, and every height here is measured from it.")
+  :input-slots
+  ((gauge 500) (head-radius 16) (wheel-radius 120) (wheel-width 80)
+   ("Steepest track the bogie is to meet, rise over run" gradient-limit 0.15)
+   ("How far along the track the plumb parts under the pivot reach" plumb-reach 500))
+  :computed-slots
+  ((plate 12)
+   (slot-half (- (half (the gauge)) (the head-radius) 25))
+   (inner-half (+ (half (the gauge)) (half (the wheel-width)) 40))
+   (outer-half (+ (the inner-half) (the plate)))
+   (flange-top (- (the head-radius)))
+   (girder-bottom (- (the flange-top) 30))
+   (inside-top (+ (the head-radius) (twice (the wheel-radius)) 50))
+   (girder-top (+ (the inside-top) (the plate)))
+   ;; Nothing of the bogie wider than the slot comes nearer the axis
+   ;; than this from below: a saddle shoe is 50 deep, 60 is kept clear,
+   ;; and on the steepest track the uphill end of what hangs plumb
+   ;; swings up toward the track by its reach times the gradient.
+   (under-track (+ (the head-radius) 110
+                   (* (the plumb-reach) (the gradient-limit))))))
+
+(define-object box-beam (base-object)
+  :documentation (:description "Straight horizontal beam from START to END.")
+  :input-slots
+  (start end (section-width 250) (section-height 350) (color :slate-gray))
+  :computed-slots
+  ((direction (unitize-vector (subtract-vectors (the end) (the start)))))
+  :objects
+  ((beam :type 'box
+         :width (3d-distance (the start) (the end))
+         :length (the section-width) :height (the section-height)
+         :center (midpoint (the start) (the end))
+         :orientation (alignment :right (the direction) :top (make-vector 0 0 1))
+         :display-controls (list :color (the color)))))
+
+(define-object rail-segment (track-mixin base-object)
+  :documentation (:description "Straight slotted box girder from START to END, both
+on the track axis.  The bogie runs inside on two round running heads and
+the pod's hanger comes down through the slot, so the girder can be held
+from above or from either side anywhere along its length.")
+  :input-slots
+  (start end (color :slate-gray))
+  :computed-slots
+  ((direction (unitize-vector (subtract-vectors (the end) (the start))))
+   (across (unitize-vector (cross-vectors (make-vector 0 0 1) (the direction))))
+   (upward (cross-vectors (the direction) (the across)))
+   (run (3d-distance (the start) (the end)))
+   (middle (midpoint (the start) (the end)))
+   (attitude (alignment :right (the direction) :rear (the across))))
+  :objects
+  ((top-plate :type 'box
+              :width (the run) :length (twice (the outer-half)) :height (the plate)
+              :center (translate-along-vector (the middle) (the upward)
+                                              (+ (the inside-top) (half (the plate))))
+              :orientation (the attitude)
+              :display-controls (list :color (the color)))
+   (web :type 'box :sequence (:size 2)
+        :width (the run) :length (the plate)
+        :height (- (the inside-top) (the girder-bottom))
+        :center (translate-along-vector
+                 (translate-along-vector (the middle) (the upward)
+                                         (half (+ (the inside-top) (the girder-bottom))))
+                 (the across)
+                 (* (if (zerop (the-child index)) -1 1)
+                    (+ (the inner-half) (half (the plate)))))
+        :orientation (the attitude)
+        :display-controls (list :color (the color)))
+   (flange :type 'box :sequence (:size 2)
+           :width (the run) :length (- (the inner-half) (the slot-half))
+           :height (- (the flange-top) (the girder-bottom))
+           :center (translate-along-vector
+                    (translate-along-vector (the middle) (the upward)
+                                            (half (+ (the flange-top) (the girder-bottom))))
+                    (the across)
+                    (* (if (zerop (the-child index)) -1 1)
+                       (half (+ (the inner-half) (the slot-half)))))
+           :orientation (the attitude)
+           :display-controls (list :color (the color)))
+   (head :type 'cylinder :sequence (:size 2)
+         :radius (the head-radius) :length (the run)
+         :center (translate-along-vector (the middle) (the across)
+                                         (* (if (zerop (the-child index)) -1 1)
+                                            (half (the gauge))))
+         :orientation (alignment :rear (the direction))
+         :display-controls (list :color :silver))))
+
+(define-object utility-pole (track-mixin base-object)
+  :documentation (:description "Slender pole with an arm out over the girder, which
+hangs from it.  BEAM-POINT is on the track axis.")
+  :input-slots
+  (base-x base-y beam-point (pole-radius 130) (arm-height 220))
+  :computed-slots
+  ((arm-z (+ (get-z (the beam-point)) (the girder-top) (half (the arm-height))))
+   (top-z (+ (the arm-z) (half (the arm-height)) 100))
+   (arm-start (make-point (the base-x) (the base-y) (the arm-z)))
+   (over-track (make-point (get-x (the beam-point)) (get-y (the beam-point)) (the arm-z)))
+   (reach (unitize-vector (subtract-vectors (the over-track) (the arm-start)))))
+  :objects
+  ((pole :type 'cylinder
+         :radius (the pole-radius) :length (the top-z)
+         :center (make-point (the base-x) (the base-y) (half (the top-z)))
+         :orientation (alignment :rear (make-vector 0 0 1))
+         :display-controls (list :color :wood-dark))
+   (collar :type 'box :width 500 :length 500 :height 200
+           :center (make-point (the base-x) (the base-y) 100)
+           :display-controls (list :color :dim-gray))
+   (arm :type 'box-beam
+        :start (the arm-start)
+        :end (translate-along-vector (the over-track) (the reach) (the outer-half))
+        :section-width 150 :section-height (the arm-height) :color :dim-gray)))
