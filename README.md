@@ -23,6 +23,11 @@ worker that keeps the page itself on the device).  It needs its
 connection all the same: models are built, drawn and saved by the
 lab's engine, and nothing of that is ever answered from a cache.
 
+The lab's own [README](prompt-lab/README.md) names the reference
+instance Genworks hosts, <https://hack.genworks.com/prompt-lab>, and
+the lab's own repository, <https://github.com/genworks/prompt-lab>,
+which the page links to under About.
+
 ## The pod line
 
 `pod-line/` began as a model built in the prompt lab: personal pods
