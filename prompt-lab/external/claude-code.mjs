@@ -150,12 +150,16 @@ console.log(`session  ${sessionId}${resumed ? ' (continued)' : ''}`);
 console.log(`watch    ${pageUrl}`);
 
 // everything said to the lab from here on goes in order, and a failure
-// to say it never stops the agent
+// to say it never stops the agent; the promise answers whether the lab
+// took it
 let told = Promise.resolve();
 const report = (body) => {
   told = told.then(() => tell({ ...body, session: sessionId }))
-    .then((r) => { if (r.status !== 200) console.error(`(the lab answered ${r.status} to "${body.event}")`); })
-    .catch((e) => console.error(`(the lab did not hear "${body.event}": ${e.message})`));
+    .then((r) => {
+      if (r.status !== 200) console.error(`(the lab answered ${r.status} to "${body.event}")`);
+      return r.status === 200;
+    })
+    .catch((e) => { console.error(`(the lab did not hear "${body.event}": ${e.message})`); return false; });
   return told;
 };
 
@@ -245,10 +249,17 @@ rmSync(work, { recursive: true, force: true });
 
 // --- the end of the prompt -------------------------------------------------
 
-const ok = result && result.subtype === 'success' && !result.is_error && !interrupted;
+let ok = result && result.subtype === 'success' && !result.is_error && !interrupted;
 if (ok) {
   pending = [];                   // the last text is the reply itself
-  await report({ event: 'done', text: result.result || '', usage: result.usage });
+  // Claude Code finishing is not the build finishing: a lab that went
+  // away under it (its host restarted, the session with it) takes no
+  // reply, and whatever the agent thinks it built is not there
+  if (!await report({ event: 'done', text: result.result || '', usage: result.usage })) {
+    ok = false;
+    console.error('The lab did not take the agent\'s reply: the session is gone (did its host restart?). '
+      + 'Nothing of this build is kept there.');
+  }
 } else {
   flush();
   const why = interrupted ? 'Interrupted.'
@@ -290,6 +301,7 @@ if (opt.out) {
     console.log(`wrote    ${opt.out}`);
   } else {
     console.error(`--out: ${opt.out} was not written (${ok ? 'the session has no model' : 'the build did not finish'}).`);
+    ok = false;                   // asked for a file, and there is none
   }
 }
 console.log(`watch    ${pageUrl}`);
