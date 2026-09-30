@@ -636,7 +636,8 @@ the model with one panel under it, the inputs or the tree."
 <prefix>/static/, its manifest and service worker beside it, its doors
 under <prefix>/api/ (config, session, state,
 prompt, model, reload, topup, confirm, privacy; sessions, archive,
-archived, replay) and the viewer at <prefix>/viewer, on every server."
+archived, replay; agent), the tools' door for an external agent at
+<prefix>/mcp, and the viewer at <prefix>/viewer, on every server."
   (gwl:with-all-servers (server)
     (net.aserve:publish :path *url-prefix* :server server :host host :function #'page-door
                         :content-type "text/html; charset=utf-8")
@@ -667,6 +668,10 @@ archived, replay) and the viewer at <prefix>/viewer, on every server."
     (net.aserve:publish :path (door-path "archive") :server server :host host :function #'archive-door)
     (net.aserve:publish :path (door-path "archived") :server server :host host :function #'archived-door)
     (net.aserve:publish :path (door-path "replay") :server server :host host :function #'replay-door)
+    ;; an agent that runs elsewhere (external.lisp); shut unless *external-agent?*
+    (net.aserve:publish :path (door-path "agent") :server server :host host :function #'agent-door)
+    (net.aserve:publish :path (format nil "~a/mcp" *url-prefix*)
+                        :server server :host host :function #'mcp-door)
     (publish-gwl-app (format nil "~a/viewer" *url-prefix*) 'viewer :server server :host host))
   (start-reaper!)
   *url-prefix*)

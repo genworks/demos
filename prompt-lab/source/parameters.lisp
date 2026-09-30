@@ -80,6 +80,15 @@ reverse proxy): \"/console\" on the public workshop, \"/ttyd\" on a dev
 ship.  The page's editor link is <*console-base*>/?arg=<model file>, which
 the terminal's door script hands to emacsclient.  Nil: no link.")
 
+(defparameter *external-agent?* nil
+  "Boolean. True opens the two doors of external.lisp: an agent that runs
+somewhere else (a developer's headless Claude Code, say) is handed the
+lab's system prompt and its tools over MCP, and works on a session in
+place of the lab's own loop, with no call to the gate.  Those doors run
+the tools for whoever holds a session's key, without the caps or the
+human check of the public doors: for a development host, not for an
+instance that serves visitors.")
+
 (defparameter *max-prompts-per-session* 6
   "Integer. Prompts one session may run: a first build and its follow-ups.")
 

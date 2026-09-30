@@ -375,6 +375,52 @@ the body, the status, the final path."
                      (and (eq (gethash "model_defined" state) t)
                           (eq (gethash "editable" state) t)
                           (search "define-object model" (gethash "model_source" state))))))
+          ;; an agent that runs elsewhere (external.lisp): its doors are
+          ;; shut until the switch is thrown, then the session's tools
+          ;; answer its owner over MCP and the agent door keeps the log
+          (smoke "prompt-lab external doors are shut unless switched on"
+                 (lambda ()
+                   (and (eql 404 (nth-value 1 (http :post (door "agent") :headers (owner-headers)
+                                                    :json (table "event" "text" "session" session "text" "x"))))
+                        (eql 404 (nth-value 1 (http :post (format nil "~a/mcp?session=~a" prefix session)
+                                                    :headers (owner-headers)
+                                                    :json (table "jsonrpc" "2.0" "id" 1 "method" "ping")))))))
+          (setf (symbol-value (lab '#:*external-agent?*)) t)
+          (smoke "prompt-lab MCP door lists the tools and runs one, for the session's owner alone"
+                 (lambda ()
+                   (let ((mcp (format nil "~a/mcp?session=~a" prefix session)))
+                     (flet ((rpc (id method &optional (params (table)))
+                              (let ((answer (json-of :post mcp :headers (owner-headers)
+                                                     :json (table "jsonrpc" "2.0" "id" id
+                                                                  "method" method "params" params))))
+                                (or (gethash "result" answer)
+                                    (error "~a answered ~a" method
+                                           (gethash "message" (gethash "error" answer)))))))
+                       (unless (stringp (gethash "protocolVersion" (rpc 1 "initialize")))
+                         (error "initialize named no protocol version"))
+                       (unless (find "write_model" (gethash "tools" (rpc 2 "tools/list"))
+                                     :key (lambda (tool) (gethash "name" tool)) :test #'equal)
+                         (error "tools/list lacks write_model"))
+                       (let ((answer (rpc 3 "tools/call" (table "name" "read_model" "arguments" (table)))))
+                         (unless (search "define-object model"
+                                         (gethash "text" (first (gethash "content" answer))))
+                           (error "read_model did not answer the model file")))
+                       (eql 403 (nth-value 1 (http :post mcp
+                                                   :json (table "jsonrpc" "2.0" "id" 4 "method" "tools/list"))))))))
+          (smoke "prompt-lab agent door takes a prompt, hands out the brief, and logs the reply"
+                 (lambda ()
+                   (let ((brief (json-of :post (door "agent") :headers (owner-headers)
+                                         :json (table "event" "prompt" "session" session "text" "A plate."))))
+                     (unless (and (stringp (gethash "system" brief)) (search session (gethash "mcp" brief)))
+                       (error "the brief lacks the system prompt or the tools' address"))
+                     (json-of :post (door "agent") :headers (owner-headers)
+                              :json (table "event" "done" "session" session "text" "A plate, built."))
+                     (let ((state (json-of :get (format nil "~a?session=~a" (door "state") session)
+                                           :headers (owner-headers))))
+                       (and (not (eq (gethash "busy" state) t))
+                            (find "done" (gethash "log" state)
+                                  :key (lambda (entry) (gethash "kind" entry)) :test #'equal))))))
+          (setf (symbol-value (lab '#:*external-agent?*)) nil)
           (smoke "prompt-lab viewer draws the model"
                  (lambda ()
                    (page-ok? (format nil "~a/viewer?session=~a&owner=~a" prefix session owner))))

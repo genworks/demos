@@ -25,6 +25,7 @@
              #:*workspace-root*
              #:*url-prefix*
              #:*console-base*
+             #:*external-agent?*
              #:*max-prompts-per-session*
              #:*render-tool?*
              #:*max-sessions-per-address*

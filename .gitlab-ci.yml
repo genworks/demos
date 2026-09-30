@@ -21,8 +21,9 @@
 # 2026-09-11, and this is the check that would have caught it.  Then
 # every demo that loaded is published and its page fetched from the
 # image's own server, and the prompt lab is driven through its doors
-# (a session, a hand-written model compiled and loaded, the viewer
-# drawing it) with no agent and no network; any failed page fails the
+# (a session, a hand-written model compiled and loaded, its tools
+# called over MCP, the viewer drawing it) with no agent and no
+# network; any failed page fails the
 # job.  The header of ci/cold-load.lisp has the details.
 #
 # The same script runs twice, once per engine: cold-load on the free
