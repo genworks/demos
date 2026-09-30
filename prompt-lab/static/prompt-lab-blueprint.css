@@ -8,12 +8,10 @@
  * ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-/* prompt-lab-blueprint.css -- a skin: the drawing office's blueprint.
- *
- * White line on a blue ground, lettered in capitals.  It is here as
- * much to show the protocol as for its own sake: everything up to the
- * line "beyond the tokens" is tokens and nothing else, and that part
- * alone is a whole skin (SKIN-API.md).
+/* prompt-lab-blueprint.css -- the lab's copy of the sluice's skin-blueprint.css, for a lab served by a
+ * sluice older than its skins (source/skins.lisp).  The sluice's file is
+ * the one to change; this one follows it, and goes when no image needs
+ * it any more.
  */
 
 :root {
@@ -56,21 +54,11 @@
   /* the drawing's black lines, turned to white ones; hues kept */
   --pl-viewport-bg: #0a2f5c;
   --pl-viewport-filter: invert(1) hue-rotate(180deg);
-}
-
-/* --- beyond the tokens --------------------------------------------------
-   Ordinary rules, which a skin may write but need not.  They name the
-   lab's own classes, and those carry no promise: a skin that stops
-   above this line outlives any change to the page.  This one is kept
-   with the page, so it may reach in -- for the grid a drawing sheet is
-   ruled with, on the ground the model is drawn on. */
-
-.pane.viewer,
-body.pl-viewer main > div {
-  background-image:
+  /* the sheet's grid: a line every twenty, a heavier one every hundred */
+  --pl-viewport-image:
     linear-gradient(rgba(217, 232, 255, 0.10) 1px, transparent 1px),
     linear-gradient(90deg, rgba(217, 232, 255, 0.10) 1px, transparent 1px),
     linear-gradient(rgba(217, 232, 255, 0.05) 1px, transparent 1px),
     linear-gradient(90deg, rgba(217, 232, 255, 0.05) 1px, transparent 1px);
-  background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
+  --pl-viewport-image-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
 }

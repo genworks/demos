@@ -541,18 +541,23 @@ the model with one panel under it, the inputs or the tree."
 
    ;; the skin the page wears, named on the frame's address; nil is the
    ;; house look
-   (skin (find-skin (cdr (assoc "skin" (the query-toplevel) :test #'string-equal))))
+   (page-skin (find-skin (cdr (assoc "skin" (the query-toplevel) :test #'string-equal))))
+
+   ;; what the sluice is told to wear: the same, when the skin is one of
+   ;; its own (skins.lisp)
+   (skin (viewer-skin (the page-skin)))
 
    ;; the page is laid out for a phone: the frame shows the model and,
    ;; under it, whichever panel the page's tabs ask for
    (phone? (equal (cdr (assoc "mode" (the query-toplevel) :test #'string-equal)) "phone"))
 
-   ;; after the sluice's own sheets: the tokens, the sheet that lays
-   ;; them onto the sluice, the phone's when the page is one, then the
-   ;; skin.  Only INPUTS of the sluice are overridden here: where its
-   ;; package is locked (a Genworks GDL workshop) its computed slots,
-   ;; body-class among them, are reserved words.
-   (additional-css-links (viewer-css-links (the skin) :phone? (the phone?)))
+   ;; after the sluice's own sheets and its skin: the phone's sheet
+   ;; when the page is one, and a skin of the lab's own (an older
+   ;; sluice is handed the tokens and the skin here too).  Only INPUTS
+   ;; of the sluice are overridden here: where its package is locked
+   ;; (a Genworks GDL workshop) its computed slots, body-class among
+   ;; them, are reserved words.
+   (additional-css-links (viewer-css-links (the page-skin) :phone? (the phone?)))
 
    ;; on a phone the inspector holds the inputs alone
    (user-mode?-default (the phone?))
@@ -638,6 +643,11 @@ archived, replay) and the viewer at <prefix>/viewer, on every server."
     (net.aserve:publish-directory :prefix (format nil "~a/static/" *url-prefix*)
                                   :server server :host host
                                   :destination (namestring *static-directory*))
+    ;; the sluice's tokens, skins and dividers, for the page (skins.lisp)
+    (when (sluice-skins?)
+      (net.aserve:publish-directory :prefix (format nil "~a/sluice-static/" *url-prefix*)
+                                    :server server :host host
+                                    :destination (format nil "~a/" sluice:*static*)))
     ;; the lab as an installable app (app.lisp)
     (net.aserve:publish :path (format nil "~a/manifest.webmanifest" *url-prefix*)
                         :server server :host host :function #'manifest-door)

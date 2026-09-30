@@ -277,25 +277,52 @@ the body, the status, the final path."
              (owner-headers () (list (cons "X-Prompt-Lab-Owner" owner))))
         (smoke "prompt-lab publish" (lambda () (uiop:symbol-call :prompt-lab :publish-prompt-lab!) t))
         (smoke (format nil "prompt-lab page ~a" prefix) (lambda () (page-ok? prefix)))
+        ;; The lab wears the sluice's skins where the image's sluice has
+        ;; them, and its own copies where it is older; the checks below
+        ;; hold either way, and say which they met.
+        (format t "~&     the sluice of this image ~:[is older than its skins: the lab's own copies~;wears skins: the lab asks it~]~%"
+                (uiop:symbol-call :prompt-lab :sluice-skins?))
         (smoke "prompt-lab page names its stylesheets, every place filled in"
                (lambda ()
                  (let ((body (http :get prefix)))
                    (when (search "{{" body) (error "a place in the page was left unfilled"))
-                   (dolist (name '("prompt-lab.css" "prompt-lab-page.css" "prompt-lab.js") t)
-                     (unless (search (format nil "~a/static/~a" prefix name) body)
-                       (error "the page does not name ~a" name))))))
+                   (dolist (address (list (uiop:symbol-call :prompt-lab :tokens-url)
+                                          (format nil "~a/static/prompt-lab-page.css" prefix)
+                                          (format nil "~a/static/prompt-lab.js" prefix))
+                                    t)
+                     (unless (search address body)
+                       (error "the page does not name ~a" address))))))
         (smoke "prompt-lab stylesheets, script and skins"
                (lambda ()
-                 (let ((skins (mapcar (lambda (skin) (format nil "prompt-lab-~a.css" (getf skin :name)))
-                                      (uiop:symbol-call :prompt-lab :skins))))
-                   (unless skins (error "no skin was found beside the page"))
-                   (dolist (name (append '("prompt-lab.css" "prompt-lab-page.css" "prompt-lab-viewer.css"
-                                           "prompt-lab-phone.css" "prompt-lab.js")
-                                         skins)
-                                 t)
-                     (multiple-value-bind (body status) (http :get (format nil "~a/static/~a" prefix name))
+                 (let ((skins (mapcar (lambda (skin) (getf skin :href))
+                                      (uiop:symbol-call :prompt-lab :skins)))
+                       (split (uiop:symbol-call :prompt-lab :split-url)))
+                   (unless skins (error "no skin was found"))
+                   (dolist (address (append (list (uiop:symbol-call :prompt-lab :tokens-url))
+                                            (mapcar (lambda (name) (format nil "~a/static/~a" prefix name))
+                                                    '("prompt-lab.css" "prompt-lab-page.css"
+                                                      "prompt-lab-viewer.css" "prompt-lab-phone.css"
+                                                      "prompt-lab.js"))
+                                            (and split (list split))
+                                            skins)
+                                    t)
+                     (multiple-value-bind (body status) (http :get address)
                        (unless (and (eql status 200) (plusp (length body)))
-                         (error "~a/static/~a answered ~a" prefix name status)))))))
+                         (error "~a answered ~a" address status)))))))
+        (when (uiop:symbol-call :prompt-lab :sluice-skins?)
+          (smoke "prompt-lab's copy of the tokens says what the sluice's tokens say"
+                 (lambda ()
+                   (flet ((tokens (address)
+                            (let* ((body (http :get address))
+                                   ;; the block, at the head of a line; the
+                                   ;; word is in the sheet's comment too
+                                   (start (search (format nil "~%:root {") body))
+                                   (end (and start (position #\} body :start start))))
+                              (and end (subseq body start end)))))
+                     (let ((theirs (tokens (uiop:symbol-call :prompt-lab :tokens-url)))
+                           (ours (tokens (format nil "~a/static/prompt-lab.css" prefix))))
+                       (or (and theirs (equal theirs ours))
+                           (error "static/prompt-lab.css has fallen behind the sluice's tokens.css")))))))
         (smoke "prompt-lab manifest, and every icon it names"
                (lambda ()
                  (let* ((manifest (json-of :get (format nil "~a/manifest.webmanifest" prefix)))
@@ -355,15 +382,23 @@ the body, the status, the final path."
                    (let* ((skin (getf (first (uiop:symbol-call :prompt-lab :skins)) :name))
                           (body (http :get (format nil "~a/viewer?session=~a&skin=~a&mode=phone"
                                                    prefix session skin))))
-                     (dolist (name (list "prompt-lab.css" "prompt-lab-viewer.css" "prompt-lab-phone.css"
-                                         (format nil "prompt-lab-~a.css" skin))
+                     (dolist (name (if (uiop:symbol-call :prompt-lab :sluice-skins?)
+                                       (list "/sluice-static/tokens.css" "/sluice-static/skinned.css"
+                                             (format nil "/sluice-static/skin-~a.css" skin)
+                                             (format nil "~a/static/prompt-lab-phone.css" prefix))
+                                       (list (format nil "~a/static/prompt-lab.css" prefix)
+                                             (format nil "~a/static/prompt-lab-viewer.css" prefix)
+                                             (format nil "~a/static/prompt-lab-phone.css" prefix)
+                                             (format nil "~a/static/prompt-lab-~a.css" prefix skin)))
                                    t)
-                       (unless (search (format nil "~a/static/~a" prefix name) body)
+                       (unless (search name body)
                          (error "the viewer does not link ~a" name))))))
-          (smoke "prompt-lab viewer without a skin links none, whatever it is asked for"
+          (smoke "prompt-lab viewer asked for no skin's name wears the house look, and links nothing it should not"
                  (lambda ()
                    (let ((body (http :get (format nil "~a/viewer?session=~a&skin=..%2Fpage" prefix session))))
-                     (and (search "prompt-lab-viewer.css" body)
+                     (and (or (search "/sluice-static/skinned.css" body)
+                              (search "prompt-lab-viewer.css" body))
+                          (not (search "/sluice-static/skin-" body))
                           (not (search "prompt-lab-phone.css" body))
                           (not (search "prompt-lab-page.css" body)))))))))))
 

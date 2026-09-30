@@ -75,10 +75,23 @@ body:not(.pl-desk) #tree { display: none; }
 body.pl-panel-parts:not(.pl-desk) #tree { display: block; }
 body.pl-panel-parts:not(.pl-desk) #inspector { display: none; }
 
+/* A sluice whose dividers can be dragged names its frame's parts, puts
+   them in order by those names, and may have been told how they share
+   the room.  Here there is nothing to drag, the order is this sheet's,
+   and the shares are too: said again by the same names, which is what
+   it takes to be heard over them. */
+body:not(.pl-desk) .sluice-split { display: none; }
+body:not(.pl-desk) #sluice-frame > #sluice-panes { order: 1; flex: 54 1 0%; }
+body:not(.pl-desk) #sluice-frame > #sluice-aside { order: 2; flex: 46 1 0%; width: 100%; }
+body:not(.pl-desk) #sluice-aside > #tree,
+body:not(.pl-desk) #sluice-aside > #inspector { flex: 1 1 0%; }
+
 @media (orientation: landscape) {
   body:not(.pl-desk) > div > div { flex-direction: row; }
-  body:not(.pl-desk) main { flex: 58 1 0%; }
-  body:not(.pl-desk) aside {
+  body:not(.pl-desk) main,
+  body:not(.pl-desk) #sluice-frame > #sluice-panes { flex: 58 1 0%; }
+  body:not(.pl-desk) aside,
+  body:not(.pl-desk) #sluice-frame > #sluice-aside {
     flex: 42 1 0%;
     width: auto;
     border-top: 0;

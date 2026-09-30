@@ -13,15 +13,17 @@
  *   the page          asked of the network first, so that it always
  *                     names the stylesheets of the day; the kept copy
  *                     answers only when the network does not
- *   <prefix>/static/  kept: every address there carries its file's
- *                     date, so what is kept under an address is what
- *                     that address will always mean
+ *   the static files  kept -- the lab's own under <prefix>/static/,
+ *                     and the tokens, skins and script it takes from
+ *                     the sluice's: every such address carries its
+ *                     file's date, so what is kept under an address is
+ *                     what that address will always mean
  *   everything else   the network's, untouched -- the doors under
  *                     <prefix>/api/, the viewer and all it asks for.
  *                     A model is built and drawn by the lab's engine;
  *                     nothing of it is ever answered from a cache.
  *
- * The three names in double braces are filled in by the server
+ * The four names in double braces are filled in by the server
  * (source/app.lisp), which serves this file at <prefix>/worker.  The
  * cache's name changes when any file of the shell does; that makes
  * this script a new one, the browser installs it in place of the old,
@@ -31,6 +33,7 @@
 var CACHE = {{cache}};
 var PREFIX = {{prefix}};
 var SHELL = {{shell}};
+var KEPT = {{kept}};
 
 // every cache of THIS lab begins so; another lab on the same host (a
 // second engine, at a prefix of its own) keeps its own
@@ -83,7 +86,7 @@ self.addEventListener('fetch', function (event) {
   }
 
   // the static files: kept, and fetched once when they are not
-  if (url.pathname.indexOf(PREFIX + '/static/') === 0) {
+  if (KEPT.some(function (place) { return url.pathname.indexOf(place) === 0; })) {
     event.respondWith(
       caches.open(CACHE).then(function (cache) {
         return cache.match(request).then(function (kept) {

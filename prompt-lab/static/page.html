@@ -103,6 +103,11 @@
         </form>
       </section>
 
+      <div class="split" data-split="prompt" data-a="#pane-prompt" data-b="#pane-source"
+           data-scope="#column" data-container="#column" data-key="prompt-lab-split-prompt"
+           data-min-a="160" data-min-b="90"
+           data-doc="Drag to share the room between the prompt and the model file; double-click to give it back."></div>
+
       <section class="pane" id="spend-box">
         <header class="pane-head"><h2 class="label">Modeling Credits</h2></header>
         <div class="pane-body">
@@ -150,6 +155,10 @@
 
   </div>
 
+  <div class="split" data-split="column" data-a="#column" data-b="#pane-viewer"
+       data-key="prompt-lab-split-column" data-min-a="240" data-min-b="320"
+       data-doc="Drag to share the room between the panes on the left and the viewer; double-click to give it back."></div>
+
   <section class="pane viewer" id="pane-viewer">
     <iframe id="viewer" title="Model viewer" hidden></iframe>
     <div id="viewer-empty" class="empty">The model appears here once it is built.</div>
@@ -196,6 +205,7 @@
   </div>
 </dialog>
 
+{{split-script}}
 <script src="{{script}}"></script>
 </body>
 </html>

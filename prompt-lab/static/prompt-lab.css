@@ -8,22 +8,10 @@
  * ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-/* prompt-lab.css -- the prompt lab's tokens, each with its default.
- *
- * This file is the whole list: what a skin may redefine is what is
- * declared here, and SKIN-API.md says what each one promises.  It is
- * loaded first in BOTH of the lab's documents -- the page, and the
- * viewer in its frame -- ahead of the sheet that lays each one out
- * (prompt-lab-page.css, prompt-lab-viewer.css) and of the skin.
- *
- * The defaults ARE the house look, "workstation": a 1980s Lisp
- * workstation's screen.  Black ink on a near-white ground; panes tiled
- * edge to edge and ruled off in single pixels; labels in reverse
- * video; what is under the pointer boxed rather than tinted; nothing
- * rounded, nothing shaded, and no colour but for what has gone wrong.
- *
- * A skin is a file beside this one, prompt-lab-<name>.css, holding a
- * :root block like the one below with the tokens it changes.
+/* prompt-lab.css -- the lab's copy of the sluice's tokens.css, for a lab served by a
+ * sluice older than its skins (source/skins.lisp).  The sluice's file is
+ * the one to change; this one follows it, and goes when no image needs
+ * it any more.
  */
 
 :root {
@@ -81,4 +69,6 @@
   /* the viewer */
   --pl-viewport-bg: #ffffff;    /* the ground the model is drawn on */
   --pl-viewport-filter: none;   /* a CSS filter over the line drawing: a dark skin inverts it */
+  --pl-viewport-image: none;    /* a background-image on that ground: a drawing sheet's grid */
+  --pl-viewport-image-size: auto;   /* and its background-size */
 }

@@ -8,14 +8,10 @@
  * ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-/* prompt-lab-plain.css -- a skin: the look of an ordinary web
- * application of the 2020s, which the lab wore before it had skins.
- *
- * Tokens and nothing else.  It shows the other half of the protocol
- * from the house look: panes that FLOAT on the ground rather than tile
- * it (a gap, with the ground showing in the seam), rounded corners, a
- * shadow, a fill under the pointer instead of a box, and one colour
- * for what can be pressed.
+/* prompt-lab-plain.css -- the lab's copy of the sluice's skin-plain.css, for a lab served by a
+ * sluice older than its skins (source/skins.lisp).  The sluice's file is
+ * the one to change; this one follows it, and goes when no image needs
+ * it any more.
  */
 
 :root {

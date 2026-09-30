@@ -158,17 +158,20 @@
     try { return $('viewer').contentDocument || null; } catch (e) { return null; }
   }
 
-  // The lab's stylesheets in the viewer's frame: its own, the phone's,
-  // and the skin's.  No sheet of its own: the frame holds something
-  // else (an error's page), and is left alone.
+  // The stylesheets of the skin in the viewer's frame: the one that
+  // says the sluice in the tokens (the sluice's own, or the lab's copy
+  // where the sluice is older than its skins), the phone's, and the
+  // skin's.  Without the first the frame holds something else (an
+  // error's page), and is left alone.
   function frameSheets(doc) {
     var found = { viewer: null, phone: null, skins: [] };
     if (!doc || !doc.head || !doc.body) return found;
     var links = doc.querySelectorAll('link[rel="stylesheet"]');
     for (var i = 0; i < links.length; i++) {
       var href = links[i].getAttribute('href') || '';
-      if (/\/static\/prompt-lab-viewer\.css/.test(href)) found.viewer = links[i];
+      if (/\/sluice-static\/skinned\.css/.test(href) || /\/static\/prompt-lab-viewer\.css/.test(href)) found.viewer = links[i];
       else if (/\/static\/prompt-lab-phone\.css/.test(href)) found.phone = links[i];
+      else if (/\/sluice-static\/skin-/.test(href)) found.skins.push(links[i]);
       else if (/\/static\/prompt-lab-/.test(href)) found.skins.push(links[i]);
     }
     return found;

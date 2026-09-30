@@ -8,7 +8,9 @@
  * ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-/* prompt-lab-viewer.css -- the lab's tokens laid onto the viewer.
+/* prompt-lab-viewer.css -- the lab's copy of the sluice's skinned.css,
+ * for a lab served by a sluice older than its skins (source/skins.lisp):
+ * the lab's tokens laid onto the viewer.
  *
  * The viewer in the page's frame is a sluice, Gendl's object browser: a
  * document of its own, with its own stylesheets, laid out with utility
@@ -85,7 +87,9 @@ body #inspector {
 }
 body main > div {
   border: 0;
-  background: var(--pl-viewport-bg);
+  background-color: var(--pl-viewport-bg);
+  background-image: var(--pl-viewport-image, none);
+  background-size: var(--pl-viewport-image-size, auto);
   border-radius: var(--pl-radius);
   box-shadow: var(--pl-shadow);
   overflow: hidden;
@@ -227,6 +231,7 @@ body .tree-node {
 /* a node's colour is its own, in its style attribute; the usual black
    is the lab's ink instead, or a dark skin would hide the tree */
 body .tree-node[style*="#000000"] { color: var(--pl-ink) !important; }
+body .tree-node[style*="color"]:not([style*="#000000"]) { filter: var(--pl-viewport-filter); }
 body .tree-node:hover {
   background: var(--pl-hover-bg);
   outline-color: var(--pl-hover-line);

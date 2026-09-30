@@ -11,10 +11,12 @@ agent's calls to the language model go through a gate on the
 deploying stack's reverse proxy, which holds the API key; no key
 lives with this code.
 
-How the lab looks is a **skin**: one CSS file of tokens, dropped into
-`prompt-lab/static/`, dresses the page and the viewer alike, on a desk
-and on a phone.  [prompt-lab/SKIN-API.md](prompt-lab/SKIN-API.md) is
-the contract.
+How the lab looks is a **skin**: one CSS file of tokens dresses the
+page and the viewer alike, on a desk and on a phone.  The skins are
+the viewer's -- the sluice's, Gendl's object browser -- and so is
+their contract; [prompt-lab/SKIN-API.md](prompt-lab/SKIN-API.md) says
+what the lab adds.  On a desk the seams between the panes can be
+dragged.
 
 The lab can be installed as an app (a web app manifest, and a service
 worker that keeps the page itself on the device).  It needs its

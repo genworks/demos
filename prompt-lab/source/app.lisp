@@ -75,7 +75,9 @@ stylesheet is read."
            (let ((value (and file (token-value file token))))
              (and value (plusp (length value)) (char= (char value 0) #\#) value))))
     (or (let ((skin (find-skin *default-skin*)))
-          (and skin (colour (static-file (skin-file-name (getf skin :name))))))
+          (and skin (colour (getf skin :file))))
+        (and (sluice-skins?)
+             (colour (probe-file (format nil "~a/tokens.css" sluice:*static*))))
         (colour (static-file "prompt-lab.css"))
         fallback)))
 
@@ -127,9 +129,10 @@ stylesheet is read."
   "List of strings. What the worker keeps: the page and every static file
 it may ask for."
   (append (list *url-prefix*
-                (static-url "prompt-lab.css")
+                (tokens-url)
                 (static-url "prompt-lab-page.css")
                 (static-url "prompt-lab.js"))
+          (let ((split (split-url))) (and split (list split)))
           (mapcar #'(lambda (skin) (getf skin :href)) (skins))
           (mapcar #'(lambda (icon) (static-url (first icon)))
                   (remove-if-not #'(lambda (icon) (static-file (first icon))) *app-icons*))
@@ -140,7 +143,7 @@ it may ask for."
   "String. The service worker's script, filled in; with *app?* off, the
 worker that retires the one before it."
   (if *app?*
-      (let ((signature (list *url-prefix* *default-skin* (static-signature))))
+      (let ((signature (list *url-prefix* *default-skin* (static-signature) (shell-addresses))))
         (reduce #'(lambda (text place)
                     (replace-substring text (car place) (cdr place)))
                 (list (cons "{{cache}}"
@@ -148,6 +151,11 @@ worker that retires the one before it."
                                                         *url-prefix*
                                                         (sxhash (prin1-to-string signature))))))
                       (cons "{{prefix}}" (ascii-json (encode *url-prefix*)))
+                      ;; where the shell's files are: the lab's own, and
+                      ;; the sluice's, whose tokens and skins the page wears
+                      (cons "{{kept}}" (ascii-json
+                                        (encode (vector (format nil "~a/static/" *url-prefix*)
+                                                        (format nil "~a/sluice-static/" *url-prefix*)))))
                       (cons "{{shell}}" (ascii-json (encode (coerce (shell-addresses) 'vector)))))
                 :initial-value (uiop:read-file-string (merge-pathnames "worker.js" *static-directory*)
                                                       :external-format :utf-8)))
