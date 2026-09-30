@@ -15,9 +15,10 @@ with free modeling credits, prompts and generated code are logged,
 and generated code is the visitor's under the GNU Affero General
 Public License, like Gendl itself and like this code.
 
-This repository is that instance's source.  Issues with the lab, a
-model it built wrong, or a page that misbehaves are welcome at
-<https://github.com/genworks/prompt-lab/issues>.
+This directory of the [genworks/demos](https://github.com/genworks/demos)
+repository is that instance's source.  Issues with the lab, a model it
+built wrong, or a page that misbehaves are welcome at
+<https://github.com/genworks/demos/issues>.
 
 ## What is here
 

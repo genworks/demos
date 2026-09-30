@@ -24,9 +24,8 @@ connection all the same: models are built, drawn and saved by the
 lab's engine, and nothing of that is ever answered from a cache.
 
 The lab's own [README](prompt-lab/README.md) names the reference
-instance Genworks hosts, <https://hack.genworks.com/prompt-lab>, and
-the lab's own repository, <https://github.com/genworks/prompt-lab>,
-which the page links to under About.
+instance Genworks hosts, <https://hack.genworks.com/prompt-lab>; the
+page links to this repository's `prompt-lab/` tree under About.
 
 ## The pod line
 
