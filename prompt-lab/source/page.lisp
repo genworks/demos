@@ -145,19 +145,108 @@ status instead: (refuse req ent *response-forbidden* \"No.\")."
 (defun prompts-used (session)
   (count :prompt (session-log session) :key #'second))
 
+(defun balance-number (session name)
+  "The number the gate's last balance answer for SESSION gave under NAME, or nil."
+  (let* ((balance (session-balance session))
+         (value (and balance (gethash name balance))))
+    (and (realp value) value)))
+
 (defun paying? (session)
   "True when the session's wallet holds credit: the free-use caps (prompts
 a session, prompts and sessions an address a day) step aside, and the
-gate's budgets are what bind."
-  (let ((credits (session-credits session)))
-    (and (realp credits) (plusp credits))))
+gate's budgets are what bind.  Where the gate keeps a community pot
+nobody holds credit of their own; there it is true while the wallet has
+put more into the pot than its sessions have drawn from it."
+  (let ((credits (session-credits session))
+        (left (balance-number session "contribution_left_cents")))
+    (or (and (realp credits) (plusp credits))
+        (and left (plusp left)))))
 
 (defun paid? (session)
   "True once the session's wallet has bought credits -- credit on it now,
-or credits already drawn from it here: what makes a session eligible to
-be made private."
+credits already drawn from it here, or a top-up of the community pot:
+what makes a session eligible to be made private."
   (or (paying? session)
-      (let ((charged (session-charged session))) (and (realp charged) (plusp charged)))))
+      (let ((charged (session-charged session))) (and (realp charged) (plusp charged)))
+      (let ((contributed (balance-number session "contributed_cents")))
+        (and contributed (plusp contributed)))))
+
+
+;;
+;; The community pot.  A gate may keep ONE balance of modeling credits
+;; for everybody in place of a free allowance a session and a wallet a
+;; payer: every build, whoever's, draws on it; anyone may add to it, up
+;; to a cap; at zero the gate refuses, and the page asks for a top-up.
+;; The gate says so in every balance it answers ("pot": true, what the
+;; pot holds, its cap, the room left), and with each relayed call.  The
+;; lab keeps the latest word, asks again when that is *pot-refresh-seconds*
+;; old -- other labs draw on the same pot -- and shows it to everyone,
+;; owner and watcher alike: it is nobody's secret.
+;;
+
+(defvar *pot* nil
+  "Plist or nil. What the gate last said of its pot: :credits :max :room
+:topup? :amounts :key.  Nil until a gate has said it keeps one, and again
+once it says it does not.")
+
+(defvar *pot-asked* 0 "Universal time the gate was last asked about the pot.")
+
+(defun note-pot! (json)
+  "Keep what a balance answer (a hash table) says of the gate's pot.  An
+answer that is no balance -- a refusal, an error -- says nothing of it."
+  (when (and (hash-table-p json) (nth-value 1 (gethash "markup" json)))
+    (setq *pot* (and (eq (gethash "pot" json) t)
+                     (list :credits (gethash "pot_credits" json)
+                           :max (gethash "pot_max" json)
+                           :room (gethash "pot_room" json)
+                           :topup? (eq (gethash "topup" json) t)
+                           :amounts (gethash "topup_amounts" json)
+                           :key (gethash "publishable_key" json))))))
+
+(defun note-pot-credits! (credits)
+  "Keep what a relayed call says the pot holds now (agent.lisp)."
+  (let ((pot *pot*))
+    (when (and pot (realp credits))
+      (let ((spent (- (or (getf pot :credits) credits) credits)))
+        (setq *pot* (list* :credits credits
+                           ;; what was drawn is room again, up to the cap
+                           :room (+ (or (getf pot :room) 0) (max 0 spent))
+                           (loop for (key value) on pot by #'cddr
+                                 unless (member key '(:credits :room))
+                                   append (list key value))))))))
+
+(defun pot ()
+  "The gate's pot as last heard of (a plist), or nil when the gate keeps
+none or has not answered.  Asks the gate when the word is old; a gate
+that does not answer leaves the old word standing."
+  (let ((now (get-universal-time)))
+    (when (>= (- now *pot-asked*) *pot-refresh-seconds*)
+      ;; whoever asks within the interval takes what is here
+      (setq *pot-asked* now)
+      (ignore-errors
+       (let ((json (gate-post "balance" (h) :seconds *pot-seconds*)))
+         (when json (note-pot! json))))))
+  *pot*)
+
+(defun pot-empty? ()
+  "True when the gate keeps a pot and it is spent: nothing builds."
+  (let ((pot (pot)))
+    (and pot (not (plusp (or (getf pot :credits) 0))))))
+
+(defun pot-state ()
+  "What the page shows of the pot, or nil: what it holds, its cap, the
+room left, whether and at which amounts it can be topped up, and where
+to go for a lab of one's own when it is full."
+  (let ((pot (pot)))
+    (and pot
+         (h "credits" (max 0 (floor (or (getf pot :credits) 0)))
+            "max" (getf pot :max)
+            "room" (max 0 (floor (or (getf pot :room) 0)))
+            "topup" (if (getf pot :topup?) t 'yason:false)
+            "topup_amounts" (or (getf pot :amounts) #())
+            "publishable_key" (or (getf pot :key) "")
+            "own_lab_url" (car *own-lab*)
+            "own_lab_label" (cdr *own-lab*)))))
 
 (defun model-defined? (session)
   (let ((symbol (model-symbol session)))
@@ -197,10 +286,10 @@ the page's editor shows, and what write-model takes back."
 (defun gate-door-url (name)
   (format nil "~a/~a" (string-right-trim "/" *messages-url*) name))
 
-(defun gate-post (name object)
+(defun gate-post (name object &key (seconds *gate-seconds*))
   "POST OBJECT (a hash table) as JSON to the gate's side door NAME.
 Values: the parsed answer (a hash table, or nil) and the status."
-  (multiple-value-bind (status text) (post-json (gate-door-url name) (encode object) :seconds *gate-seconds*)
+  (multiple-value-bind (status text) (post-json (gate-door-url name) (encode object) :seconds seconds)
     (let ((json (ignore-errors (yason:parse text))))
       (values (and (hash-table-p json) json) status))))
 
@@ -215,6 +304,8 @@ Values: the parsed answer (a hash table, or nil) and the status."
     (when (and (realp cents) (> cents (session-cents session))) (setf (session-cents session) cents))
     (when (and (realp allowance) (plusp allowance)) (setf (session-allowance session) allowance))
     (setf (session-balance session) json)
+    ;; and what it says of the community pot, if the gate keeps one
+    (note-pot! json)
     json))
 
 (defun refresh-balance! (session)
@@ -240,6 +331,10 @@ one scale.  Tokens never appear."
        "credits_free" (round (* rate allowance))
        "credits_from_wallet" (round (session-charged session))
        "credits_balance" (and (session-credits session) (max 0 (round (session-credits session))))
+       ;; where the gate keeps a community pot: what this wallet has put
+       ;; into it, and what of that its sessions have not drawn yet
+       "contributed" (round (or (balance-number session "contributed_cents") 0))
+       "contribution_left" (round (or (balance-number session "contribution_left_cents") 0))
        "wallet" (session-wallet session)
        "topup" (if (and balance (eq (gethash "topup" balance) t)) t 'yason:false)
        "topup_amounts" (or (and balance (gethash "topup_amounts" balance)) #())
@@ -289,6 +384,8 @@ file's place and the terminal opened on it."
        "engine" (engine-name)
        "created" (epoch-seconds (session-created session))
        "spend" (and owner? (spend-state session))
+       ;; the community pot, where the gate keeps one: everyone's to see
+       "pot" (pot-state)
        "log" (log-vector (session-log session))
        "model_defined" (if (model-defined? session) t 'yason:false)
        "model_file" (and owner? (namestring (session-model-file session)))
@@ -313,7 +410,9 @@ behind this room and the sibling lab on the other engine, if any."
                            "engine_label" (engine-label)
                            "sibling_url" (car *sibling-lab*)
                            "sibling_label" (cdr *sibling-lab*)
-                           "browsing" (if *browsing?* t 'yason:false))))
+                           "browsing" (if *browsing?* t 'yason:false)
+                           ;; the community pot, where the gate keeps one
+                           "pot" (pot-state))))
 
 (defun session-door (req ent)
   "POST <prefix>/api/session {wallet?}: open a session; answers its id.
@@ -322,11 +421,16 @@ One address opens at most *max-sessions-per-address* a day."
          (json (request-json req))
          (wallet (and json (gethash "wallet" json))))
     (if (and (address-over-limit? address :sessions)
-             ;; a wallet with credit opens sessions past the free cap
+             ;; a wallet with credit -- or, at a community pot, one that
+             ;; has put in more than it has drawn -- opens sessions past
+             ;; the free cap
              (not (and (wallet-id? wallet)
                        (let ((balance (ignore-errors (gate-post "balance" (h "wallet" wallet)))))
-                         (and balance (realp (gethash "credits_cents" balance))
-                              (plusp (gethash "credits_cents" balance)))))))
+                         (and balance
+                              (flet ((credit? (name)
+                                       (let ((value (gethash name balance)))
+                                         (and (realp value) (plusp value)))))
+                                (or (credit? "credits_cents") (credit? "contribution_left_cents"))))))))
         (refuse req ent *response-too-many-requests*
                 "This address has opened its ~a free sessions for today.  Come back tomorrow, or bring your own agent."
                 *max-sessions-per-address*)
@@ -338,7 +442,8 @@ One address opens at most *max-sessions-per-address* a day."
           ;; the owner key goes to this browser once, here, and nowhere else
           (respond-json req ent (h "session" (session-id session)
                                    "owner" (session-owner session)
-                                   "spend" (spend-state session)))))))
+                                   "spend" (spend-state session)
+                                   "pot" (pot-state)))))))
 
 (defun topup-door (req ent)
   "POST <prefix>/api/topup {session, amount_cents, embedded?}: a Stripe
@@ -377,7 +482,10 @@ page, or {client_secret, publishable_key, wallet} for the in-page form."
                      (wallet (and answer (gethash "wallet" answer))))
                  (cond ((and (eql status 200) (or (stringp checkout-url) (stringp client-secret)))
                         (when (wallet-id? wallet) (setf (session-wallet session) wallet))
-                        (log-event session :note "Buying ~:d modeling credits.  They arrive when the payment completes." amount)
+                        (log-event session :note (if (pot)
+                                                     "Adding ~:d modeling credits to the community pot.  They arrive when the payment completes."
+                                                     "Buying ~:d modeling credits.  They arrive when the payment completes.")
+                                   amount)
                         (respond-json req ent (h "url" checkout-url
                                                  "client_secret" client-secret
                                                  "publishable_key" (gethash "publishable_key" (spend-state session))
@@ -410,12 +518,16 @@ spend state with the outcome."
              (when answer (note-balance session answer))
              (let ((outcome (and answer (gethash "outcome" answer))))
                (when (equal outcome "credited")
-                 (log-event session :note "Credits added: ~:d on your balance.  Builds beyond the free credits draw on it."
-                            (round (or (session-credits session) 0))))
+                 (if *pot*
+                     (log-event session :note "Thank you: the community pot holds ~:d modeling credits now, for everyone's builds."
+                                (max 0 (floor (or (getf *pot* :credits) 0))))
+                     (log-event session :note "Credits added: ~:d on your balance.  Builds beyond the free credits draw on it."
+                                (round (or (session-credits session) 0)))))
                (save-session! session)
                (respond-json req ent (h "outcome" (or outcome "failed")
                                         "text" (or (and answer (gethash "text" answer)) "The gate did not answer.")
-                                        "spend" (spend-state session)))))))))
+                                        "spend" (spend-state session)
+                                        "pot" (pot-state)))))))))
 
 (defun state-door (req ent)
   "GET <prefix>/api/state?session=<id>: everything the page shows.  The
@@ -470,13 +582,19 @@ prompt in a thread of its own; the page follows along through the state door."
            (refuse req ent "Say what to build."))
           ((> (length prompt) *max-prompt-length*)
            (refuse req ent "A prompt may have ~a characters at most." *max-prompt-length*))
+          ;; a community pot with nothing in it builds for nobody
+          ((pot-empty?)
+           (refuse req ent *response-too-many-requests*
+                   "The community pot of modeling credits is empty.  Top it up and the lab builds again, for everyone."))
           ((and (not (paying? session)) (>= (prompts-used session) *max-prompts-per-session*))
-           (refuse req ent "This session has used its ~a free prompts.  Buy modeling credits to keep going here, take a copy of the model file, or start a new session."
-                   *max-prompts-per-session*))
+           (refuse req ent "This session has used its ~a ~:[free ~;~]prompts.  ~a to keep going here, take a copy of the model file, or start a new session."
+                   *max-prompts-per-session* (pot)
+                   (if (pot) "Add modeling credits to the pot" "Buy modeling credits")))
           ((and (not (paying? session)) (address-over-limit? address :prompts))
            (refuse req ent *response-too-many-requests*
-                   "This address has run its ~a free prompts for today.  Buy modeling credits to keep going, come back tomorrow, or bring your own agent."
-                   *max-prompts-per-address*))
+                   "This address has run its ~a ~:[free ~;~]prompts for today.  ~a to keep going, come back tomorrow, or bring your own agent."
+                   *max-prompts-per-address* (pot)
+                   (if (pot) "Add modeling credits to the pot" "Buy modeling credits")))
           ((session-busy? session)
            (refuse req ent "Still working on the previous request."))
           (t

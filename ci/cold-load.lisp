@@ -421,6 +421,29 @@ the body, the status, the final path."
                             (find "done" (gethash "log" state)
                                   :key (lambda (entry) (gethash "kind" entry)) :test #'equal))))))
           (setf (symbol-value (lab '#:*external-agent?*)) nil)
+          ;; the community pot (page.lisp): what the lab has heard from a
+          ;; gate that keeps one is everyone's to see, and an empty pot
+          ;; builds for nobody.  There is no gate here, so the word is put
+          ;; in by hand, and the lab kept from asking for a fresher one.
+          (setf (symbol-value (lab '#:*pot-asked*)) (+ (get-universal-time) 3600)
+                (symbol-value (lab '#:*pot*)) (list :credits 0 :max 9900 :room 9900 :topup? t
+                                                    :amounts (list 1000 2000) :key ""))
+          (smoke "prompt-lab shows a community pot to everyone, and an empty one refuses the prompt"
+                 (lambda ()
+                   (let ((config (json-of :get (door "config")))
+                         (watched (json-of :get (format nil "~a?session=~a" (door "state") session))))
+                     (unless (eql (gethash "max" (gethash "pot" config)) 9900)
+                       (error "the config door does not show the pot"))
+                     (unless (eql (gethash "credits" (gethash "pot" watched)) 0)
+                       (error "a watcher's state does not show the pot"))
+                     (multiple-value-bind (body status)
+                         (http :post (door "prompt") :headers (owner-headers)
+                                                     :json (table "session" session "prompt" "A plate."))
+                       (or (and (eql status 429) (search "pot" body))
+                           (error "the prompt door answered ~a: ~a" status
+                                  (subseq body 0 (min 200 (length body)))))))))
+          (setf (symbol-value (lab '#:*pot*)) nil
+                (symbol-value (lab '#:*pot-asked*)) 0)
           (smoke "prompt-lab viewer draws the model"
                  (lambda ()
                    (page-ok? (format nil "~a/viewer?session=~a&owner=~a" prefix session owner))))

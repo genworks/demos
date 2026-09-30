@@ -132,6 +132,19 @@ every answer, and that value replaces this one).  77 c reads as a round
 :session-budget-credits and derives the cents from whatever the markup
 is, and the balance door reports both before the first build.")
 
+(defparameter *pot-refresh-seconds* 10
+  "Integer. How old what the lab knows of the gate's community pot may get
+before the gate is asked again.  Other labs behind the same gate draw on
+the same pot, so the page's figure is this stale at most.")
+
+(defparameter *pot-seconds* 5
+  "Integer. Seconds that question may take; the page waits behind it.")
+
+(defparameter *own-lab*
+  (cons "https://github.com/genworks/demos/tree/devo/prompt-lab" "run a prompt lab of your own")
+  "Cons of a URL and a label, or nil.  Where the page sends someone who
+would add to a community pot that has no room left: a lab of their own.")
+
 (defparameter *wallet-header* "X-Prompt-Lab-Wallet"
   "String. The header naming the visitor's wallet to the gate on each
 call; must match the gate's :wallet-header.")

@@ -185,14 +185,19 @@ keywords), or nil."
 
 (defun note-gate-answer (session headers)
   "Keep what the gate says about money with each answer: the session's
-cents so far, the allowance, the wallet's charge and credit."
+cents so far, the allowance, the wallet's charge and credit -- or, from
+a gate that keeps a community pot, what the pot holds."
   (let ((cents (response-number headers "X-Cyclops-LLM-Gate-Session-Cents"))
         (allowance (response-number headers "X-Cyclops-LLM-Gate-Allowance"))
         (charged (response-number headers "X-Cyclops-LLM-Gate-Charged"))
-        (credits (response-number headers "X-Cyclops-LLM-Gate-Credits")))
+        (credits (response-number headers "X-Cyclops-LLM-Gate-Credits"))
+        ;; a gate that keeps a community pot says what is left in it (page.lisp)
+        (pot (response-number headers "X-Cyclops-LLM-Gate-Pot")))
+    (when pot (note-pot-credits! pot))
     (when cents (setf (session-cents session) cents))
     (when allowance (setf (session-allowance session) allowance))
-    (when (and charged (plusp charged)) (incf (session-charged session) charged))
+    ;; what a pot was charged came out of no wallet of this session's
+    (when (and charged (plusp charged) (not pot)) (incf (session-charged session) charged))
     (when credits (setf (session-credits session) credits))))
 
 (defun call-messages-api (session)

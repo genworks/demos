@@ -366,6 +366,16 @@ ol.log li.stopped time { color: var(--pl-status-fail); }
 #checkout-box { margin-top: 0.5rem; }
 #checkout-box .row { margin-top: 0.4rem; }
 #topup-buttons button { padding: 0.15rem 0.6rem; }
+#topup-buttons button:disabled { opacity: 0.45; cursor: default; }
+/* the community pot, spent: the pane asks */
+#spend-box .banner.beg {
+  margin: 0;
+  border-color: var(--pl-status-fail);
+  border-left-width: calc(var(--pl-rule) * 4);
+  font-weight: 700;
+}
+body.pot-empty #spend-meter { border-color: var(--pl-status-fail); }
+body.pot-empty #status-credits { color: var(--pl-status-fail); font-weight: 700; }
 
 
 /* --- the model file ----------------------------------------------------- */

@@ -107,9 +107,13 @@ version that fails to compile is kept too."
                 t)))))
 
 (defun read-model (session)
+  "The model's source as write-model takes it: the file after its header
+(the lab's comment and the in-package line), which is also what the
+page's editor shows.  Handed the whole file, an agent wrote the header's
+comment back into the source, and the next write put a second one on top."
   (let ((file (session-model-file session)))
     (if (probe-file file)
-        (values (list (text-result "~a" (uiop:read-file-string file :external-format :utf-8))) nil)
+        (values (list (text-result "~a" (file-model-body file))) nil)
         (values (list (text-result "There is no model file yet.")) nil))))
 
 

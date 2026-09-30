@@ -137,7 +137,7 @@
       if (!configLoaded) loadConfig();
       if (!session) {
         status('User Input');
-        $('build').disabled = !turnstileReady();
+        $('build').disabled = !turnstileReady() || potEmpty();
       }
     }
   }
@@ -407,6 +407,80 @@
     }
   }
 
+  //
+  // The community pot.  A lab whose gate keeps one has no free credits a
+  // session and no balance a visitor: ONE pot of modeling credits that
+  // every build, anyone's, draws on and anyone may add to, up to its cap.
+  // At zero nothing builds, and the page asks for a top-up.  The lab
+  // names it in its configuration and with every state (pot: what it
+  // holds, its cap, the room left, the amounts on sale); the owner's
+  // spend says what this session has drawn and this browser has put in.
+  //
+
+  var pot = null, potButtons = [];
+  var DOT = ' ' + String.fromCharCode(183) + ' ';
+
+  function potEmpty() { return !!pot && !(pot.credits > 0); }
+
+  function renderPot(p, spend) {
+    if (!p) return;
+    pot = p;
+    var empty = potEmpty();
+    document.body.classList.add('has-spend');
+    document.body.classList.add('has-pot');
+    document.body.classList.toggle('pot-empty', empty);
+    var text = 'the community pot: ' + credits(p.credits) + ' of at most ' + credits(p.max) + ' modeling credits';
+    if (spend && spend.credits_used > 0) text += DOT + 'this session has drawn ' + credits(spend.credits_used);
+    if (spend && spend.contributed > 0) text += DOT + 'you have added ' + credits(spend.contributed);
+    $('spend').textContent = text;
+    var meter = $('spend-meter'), most = p.max || 100, held = Math.max(0, Math.min(p.credits, most));
+    meter.setAttribute('aria-label', 'Modeling credits in the pot');
+    meter.setAttribute('aria-valuemax', most);
+    meter.setAttribute('aria-valuenow', held);
+    meter.firstElementChild.style.width = (100 * held / most) + '%';
+    $('pot-note').hidden = false;
+    $('about-pot').hidden = false;
+    $('pot-empty').hidden = !empty;
+    $('status-credits').textContent = empty ? 'the pot is empty' : 'pot: ' + credits(p.credits) + ' credits';
+    if (p.publishable_key) publishableKey = p.publishable_key;
+    var amounts = p.topup_amounts || [];
+    if (p.topup && !topupButtonsMade && amounts.length) {
+      topupButtonsMade = true;
+      $('topup-label').textContent = 'Add to the pot:';
+      amounts.forEach(function (amount) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = credits(amount) + ' credits for ' + dollars(amount);
+        b.addEventListener('click', function () { startTopup(amount); });
+        $('topup-buttons').appendChild(b);
+        potButtons.push({ amount: amount, button: b });
+      });
+      $('topup').hidden = false;
+    }
+    // a pot sells no more than it has room for
+    var fits = 0;
+    potButtons.forEach(function (entry) {
+      var fit = entry.amount <= p.room;
+      if (fit) fits++;
+      entry.button.disabled = !fit;
+      entry.button.setAttribute('data-doc', fit
+        ? 'Add ' + credits(entry.amount) + ' modeling credits to the pot, by card. Everyone builds on them.'
+        : 'The pot has no room for ' + credits(entry.amount) + ' more credits.');
+    });
+    var full = potButtons.length > 0 && fits === 0;
+    $('pot-full').hidden = !full;
+    if (full) {
+      $('pot-full-text').textContent = 'The pot is as full as it gets: it holds at most ' + credits(p.max) + ' credits.'
+        + (p.own_lab_url ? ' To build without sharing one,' : '');
+      $('own-lab').hidden = !p.own_lab_url;
+      if (p.own_lab_url) { $('own-lab').href = p.own_lab_url; $('own-lab').textContent = (p.own_lab_label || 'run a lab of your own') + '.'; }
+    }
+    if (empty) {
+      $('build').disabled = true;
+      if (!$('busy') || $('busy').hidden) $('quota').textContent = 'the community pot is empty';
+    }
+  }
+
   function note(text) { var el = $('spend-note'); el.textContent = text || ''; el.hidden = !text; }
 
   function keepWallet(r) {
@@ -476,8 +550,8 @@
     return ensureSession().then(function () {
       return api('confirm', { session: session, wallet: wallet, checkout: checkout });
     }).then(function (r) {
-      renderSpend(r.spend);
-      note(r.outcome === 'credited' ? 'Thank you: your credits are in.' :
+      if (r.pot) renderPot(r.pot, r.spend); else renderSpend(r.spend);
+      note(r.outcome === 'credited' ? (r.pot ? 'Thank you: your credits are in the pot, for everyone\'s builds.' : 'Thank you: your credits are in.') :
            r.outcome === 'already' ? 'That payment was already credited.' :
            r.outcome === 'unpaid' ? 'The payment has not completed yet; reload in a moment.' :
            'The payment could not be confirmed: ' + r.text);
@@ -500,7 +574,11 @@
     turnstileWidget = window.turnstile.render('#turnstile', {
       sitekey: turnstileKey,
       size: 'flexible',
-      callback: function (token) { turnstileToken = token; $('build').disabled = false; $('quota').textContent = ''; },
+      callback: function (token) {
+        turnstileToken = token;
+        $('build').disabled = potEmpty();
+        $('quota').textContent = potEmpty() ? 'the community pot is empty' : '';
+      },
       'expired-callback': function () { turnstileToken = null; },
       'error-callback': function (code) { turnstileToken = null; showError('prompt-error', 'The human check could not load (' + code + ').  Reload the page.'); }
     });
@@ -530,6 +608,8 @@
         $('sibling').textContent = titled(config.sibling_label || 'the other lab');
         $('sibling').hidden = false;
       }
+      // a community pot shows before there is a session to spend from it
+      if (config.pot) renderPot(config.pot);
       if (config.browsing) {
         $('browse-live').hidden = $('browse-archive').hidden = $('about-browsing').hidden = false;
         if (browse === 'live') $('browse-live').className = 'current';
@@ -588,7 +668,7 @@
       if (r.error) { throw new Error(r.error); }
       session = r.session;
       if (r.owner) keepOwner(session, r.owner);
-      renderSpend(r.spend);
+      if (r.pot) renderPot(r.pot, r.spend); else renderSpend(r.spend);
       history.replaceState(null, '', pageUrl('session=' + session));
     });
   }
@@ -663,13 +743,15 @@
     $('build').disabled = state.busy || capped || !turnstileReady();
     $('quota').textContent = state.busy ? 'working\u2026'
       : !turnstileReady() ? 'checking you are human\u2026'
-      : state.prompts_unlimited ? 'prompts draw on your credits'
-      : (state.prompts_allowed - state.prompts_used) + ' of ' + state.prompts_allowed + ' free prompts left';
+      : state.prompts_unlimited ? (state.pot ? 'no prompt cap: you have added to the pot' : 'prompts draw on your credits')
+      : (state.prompts_allowed - state.prompts_used) + ' of ' + state.prompts_allowed
+        + (state.pot ? ' prompts left in this session' : ' free prompts left');
     $('usage').textContent = usageText(state.usage, state.meter, true);
     $('status-session').textContent = 'Session ' + state.session;
     if (editable) status(state.busy ? 'Run' : 'User Input');
     else status(state.busy ? 'Run' : 'Watching');
-    if (state.spend) renderSpend(state.spend);
+    if (state.pot) renderPot(state.pot, state.spend);
+    else if (state.spend) renderSpend(state.spend);
 
     if (state.model_source !== lastSource) {
       lastSource = state.model_source;
@@ -884,11 +966,11 @@
       return api('prompt', { session: session, prompt: prompt, turnstile: token });
     }).then(function (r) {
       resetTurnstile();
-      if (r.error) { showError('prompt-error', r.error); $('build').disabled = !turnstileReady(); return; }
+      if (r.error) { showError('prompt-error', r.error); $('build').disabled = !turnstileReady() || potEmpty(); return; }
       $('prompt').value = '';
       fit($('prompt'));
       schedule(500);
-    }).catch(function (e) { resetTurnstile(); showError('prompt-error', 'Could not reach the lab: ' + e); $('build').disabled = !turnstileReady(); });
+    }).catch(function (e) { resetTurnstile(); showError('prompt-error', 'Could not reach the lab: ' + e); $('build').disabled = !turnstileReady() || potEmpty(); });
   });
 
   // On a phone the prompt's box is one line that grows with what is typed.

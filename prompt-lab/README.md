@@ -48,6 +48,13 @@ deploying stack's reverse proxy, which holds the API key: no key
 lives with this code, and none is read from it.  Payments, when an
 instance offers them, are settled by the same gate.
 
+Builds spend **modeling credits**, and the gate keeps the count.  It
+may give every session a free allowance and every payer a balance of
+their own, or keep one **community pot**: a single balance that every
+build, by anyone, draws on, that anyone may add to up to a limit, and
+that stops the lab at zero until someone does.  The page shows
+whichever the gate says it keeps; the reference instance keeps a pot.
+
 ## Running it
 
 Load the system into a Gendl image that has the `sluice` application
