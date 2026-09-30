@@ -223,6 +223,11 @@ textarea::placeholder { color: var(--pl-ink-dimmer); }
 }
 
 
+/* the lab out of reach: said once, in the colour of a complaint */
+.banner.offline { border-color: var(--pl-status-warn); }
+body.unreachable #status-state { color: var(--pl-status-warn); }
+
+
 /* --- the frame ---------------------------------------------------------- */
 
 #lab-main {

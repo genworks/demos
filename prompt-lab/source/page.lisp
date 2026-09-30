@@ -628,7 +628,8 @@ the model with one panel under it, the inputs or the tree."
 
 (defun publish-prompt-lab! (&key host)
   "Publish the page at *url-prefix*, its stylesheets and script under
-<prefix>/static/, its doors under <prefix>/api/ (config, session, state,
+<prefix>/static/, its manifest and service worker beside it, its doors
+under <prefix>/api/ (config, session, state,
 prompt, model, reload, topup, confirm, privacy; sessions, archive,
 archived, replay) and the viewer at <prefix>/viewer, on every server."
   (gwl:with-all-servers (server)
@@ -637,6 +638,11 @@ archived, replay) and the viewer at <prefix>/viewer, on every server."
     (net.aserve:publish-directory :prefix (format nil "~a/static/" *url-prefix*)
                                   :server server :host host
                                   :destination (namestring *static-directory*))
+    ;; the lab as an installable app (app.lisp)
+    (net.aserve:publish :path (format nil "~a/manifest.webmanifest" *url-prefix*)
+                        :server server :host host :function #'manifest-door)
+    (net.aserve:publish :path (format nil "~a/worker" *url-prefix*)
+                        :server server :host host :function #'worker-door)
     (net.aserve:publish :path (door-path "config") :server server :host host :function #'config-door)
     (net.aserve:publish :path (door-path "session") :server server :host host :function #'session-door)
     (net.aserve:publish :path (door-path "state") :server server :host host :function #'state-door)

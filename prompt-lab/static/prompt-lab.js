@@ -53,6 +53,97 @@
 
 
   //
+  // The lab as an app.  Installed (the manifest, and the worker that
+  // keeps the page's shell), it opens from its icon at ?app=1 and takes
+  // up the session this browser was last in.  The page is all that is
+  // kept on the device: a model is built, drawn and saved by the lab's
+  // engine, so when the lab cannot be reached the page says so, shows
+  // that session as it last saw it, and waits.
+  //
+
+  var launched = params.get('app') === '1', resumed = false;
+  var unreachable = false, configLoaded = false, shownLast = false;
+
+  function lastSeen() {
+    try { return JSON.parse(localStorage.getItem('prompt-lab-last') || 'null'); } catch (e) { return null; }
+  }
+
+  function keepLast(state) {
+    try {
+      localStorage.setItem('prompt-lab-last', JSON.stringify({
+        session: state.session, created: state.created, log: state.log || [],
+        usage: state.usage, meter: state.meter,
+        model_source: state.model_source, model_defined: !!state.model_defined
+      }));
+    } catch (e) {}
+  }
+
+  function forgetLast() { try { localStorage.removeItem('prompt-lab-last'); } catch (e) {} }
+
+  if (launched && !session && !archiveId && !browse) {
+    var last = lastSeen();
+    if (last && last.session && owners[last.session]) {
+      session = last.session;
+      resumed = true;
+      history.replaceState(null, '', pageUrl('session=' + session));
+    }
+  }
+
+  // The lab answers, or it does not.
+  function reach(there) {
+    if (unreachable === !there) return;
+    unreachable = !there;
+    document.body.classList.toggle('unreachable', unreachable);
+    $('offline-banner').hidden = !unreachable;
+    $('source').readOnly = unreachable || !editable;
+    if (unreachable) {
+      status('No Connection');
+      $('build').disabled = true;
+      $('save').disabled = true;
+      $('busy').hidden = true;
+      $('quota').textContent = '';
+    } else {
+      // what the page asks once, it may not have been able to ask yet
+      if (!configLoaded) loadConfig();
+      if (!session) {
+        status('User Input');
+        $('build').disabled = !turnstileReady();
+      }
+    }
+  }
+
+  // The session as this browser last saw it, shown once, when the lab
+  // cannot be asked.
+  function showLast() {
+    var last = lastSeen();
+    if (shownLast || rendered || !last || last.session !== session) return;
+    shownLast = true;
+    renderLog(last.log || []);
+    $('usage').textContent = usageText(last.usage, last.meter, true);
+    $('status-session').textContent = 'Session ' + last.session;
+    $('source').value = last.model_source || '';
+    lastSource = last.model_source;
+    if (last.model_defined) $('viewer-empty').textContent = 'The model is drawn by the lab\'s engine. It will be here when the lab answers.';
+  }
+
+  // A session taken up at launch that the lab no longer has: a new
+  // start, without a word about it.
+  function startAfresh() {
+    resumed = false;
+    forgetLast();
+    session = null;
+    logCount = 0;
+    $('log').innerHTML = '';
+    $('usage').textContent = '';
+    $('status-session').textContent = '';
+    $('welcome').hidden = false;
+    $('source').value = '';
+    lastSource = null;
+    history.replaceState(null, '', pageUrl(''));
+  }
+
+
+  //
   // Two layouts, one document.  On a desk the panes tile a frame; on a
   // phone they are screens behind the tabs, and the viewer's frame shows
   // the model with one panel under it.  The stylesheet decides by the
@@ -390,7 +481,10 @@
   var siblingUrl = null, engineHere = null;
 
   function loadConfig() {
+    if (configLoaded) return Promise.resolve();
     return fetch(base + '/api/config').then(function (r) { return r.json(); }).then(function (config) {
+      configLoaded = true;
+      if (!session) reach(true);
       engineHere = config.engine || null;
       // which engine this room runs, and the lab on the other one
       if (config.engine_label) {
@@ -419,7 +513,12 @@
       script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=__turnstileLoaded&render=explicit';
       script.async = true; script.defer = true;
       document.head.appendChild(script);
-    }).catch(function () { /* no config door: an older lab; carry on without a widget */ });
+    }).catch(function (e) {
+      // an answer that is not a configuration is an older lab, with no
+      // such door: carry on without a widget.  No answer at all is the
+      // lab out of reach.
+      if (e instanceof TypeError) { reach(false); if (!session) schedule(5000); }
+    });
   }
 
   // A command's name, in the manner of the others: each word with a capital.
@@ -518,6 +617,8 @@
 
   function render(state) {
     var log = state.log || [];
+    reach(true);
+    resumed = false;
     renderLog(log);
     if (state.editable === false && editable) {
       readOnly('You are watching someone else\u2019s session, opened ' + escapeHtml(formatDate(state.created))
@@ -573,6 +674,8 @@
       $('viewer-empty').hidden = true;
     }
     rendered = true;
+    // what an app opened from its icon takes up again
+    if (editable && ownerKey()) keepLast(state);
     // a watcher polls more gently
     schedule(state.busy ? (editable ? 2000 : 4000) : (editable ? 8000 : 15000));
   }
@@ -715,8 +818,10 @@
   }
 
   function poll() {
-    if (!session) return;
+    // no session yet, and the lab did not answer: ask again
+    if (!session) { if (unreachable) loadConfig(); return; }
     api('state').then(function (state) {
+      if (state._status === 404 && resumed) { reach(true); startAfresh(); return; }
       if (state._status === 403) {
         readOnly(escapeHtml(state.error || 'This session is private.') + ' <a href="' + pageUrl('') + '">Start your own</a>.');
         return;
@@ -729,8 +834,10 @@
         return;
       }
       render(state);
-    }).catch(function () { schedule(5000); });
+    }).catch(function () { reach(false); showLast(); schedule(5000); });
   }
+
+  window.addEventListener('online', function () { if (unreachable) { clearTimeout(timer); poll(); } });
 
   $('prompt-form').addEventListener('submit', function (event) {
     event.preventDefault();
@@ -846,6 +953,30 @@
     var doc = frameDocument();
     if (doc && doc.documentElement) { try { watchPointer(doc); } catch (e) {} }
   });
+
+  // The browser's offer to install the lab, kept until the visitor asks
+  // for it among the commands.
+  var installOffer = null;
+  window.addEventListener('beforeinstallprompt', function (event) {
+    event.preventDefault();
+    installOffer = event;
+    $('install').hidden = false;
+  });
+  window.addEventListener('appinstalled', function () { installOffer = null; $('install').hidden = true; });
+  $('install').addEventListener('click', function (event) {
+    event.preventDefault();
+    if (!installOffer) return;
+    installOffer.prompt();
+    installOffer.userChoice.then(function () { installOffer = null; $('install').hidden = true; });
+  });
+
+  // The worker that keeps the page's shell.  It is served beside the
+  // page and reaches the page itself: the lab's prefix is its scope.
+  if ('serviceWorker' in navigator && lab.worker && lab.prefix) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register(lab.worker, { scope: lab.prefix }).catch(function () {});
+    });
+  }
 
   function layoutChanged() { syncFrame(); fit($('prompt')); if (!phone()) sheet(false); }
   if (phoneQuery.addEventListener) phoneQuery.addEventListener('change', layoutChanged);

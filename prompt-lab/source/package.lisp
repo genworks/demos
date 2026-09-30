@@ -32,4 +32,6 @@
              #:*turnstile-site-key*
              #:*turnstile-verify-url*
              #:*turnstile-secret-file*
-             #:*browsing?*))
+             #:*browsing?*
+             #:*default-skin*
+             #:*app?*))

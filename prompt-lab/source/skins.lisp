@@ -73,20 +73,30 @@ underscore and full stop (prompt-lab-<vendor>.<name>.css), nothing else."
 (defun skin-file-name (name)
   (format nil "prompt-lab-~a.css" name))
 
+(defun token-value (file token)
+  "String or nil. What the stylesheet FILE declares TOKEN to be, as written
+there (the first declaration; a quoted string without its quotes), or nil
+when it does not declare it or cannot be read."
+  (ignore-errors
+   (let* ((text (uiop:read-file-string file :external-format :utf-8))
+          (start (search (concatenate 'string token ":") text))
+          (from (and start (+ start (length token) 1)))
+          (end (and from (position #\; text :start from))))
+     (when end
+       (let ((value (string-trim '(#\space #\tab #\newline #\return) (subseq text from end))))
+         (if (and (> (length value) 1)
+                  (char= (char value 0) #\")
+                  (char= (char value (1- (length value))) #\"))
+             (subseq value 1 (1- (length value)))
+             value))))))
+
 (defun skin-label (file name)
   "String. What the skin calls itself -- the string of its --pl-skin-label
 token -- or NAME with a capital when it declares none."
-  (or (ignore-errors
-       (let* ((text (uiop:read-file-string file :external-format :utf-8))
-              (token (search "--pl-skin-label" text))
-              (open (and token (position #\" text :start token)))
-              (close (and open (position #\" text :start (1+ open))))
-              ;; the declaration ends at its semicolon: a quote beyond it
-              ;; belongs to something else
-              (end (and token (position #\; text :start token))))
-         (when (and close end (< close end) (> close (1+ open)))
-           (subseq text (1+ open) close))))
-      (string-capitalize (substitute #\space #\- name))))
+  (let ((label (token-value file "--pl-skin-label")))
+    (if (and label (plusp (length label)))
+        label
+        (string-capitalize (substitute #\space #\- name)))))
 
 (defun skins ()
   "List of plists (:name :label :href), the skins in the static directory
@@ -125,42 +135,49 @@ then SKIN's (a plist from find-skin, or nil for the house look)."
 
 
 ;;
-;; The page.  static/page.html is the document, with four places for
-;; this side to fill in: the addresses of its two sheets and its script,
-;; and what the script needs to know before it asks any door.
+;; The page.  static/page.html is the document, with places in double
+;; braces for this side to fill in: the addresses of its two sheets, its
+;; script, its manifest and icons (app.lisp), and what the script needs
+;; to know before it asks any door.
 ;;
+
+(defun ascii-json (json)
+  "String. JSON, a string of JSON, fit to stand inside a script element
+and to be written in any encoding: nothing in it closes the element, and a
+character beyond ASCII (a skin's label) goes as its escape."
+  (with-output-to-string (out)
+    (loop for char across json
+          for code = (char-code char)
+          do (cond ((char= char #\<) (write-string "\\u003c" out))
+                   ((< code 128) (write-char char out))
+                   ((< code #x10000) (format out "\\u~4,'0x" code))
+                   (t (let ((rest (- code #x10000)))
+                        (format out "\\u~4,'0x\\u~4,'0x"
+                                (+ #xD800 (ash rest -10))
+                                (+ #xDC00 (logand rest #x3FF)))))))))
 
 (defun page-boot ()
   "String. JSON for the page's script: where the static files are, and the
 skins there are."
-  (let ((json (encode (h "prefix" *url-prefix*
-                         ;; the viewer's phone sheet, for a frame that
-                         ;; was opened on a desk and finds itself on a phone
-                         "phone_css" (static-url "prompt-lab-phone.css")
-                         "house" *house-skin*
-                         "default_skin" (let ((skin (find-skin *default-skin*)))
-                                          (if skin (getf skin :name) *house-skin*))
-                         "aliases" (let ((table (make-hash-table :test #'equal)))
-                                     (loop for (from . to) in *skin-aliases*
-                                           do (setf (gethash from table) to))
-                                     table)
-                         "skins" (map 'vector #'(lambda (skin)
-                                                  (h "name" (getf skin :name)
-                                                     "label" (getf skin :label)
-                                                     "href" (getf skin :href)))
-                                      (skins))))))
-    ;; inside a script element: nothing in it may close the element, and
-    ;; a character beyond ASCII (a skin's label) goes as its escape
-    (with-output-to-string (out)
-      (loop for char across json
-            for code = (char-code char)
-            do (cond ((char= char #\<) (write-string "\\u003c" out))
-                     ((< code 128) (write-char char out))
-                     ((< code #x10000) (format out "\\u~4,'0x" code))
-                     (t (let ((rest (- code #x10000)))
-                          (format out "\\u~4,'0x\\u~4,'0x"
-                                  (+ #xD800 (ash rest -10))
-                                  (+ #xDC00 (logand rest #x3FF))))))))))
+  (ascii-json
+   (encode (h "prefix" *url-prefix*
+              ;; the viewer's phone sheet, for a frame that was opened
+              ;; on a desk and finds itself on a phone
+              "phone_css" (static-url "prompt-lab-phone.css")
+              ;; the service worker, when the lab keeps one (app.lisp)
+              "worker" (and (app?) (format nil "~a/worker" *url-prefix*))
+              "house" *house-skin*
+              "default_skin" (let ((skin (find-skin *default-skin*)))
+                               (if skin (getf skin :name) *house-skin*))
+              "aliases" (let ((table (make-hash-table :test #'equal)))
+                          (loop for (from . to) in *skin-aliases*
+                                do (setf (gethash from table) to))
+                          table)
+              "skins" (map 'vector #'(lambda (skin)
+                                       (h "name" (getf skin :name)
+                                          "label" (getf skin :label)
+                                          "href" (getf skin :href)))
+                           (skins))))))
 
 (defun ascii-only (text)
   "String. TEXT with every character beyond ASCII as an HTML character
@@ -177,12 +194,13 @@ reference means nothing inside a script."
 
 (defun static-signature ()
   "List. The static files with their write dates: the page is filled in
-again when any of them changes."
+again when any of them changes, and the worker keeps a new cache."
   (mapcar #'(lambda (file) (list (pathname-name file) (pathname-type file)
                                  (ignore-errors (file-write-date file))))
           (append (directory (merge-pathnames "*.css" *static-directory*))
                   (directory (merge-pathnames "*.js" *static-directory*))
-                  (directory (merge-pathnames "*.html" *static-directory*)))))
+                  (directory (merge-pathnames "*.html" *static-directory*))
+                  (directory (merge-pathnames "icons/*.png" *static-directory*)))))
 
 (defvar *page-cache* nil
   "Cons of the static signature and the page filled in under it, or nil.")
@@ -194,12 +212,16 @@ again when any of them changes."
            (list (cons "{{tokens-css}}" (static-url "prompt-lab.css"))
                  (cons "{{page-css}}" (static-url "prompt-lab-page.css"))
                  (cons "{{script}}" (static-url "prompt-lab.js"))
+                 (cons "{{manifest}}" (format nil "~a/manifest.webmanifest" *url-prefix*))
+                 (cons "{{icon}}" (static-url "icons/icon-192.png"))
+                 (cons "{{touch-icon}}" (static-url "icons/apple-touch-icon.png"))
+                 (cons "{{app-name}}" (app-short-name))
                  (cons "{{boot}}" (page-boot)))
            :initial-value text)))
 
 (defun page-text ()
   "String. The page, filled in; read again when a static file has changed."
-  (let ((signature (list *url-prefix* *default-skin* (static-signature)))
+  (let ((signature (list *url-prefix* *default-skin* (app?) (app-short-name) (static-signature)))
         (cache *page-cache*))
     (if (and cache (equal (car cache) signature))
         (cdr cache)

@@ -16,6 +16,11 @@ How the lab looks is a **skin**: one CSS file of tokens, dropped into
 and on a phone.  [prompt-lab/SKIN-API.md](prompt-lab/SKIN-API.md) is
 the contract.
 
+The lab can be installed as an app (a web app manifest, and a service
+worker that keeps the page itself on the device).  It needs its
+connection all the same: models are built, drawn and saved by the
+lab's engine, and nothing of that is ever answered from a cache.
+
 ## Issues
 
 Problems with the prompt lab or any demo -- a model it built wrong, a

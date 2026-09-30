@@ -12,5 +12,5 @@
   (:file "source/session") (:file "source/archive")
   (:file "source/raster") (:file "source/tools")
   (:file "source/agent") (:file "source/docs") (:file "source/meter")
-  (:file "source/guards") (:file "source/skins")
+  (:file "source/guards") (:file "source/skins") (:file "source/app")
   (:file "source/page") (:file "source/browse")))
