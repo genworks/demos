@@ -18,6 +18,9 @@
 //   --page URL       the lab as your browser reaches it, when that is
 //                    another address (default $PROMPT_LAB_PAGE_URL, else
 //                    the same)
+//   --out FILE       when the build finishes, write the model's source
+//                    there, under a header that puts it in gdl-user, so
+//                    the file loads into any Gendl by itself
 //   --continue       go on in the session this script last worked in
 //   --session ID     go on in that session (one this script opened)
 //   --model NAME     instead of the model the lab itself uses
@@ -70,6 +73,7 @@ for (let i = 2; i < process.argv.length; i++) {
   if (a === '--help' || a === '-h') usage(0);
   else if (a === '--lab') opt.lab = value();
   else if (a === '--page') opt.page = value();
+  else if (a === '--out') opt.out = value();
   else if (a === '--session') opt.session = value();
   else if (a === '--continue') opt.continue = true;
   else if (a === '--model') opt.model = value();
@@ -266,6 +270,26 @@ if (result) {
   if (typeof result.total_cost_usd === 'number') {
     console.log(`cost     $${result.total_cost_usd.toFixed(4)} at API prices, Claude Code's own estimate `
       + '(a subscription sign-in is not billed by the token)');
+  }
+}
+
+// where the model is: the file the lab keeps (as the lab's own host names
+// it), and a copy of its source where --out asked for one
+let kept = null;
+try {
+  const response = await fetch(`${lab}/api/state?session=${sessionId}`,
+                               { headers: { 'X-Prompt-Lab-Owner': known.owner } });
+  if (response.ok) kept = await response.json();
+} catch { /* the lab went away: nothing to add */ }
+const source = kept && typeof kept.model_source === 'string' ? kept.model_source.trim() : '';
+if (source && kept.model_file) console.log(`model    ${kept.model_file}`);
+if (opt.out) {
+  if (ok && source) {
+    writeFileSync(opt.out, `;; Built by the prompt lab's modeling agent: session ${sessionId} at ${lab}.\n`
+      + ";; (make-object 'model) builds it.\n\n(in-package :gdl-user)\n\n" + source + '\n');
+    console.log(`wrote    ${opt.out}`);
+  } else {
+    console.error(`--out: ${opt.out} was not written (${ok ? 'the session has no model' : 'the build did not finish'}).`);
   }
 }
 console.log(`watch    ${pageUrl}`);

@@ -91,10 +91,15 @@ node external/claude-code.mjs --lab http://localhost:9080/prompt-lab \
 ```
 
 It prints each tool call as it happens, the reply, the token counts,
-and the session's address: open that in a browser to see the model in
-the viewer beside its source (as a watcher -- the session's key stays
-with the script).  The script needs node 18 or later and the `claude`
-command; `--help` lists its options.
+where the lab keeps the model file, and the session's address: open
+that in a browser to see the model in the viewer beside its source
+(as a watcher -- the session's key stays with the script).  With
+`--out FILE` it also writes the model's source to a file of your own,
+under an `(in-package :gdl-user)` header, so the file loads into any
+Gendl by itself.  It exits 0 when the build finished and 1 when it
+did not, so a script can run a batch of prompts and collect the
+models.  The script needs node 18 or later and the `claude` command;
+`--help` lists its options.
 
 What this exercises is everything but the lab's own loop and the
 gate: the system prompt and the primer, the tools, the compiles and
