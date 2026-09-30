@@ -420,6 +420,21 @@ the body, the status, the final path."
                        (and (not (eq (gethash "busy" state) t))
                             (find "done" (gethash "log" state)
                                   :key (lambda (entry) (gethash "kind" entry)) :test #'equal))))))
+          (smoke "prompt-lab agent door opens a session on a model it is handed"
+                 (lambda ()
+                   (let* ((brief (json-of :post (door "agent")
+                                          :json (table "event" "prompt" "text" "Make the plate thicker."
+                                                       "model" *smoke-model*)))
+                          (headers (list (cons "X-Prompt-Lab-Owner" (gethash "owner" brief))))
+                          (seeded (gethash "session" brief)))
+                     (unless (eq (gethash "seeded" brief) t)
+                       (error "the brief does not say the model was taken"))
+                     (json-of :post (door "agent") :headers headers
+                              :json (table "event" "stopped" "session" seeded "text" "Only a test."))
+                     (let ((state (json-of :get (format nil "~a?session=~a" (door "state") seeded)
+                                           :headers headers)))
+                       (and (eq (gethash "model_defined" state) t)
+                            (search "define-object model" (gethash "model_source" state)))))))
           (setf (symbol-value (lab '#:*external-agent?*)) nil)
           ;; the community pot (page.lisp): what the lab has heard from a
           ;; gate that keeps one is everyone's to see, and an empty pot

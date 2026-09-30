@@ -110,10 +110,14 @@ version that fails to compile is kept too."
   "The model's source as write-model takes it: the file after its header
 (the lab's comment and the in-package line), which is also what the
 page's editor shows.  Handed the whole file, an agent wrote the header's
-comment back into the source, and the next write put a second one on top."
+comment back into the source, and the next write put a second one on top.
+All of it, never cut at *result-limit*: an agent asked to change a model
+it did not write in this conversation (a visitor's edit, a session opened
+on a file) has nothing else to work from, and one shown the first 4000
+characters of a longer file spent its rounds looking for the rest."
   (let ((file (session-model-file session)))
     (if (probe-file file)
-        (values (list (text-result "~a" (file-model-body file))) nil)
+        (values (list `(("type" . "text") ("text" . ,(file-model-body file)))) nil)
         (values (list (text-result "There is no model file yet.")) nil))))
 
 

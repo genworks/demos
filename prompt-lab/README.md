@@ -93,10 +93,11 @@ A lab under development does not need the gate or an API key.  With
 doors (`source/external.lisp`), and an agent that runs somewhere else
 works on a session in place of the lab's own loop:
 
-- `<prefix>/api/agent` takes the prompt and answers with the system
-  prompt the lab's own agent gets, the model and effort it would use,
-  and the address of the session's tools; later it takes the agent's
-  progress and its reply, for the log the page shows.
+- `<prefix>/api/agent` takes the prompt (and, for a new session, a
+  model file to start from) and answers with the system prompt the
+  lab's own agent gets, the model and effort it would use, and the
+  address of the session's tools; later it takes the agent's progress
+  and its reply, for the log the page shows.
 - `<prefix>/mcp?session=<id>` is the session's tools -- `write_model`,
   `read_model`, `evaluate`, `check_model`, `render`, `describe_object`,
   `search_docs` -- as a [Model Context Protocol](https://modelcontextprotocol.io)
@@ -126,7 +127,12 @@ that in a browser to see the model in the viewer beside its source
 (as a watcher -- the session's key stays with the script).  With
 `--out FILE` it also writes the model's source to a file of your own,
 under an `(in-package :gdl-user)` header, so the file loads into any
-Gendl by itself.  It exits 0 when the build finished and 1 when it
+Gendl by itself.  With `--seed FILE` the session opens on a model
+that already exists -- a file `--out` wrote, or any Gendl source whose
+object is named MODEL: it is compiled and loaded there before the
+agent starts, and the agent, asked to change it, reads it and works
+from it (a file built on one engine can be taken to a lab on the
+other this way).  It exits 0 when the build finished and 1 when it
 did not, so a script can run a batch of prompts and collect the
 models.  The script needs node 18 or later and the `claude` command;
 `--help` lists its options.

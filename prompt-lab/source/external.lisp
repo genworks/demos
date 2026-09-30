@@ -73,10 +73,13 @@ session, so a tool that is slow in one keeps no other waiting.")
   "POST <prefix>/api/agent {event, session?, text, usage?}: an external
 agent's side of one prompt.  The events:
   prompt   TEXT is the visitor's prompt.  Without a session one is opened,
-           and its owner key answered, once.  The session is claimed as
-           the prompt door claims it; the answer is the brief: the system
-           prompt, the model and effort the lab itself would use, the
-           tools' names and the address of the MCP door.
+           and its owner key answered, once; MODEL, when given with it,
+           is the source of a model file for the new session to start
+           from, written, compiled and loaded as a visitor's own edit
+           is.  The session is claimed as the prompt door claims it; the
+           answer is the brief: the system prompt, the model and effort
+           the lab itself would use, the tools' names and the address of
+           the MCP door.
   text     TEXT is the agent's progress, for the log.
   done     TEXT is the agent's reply; USAGE, when given, is its token
            counts in the Messages API's names.  The session is released.
@@ -84,6 +87,7 @@ agent's side of one prompt.  The events:
   (let* ((json (request-json req))
          (event (and json (gethash "event" json)))
          (text (and json (gethash "text" json)))
+         (seed (and json (gethash "model" json)))
          (named (or (and json (gethash "session" json)) (query-value req "session")))
          (session (requested-session req json)))
     (flet ((said () (and (stringp text) (string-trim '(#\space #\tab #\newline #\return) text)))
@@ -104,7 +108,13 @@ agent's side of one prompt.  The events:
                                (refuse req ent "Still working on the previous request."))
                               (t (when opened?
                                    (log-event session :note "Session ~a opened for an external agent."
-                                              (session-id session)))
+                                              (session-id session))
+                                   ;; a model to start from, before the prompt is heard
+                                   (when (stringp seed)
+                                     (log-event session :reload "Started from a model file: ~a"
+                                                (or (cdr (assoc "text" (first (write-model session seed))
+                                                                :test #'string=))
+                                                    ""))))
                                  (log-event session :prompt "~a" (said))
                                  (setf (session-messages session)
                                        (append (session-messages session)
@@ -113,6 +123,7 @@ agent's side of one prompt.  The events:
                                  (let ((brief (agent-brief session)))
                                    ;; the key goes to whoever opened the session, once
                                    (when opened? (setf (gethash "owner" brief) (session-owner session)))
+                                   (when (and opened? (stringp seed)) (setf (gethash "seeded" brief) t))
                                    (respond-json req ent brief))))))))
             ((null session) (refuse req ent "Name the session."))
             ((equal event "text")

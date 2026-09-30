@@ -21,6 +21,10 @@
 //   --out FILE       when the build finishes, write the model's source
 //                    there, under a header that puts it in gdl-user, so
 //                    the file loads into any Gendl by itself
+//   --seed FILE      open the session on an existing model: the file's
+//                    source (what follows its in-package form, when it
+//                    has one) is compiled and loaded there before the
+//                    agent starts, which then works from it
 //   --continue       go on in the session this script last worked in
 //   --session ID     go on in that session (one this script opened)
 //   --model NAME     instead of the model the lab itself uses
@@ -74,6 +78,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--lab') opt.lab = value();
   else if (a === '--page') opt.page = value();
   else if (a === '--out') opt.out = value();
+  else if (a === '--seed') opt.seed = value();
   else if (a === '--session') opt.session = value();
   else if (a === '--continue') opt.continue = true;
   else if (a === '--model') opt.model = value();
@@ -120,9 +125,24 @@ async function tell(body) {
   return { status: response.status, json: json || {} };
 }
 
+// a model to start from: the lab's own file header sets the package, so
+// what the file has up to and with an in-package form stays behind
+let seed;
+if (opt.seed) {
+  if (sessionId) { console.error('--seed opens a new session: not with --continue or --session.'); process.exit(2); }
+  let text;
+  try { text = readFileSync(opt.seed, 'utf8'); } catch (e) {
+    console.error(`--seed: ${opt.seed} cannot be read (${e.message}).`);
+    process.exit(2);
+  }
+  const header = /^\(in-package\b[^)]*\)[ \t]*\r?\n?/im.exec(text);
+  seed = (header ? text.slice(header.index + header[0].length) : text).trim();
+  if (!seed) { console.error(`--seed: ${opt.seed} holds no source.`); process.exit(2); }
+}
+
 let brief;
 try {
-  brief = await tell({ event: 'prompt', text: prompt, session: sessionId || undefined });
+  brief = await tell({ event: 'prompt', text: prompt, session: sessionId || undefined, model: seed });
 } catch (e) {
   console.error(`The lab at ${lab} cannot be reached: ${e.cause ? e.cause.message : e.message}`);
   process.exit(1);
@@ -147,6 +167,16 @@ writeState(state);
 
 const pageUrl = `${(opt.page || process.env.PROMPT_LAB_PAGE_URL || lab).replace(/\/+$/, '')}?session=${sessionId}`;
 console.log(`session  ${sessionId}${resumed ? ' (continued)' : ''}`);
+if (seed) {
+  if (!brief.seeded) {
+    // an older lab opens the session empty: better no build than one from nothing
+    const why = 'This lab does not take a model to start from (--seed).';
+    await tell({ event: 'stopped', text: why, session: sessionId }).catch(() => {});
+    console.error(why);
+    process.exit(1);
+  }
+  console.log(`seed     ${opt.seed}, ${seed.split('\n').length} lines`);
+}
 console.log(`watch    ${pageUrl}`);
 
 // everything said to the lab from here on goes in order, and a failure
