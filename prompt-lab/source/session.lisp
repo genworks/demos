@@ -93,6 +93,17 @@
 (defmacro with-session-lock ((session) &body body)
   `(bt:with-recursive-lock-held ((session-lock ,session)) ,@body))
 
+;; Who wants to hear that a session changed: a page that shows it live
+;; (the sheet, sheet/) pushes the change instead of waiting for a poll.
+;; Called after every log entry and every save, from whichever thread
+;; made the change; a hook that fails is ignored.
+(defvar *session-change-hooks* nil
+  "List of functions of one argument, a session, called when it changes.")
+
+(defun session-changed! (session)
+  (dolist (hook *session-change-hooks*)
+    (ignore-errors (funcall hook session))))
+
 (defun make-session (&key (id (new-session-id)) address wallet (owner (new-owner-key))
                           (register? t))
   "Create a session: a fresh package defined like gdl-user, and a directory
@@ -183,7 +194,8 @@ privacy switch can all save at once, and shared session.tmp."
      (when (probe-file file) (delete-file file))
      (rename-file tmp file)
      file))
-    (archive-session! session))))
+    (archive-session! session)
+    (session-changed! session))))
 
 (defun repair-messages (messages)
   "MESSAGES as parsed from a session file, with every tool_result's

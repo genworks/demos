@@ -73,6 +73,7 @@ lists for yason."
     (with-session-lock (session)
       (setf (session-log session)
             (append (session-log session) (list (list (get-universal-time) kind text)))))
+    (session-changed! session)
     text))
 
 

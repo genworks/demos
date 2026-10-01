@@ -435,31 +435,84 @@ behind this room and the sibling lab on the other engine, if any."
                            ;; the community pot, where the gate keeps one
                            "pot" (pot-state))))
 
+(defun open-session! (address &optional wallet)
+  "Open a session for a visitor at ADDRESS, naming WALLET if any.  Values:
+the session, or nil, the reason and the response to refuse with.  One
+address opens at most *max-sessions-per-address* a day, unless its wallet
+has credit or has put more into the pot than it has drawn."
+  (if (and (address-over-limit? address :sessions)
+           (not (and (wallet-id? wallet)
+                     (let ((balance (ignore-errors (gate-post "balance" (h "wallet" wallet)))))
+                       (and balance
+                            (flet ((credit? (name)
+                                     (let ((value (gethash name balance)))
+                                       (and (realp value) (plusp value)))))
+                              (or (credit? "credits_cents") (credit? "contribution_left_cents"))))))))
+      (values nil
+              (format nil "This address has opened its ~a free sessions for today.  Come back tomorrow, or bring your own agent."
+                      *max-sessions-per-address*)
+              *response-too-many-requests*)
+      (let ((session (make-session :address address :wallet (and (wallet-id? wallet) wallet))))
+        (count-address! address :sessions)
+        (log-event session :note "Session ~a opened.  Describe what to build." (session-id session))
+        (refresh-balance! session)
+        (save-session! session)
+        session)))
+
+(defun begin-prompt! (session prompt address token)
+  "Start the agent on PROMPT in SESSION for a visitor at ADDRESS, after
+every check the prompt door makes (the owner's excepted: the caller's).
+TOKEN is the human check's, nil for a script's prompt.  Values: :started
+and the lane, or nil, the reason and the response to refuse with."
+  (cond ((not (and (stringp prompt)
+                   (plusp (length (string-trim '(#\space #\tab #\newline #\return) prompt)))))
+         (values nil "Say what to build." net.aserve:*response-bad-request*))
+        ((> (length prompt) *max-prompt-length*)
+         (values nil (format nil "A prompt may have ~a characters at most." *max-prompt-length*)
+                 net.aserve:*response-bad-request*))
+        ;; a community pot with nothing in it builds for nobody
+        ((pot-empty?)
+         (values nil "The community pot of modeling credits is empty.  Top it up and the lab builds again, for everyone."
+                 *response-too-many-requests*))
+        ((and (free-caps? session) (>= (prompts-used session) *max-prompts-per-session*))
+         (values nil (format nil "This session has used its ~a ~:[free ~;~]prompts.  ~a to keep going here, take a copy of the model file, or start a new session."
+                             *max-prompts-per-session* (pot)
+                             (if (pot) "Add modeling credits to the pot" "Buy modeling credits"))
+                 net.aserve:*response-bad-request*))
+        ((and (free-caps? session) (address-over-limit? address :prompts))
+         (values nil (format nil "This address has run its ~a ~:[free ~;~]prompts for today.  ~a to keep going, come back tomorrow, or bring your own agent."
+                             *max-prompts-per-address* (pot)
+                             (if (pot) "Add modeling credits to the pot" "Buy modeling credits"))
+                 *response-too-many-requests*))
+        ((session-busy? session)
+         (values nil "Still working on the previous request." net.aserve:*response-bad-request*))
+        (t
+         ;; the token is single-use and the check is a network call:
+         ;; last, after every cheap refusal.  A prompt with no token at
+         ;; all is a script's or an agent's, and rides the automated
+         ;; lane's allowance when there is one (guards.lisp).
+         (multiple-value-bind (ok? reason lane) (admit-prompt token address)
+           (cond ((not ok?)
+                  (values nil reason (if (and (automated-lane?) (null token))
+                                         *response-too-many-requests*
+                                         net.aserve:*response-forbidden*)))
+                 ((not (start-prompt! session (string-trim '(#\space #\tab #\newline #\return) prompt)))
+                  (values nil "Still working on the previous request." net.aserve:*response-bad-request*))
+                 (t (count-address! address :prompts)
+                    (when (eq lane :automated)
+                      (count-automated! address)
+                      (log-event session :note "This prompt came without the human check: an automated one, on the lab's daily allowance for those."))
+                    (values :started lane)))))))
+
 (defun session-door (req ent)
   "POST <prefix>/api/session {wallet?}: open a session; answers its id.
 One address opens at most *max-sessions-per-address* a day."
   (let* ((address (client-address req))
          (json (request-json req))
          (wallet (and json (gethash "wallet" json))))
-    (if (and (address-over-limit? address :sessions)
-             ;; a wallet with credit -- or, at a community pot, one that
-             ;; has put in more than it has drawn -- opens sessions past
-             ;; the free cap
-             (not (and (wallet-id? wallet)
-                       (let ((balance (ignore-errors (gate-post "balance" (h "wallet" wallet)))))
-                         (and balance
-                              (flet ((credit? (name)
-                                       (let ((value (gethash name balance)))
-                                         (and (realp value) (plusp value)))))
-                                (or (credit? "credits_cents") (credit? "contribution_left_cents"))))))))
-        (refuse req ent *response-too-many-requests*
-                "This address has opened its ~a free sessions for today.  Come back tomorrow, or bring your own agent."
-                *max-sessions-per-address*)
-        (let ((session (make-session :address address :wallet (and (wallet-id? wallet) wallet))))
-          (count-address! address :sessions)
-          (log-event session :note "Session ~a opened.  Describe what to build." (session-id session))
-          (refresh-balance! session)
-          (save-session! session)
+    (multiple-value-bind (session reason response) (open-session! address wallet)
+      (if (null session)
+          (refuse req ent response "~a" reason)
           ;; the owner key goes to this browser once, here, and nowhere else
           (respond-json req ent (h "session" (session-id session)
                                    "owner" (session-owner session)
@@ -629,49 +682,15 @@ nobody else may look."
 prompt in a thread of its own; the page follows along through the state door."
   (let* ((json (request-json req))
          (session (requested-session req json))
-         (prompt (and json (gethash "prompt" json)))
          (address (client-address req)))
     (cond ((null session) (no-such-session req ent))
           ((not (owner? session (request-owner-key req json) address)) (not-yours req ent))
-          ((not (and (stringp prompt)
-                     (plusp (length (string-trim '(#\space #\tab #\newline #\return) prompt)))))
-           (refuse req ent "Say what to build."))
-          ((> (length prompt) *max-prompt-length*)
-           (refuse req ent "A prompt may have ~a characters at most." *max-prompt-length*))
-          ;; a community pot with nothing in it builds for nobody
-          ((pot-empty?)
-           (refuse req ent *response-too-many-requests*
-                   "The community pot of modeling credits is empty.  Top it up and the lab builds again, for everyone."))
-          ((and (free-caps? session) (>= (prompts-used session) *max-prompts-per-session*))
-           (refuse req ent "This session has used its ~a ~:[free ~;~]prompts.  ~a to keep going here, take a copy of the model file, or start a new session."
-                   *max-prompts-per-session* (pot)
-                   (if (pot) "Add modeling credits to the pot" "Buy modeling credits")))
-          ((and (free-caps? session) (address-over-limit? address :prompts))
-           (refuse req ent *response-too-many-requests*
-                   "This address has run its ~a ~:[free ~;~]prompts for today.  ~a to keep going, come back tomorrow, or bring your own agent."
-                   *max-prompts-per-address* (pot)
-                   (if (pot) "Add modeling credits to the pot" "Buy modeling credits")))
-          ((session-busy? session)
-           (refuse req ent "Still working on the previous request."))
-          (t
-           ;; the token is single-use and the check is a network call:
-           ;; last, after every cheap refusal.  A prompt with no token at
-           ;; all is a script's or an agent's, and rides the automated
-           ;; lane's allowance when there is one (guards.lisp).
-           (multiple-value-bind (ok? reason lane) (admit-prompt (gethash "turnstile" json) address)
-             (cond ((not ok?)
-                    (refuse req ent (if (and (automated-lane?) (null (gethash "turnstile" json)))
-                                        *response-too-many-requests*
-                                        net.aserve:*response-forbidden*)
-                            "~a" reason))
-                   ((not (start-prompt! session (string-trim '(#\space #\tab #\newline #\return) prompt)))
-                    (refuse req ent "Still working on the previous request."))
-                   (t (count-address! address :prompts)
-                      (when (eq lane :automated)
-                        (count-automated! address)
-                        (log-event session :note "This prompt came without the human check: an automated one, on the lab's daily allowance for those."))
-                      (respond-json req ent (h "started" t "automated" (if (eq lane :automated) t 'yason:false))
-                                    net.aserve:*response-accepted*))))))))
+          (t (multiple-value-bind (started reason response)
+                 (begin-prompt! session (gethash "prompt" json) address (gethash "turnstile" json))
+               (if started
+                   (respond-json req ent (h "started" t "automated" (if (eq reason :automated) t 'yason:false))
+                                 net.aserve:*response-accepted*)
+                   (refuse req ent response "~a" reason)))))))
 
 (defun model-door (req ent)
   "POST <prefix>/api/model {session, source}: the visitor's own edit of the
