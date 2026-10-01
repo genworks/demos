@@ -22,7 +22,7 @@
 ;;   iges  the same
 ;;
 ;; STEP and IGES carry solids only: a primitive of the free engine's
-;; kind (box, cylinder, cone, torus, global-polygon-projection) is
+;; kind (box, cylinder, cone, sphere, torus, global-polygon-projection) is
 ;; written as the solid of the same shape, made for the purpose, and kept
 ;; only when its bounding box is the primitive's own; what is already a
 ;; solid is written as it is; anything else is left out and named in
@@ -120,6 +120,24 @@ its size."
                      :major-radius (the-object leaf major-radius)
                      :minor-radius (the-object leaf minor-radius)
                      :inner-minor-radius (the-object leaf inner-minor-radius))))
+      ;; surf has no sphere solid: a whole sphere's surface, sewn into a
+      ;; closed brep
+      (sphere (let ((surface (surf-type "SPHERICAL-SURFACE"))
+                    (brep (surf-type "BREP-FROM-SURFACE")))
+                (when (and surface brep
+                           (null (the-object leaf inner-radius))
+                           (full-circle? leaf)
+                           (zerop (the-object leaf start-horizontal-arc))
+                           (< (abs (- (the-object leaf end-horizontal-arc) (* 2 pi))) 1d-9)
+                           (< (abs (+ (the-object leaf start-vertical-arc) (/ pi 2))) 1d-9)
+                           (< (abs (- (the-object leaf end-vertical-arc) (/ pi 2))) 1d-9))
+                  (make-object (class-name brep)
+                               :surface (make-object (class-name surface)
+                                                     :radius (the-object leaf radius)
+                                                     :center (the-object leaf center)
+                                                     :orientation (the-object leaf orientation))
+                               :sew-and-orient-brep? t
+                               :display-controls (the-object leaf display-controls)))))
       (global-polygon-projection
        (let ((curve (surf-type "B-SPLINE-CURVE"))
              (extruded (surf-type "EXTRUDED-SOLID")))
@@ -202,7 +220,7 @@ there is nothing to write."
           (t
            (multiple-value-bind (solids left-out) (model-solids model)
              (if (null solids)
-                 (values nil (format nil "None of the model's ~a parts is a solid or the shape of one (a box, cylinder, cone, torus or extruded outline), so there is nothing to write as ~:@(~a~)."
+                 (values nil (format nil "None of the model's ~a parts is a solid or the shape of one (a box, cylinder, cone, sphere, torus or extruded outline), so there is nothing to write as ~:@(~a~)."
                                      (length left-out) kind))
                  (progn
                    (if (string= kind "step")
