@@ -59,6 +59,40 @@ session, so a tool that is slow in one keeps no other waiting.")
 ;; The agent door.
 ;;
 
+;; An external agent claims its session at `prompt' and releases it at
+;; `done' or `stopped'.  A driver that dies between them would leave the
+;; session busy for good -- the prompt door refuses it, the reaper skips
+;; it -- so a claim older than *external-claim-seconds* is released by
+;; the reaper, which says so in the log.
+(defparameter *external-claim-seconds* 1800
+  "Seconds an external agent may hold its session between prompt and
+done or stopped before the reaper releases it.")
+
+(defvar *external-claims* (make-hash-table :test #'equal)
+  "Session id -> universal time of the external agent's claim.")
+
+(defun note-external-claim! (session)
+  (bt:with-lock-held (*sessions-lock*)
+    (setf (gethash (session-id session) *external-claims*) (get-universal-time))))
+
+(defun forget-external-claim! (session)
+  (bt:with-lock-held (*sessions-lock*)
+    (remhash (session-id session) *external-claims*)))
+
+(defun reap-external-claims! (&key (now (get-universal-time)))
+  "Release every session an external agent has held past
+*external-claim-seconds*.  Returns their ids."
+  (let ((stale (bt:with-lock-held (*sessions-lock*)
+                 (loop for id being the hash-keys of *external-claims* using (hash-value since)
+                       when (> (- now since) *external-claim-seconds*) collect id))))
+    (dolist (id stale stale)
+      (let ((session (bt:with-lock-held (*sessions-lock*) (gethash id *sessions*))))
+        (bt:with-lock-held (*sessions-lock*) (remhash id *external-claims*))
+        (when (and session (session-busy? session))
+          (log-event session :stopped "The external agent went silent; the session was released.")
+          (setf (session-busy? session) nil)
+          (save-session! session))))))
+
 (defun agent-brief (session)
   "What an external agent needs to work on SESSION as the lab's own would."
   (h "session" (session-id session)
@@ -92,6 +126,7 @@ agent's side of one prompt.  The events:
          (session (requested-session req json)))
     (flet ((said () (and (stringp text) (string-trim '(#\space #\tab #\newline #\return) text)))
            (release ()
+             (forget-external-claim! session)
              (setf (session-busy? session) nil)
              (save-session! session)
              (respond-json req ent (h "ok" t))))
@@ -116,9 +151,8 @@ agent's side of one prompt.  The events:
                                                                 :test #'string=))
                                                     ""))))
                                  (log-event session :prompt "~a" (said))
-                                 (setf (session-messages session)
-                                       (append (session-messages session)
-                                               (list (h "role" "user" "content" (said)))))
+                                 (note-external-claim! session)
+                                 (add-user-prompt! session (said))
                                  (save-session! session)
                                  (let ((brief (agent-brief session)))
                                    ;; the key goes to whoever opened the session, once
@@ -192,6 +226,9 @@ Messages API's shape) as MCP content."
   "Run tool NAME on SESSION for an external agent, logged as the lab's own
 loop logs it.  Returns the MCP result."
   (log-event session :tool "~a" name)
+  ;; a working agent keeps its claim fresh
+  (when (bt:with-lock-held (*sessions-lock*) (gethash (session-id session) *external-claims*))
+    (note-external-claim! session))
   (multiple-value-bind (blocks error?)
       (bt:with-lock-held ((external-lock session))
         (handler-case (run-tool session name (and (hash-table-p arguments)

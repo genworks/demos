@@ -55,8 +55,17 @@ so the tool's own error handling reports it like any other failure."
 ;; the visitor's editor and the agent see the same code.
 ;;
 
+(defun in-package-line? (source)
+  "True when a line of SOURCE begins with an in-package form.  Only a form
+that opens a line counts: the words in a comment or a string do not."
+  (with-input-from-string (in source)
+    (loop for line = (read-line in nil) while line
+          thereis (let ((text (string-left-trim '(#\space #\tab) line)))
+                    (and (>= (length text) 11)
+                         (string-equal "(in-package" text :end2 11))))))
+
 (defun write-model (session source)
-  (when (search "(in-package" source :test #'char-equal)
+  (when (in-package-line? source)
     (return-from write-model
       (values (list (text-result "Refused: do not put an in-package form in the source. ~
 The file's header already sets the session package.")) t)))
@@ -132,7 +141,8 @@ characters of a longer file spent its rounds looking for the rest."
 (defun evaluate-expression (session expression)
   (let ((*package* (session-package session)))
     (multiple-value-bind (form end)
-        (handler-case (read-from-string expression)
+        ;; #. would run at read time, outside the time limit below
+        (handler-case (let ((*read-eval* nil)) (read-from-string expression))
           (error (condition)
             (return-from evaluate-expression
               (values (list (text-result "Could not read the expression: ~a" condition)) t))))

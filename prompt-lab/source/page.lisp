@@ -682,8 +682,12 @@ model file, written, compiled and loaded like the agent's."
     (cond ((null session) (no-such-session req ent))
           ((not (owner-request? req session json)) (not-yours req ent))
           ((not (stringp source)) (refuse req ent "No source given."))
-          ((session-busy? session) (refuse req ent "Wait for the agent to finish first."))
-          (t (multiple-value-bind (blocks error?) (write-model (touch session) source)
+          ;; claimed, not merely checked: a prompt starting in the gap
+          ;; would compile the same model file at the same time
+          ((not (claim! session)) (refuse req ent "Wait for the agent to finish first."))
+          (t (multiple-value-bind (blocks error?)
+                 (unwind-protect (write-model (touch session) source)
+                   (setf (session-busy? session) nil))
                (let ((text (or (cdr (assoc "text" (first blocks) :test #'string=)) "")))
                  (log-event session :reload "Your edit: ~a" text)
                  (save-session! session)
@@ -696,9 +700,11 @@ it is on disk, after an edit made in the terminal."
          (session (requested-session req json)))
     (cond ((null session) (no-such-session req ent))
           ((not (owner-request? req session json)) (not-yours req ent))
-          ((session-busy? session) (refuse req ent "Wait for the agent to finish first."))
           ((not (probe-file (session-model-file session))) (refuse req ent "There is no model file yet."))
-          (t (multiple-value-bind (blocks error?) (load-model-file (touch session))
+          ((not (claim! session)) (refuse req ent "Wait for the agent to finish first."))
+          (t (multiple-value-bind (blocks error?)
+                 (unwind-protect (load-model-file (touch session))
+                   (setf (session-busy? session) nil))
                (let ((text (or (cdr (assoc "text" (first blocks) :test #'string=)) "")))
                  (log-event session :reload "Reloaded from disk: ~a" text)
                  (save-session! session)
@@ -710,7 +716,12 @@ it is on disk, after an edit made in the terminal."
 ;; as the page opens.
 ;;
 
-(define-object viewer (sluice:assembly)
+;; session-control-mixin: the page opens a new viewer at every build and
+;; every page load, each holding the model's whole tree, and without the
+;; mixin none of them ever expired.  A sluice that carries the mixin
+;; itself (gendl, 2026-10-01) gets it from there; named here too, after
+;; the sluice, for an image whose sluice does not.
+(define-object viewer (sluice:assembly session-control-mixin)
 
   :documentation
   (:description "A sluice opened on one prompt-lab session's MODEL, reached
@@ -722,6 +733,11 @@ the model with one panel under it, the inputs or the tree."
 
   :computed-slots
   ((title "Prompt lab viewer")
+
+   ;; File > Open evaluates what is typed, in the image every visitor
+   ;; shares: never offered here (and refused by a sluice that knows the
+   ;; switch, whatever a crafted request names)
+   (open-from-expression? nil)
 
    ;; the skin the page wears, named on the frame's address; nil is the
    ;; house look

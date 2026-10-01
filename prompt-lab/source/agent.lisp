@@ -68,8 +68,11 @@ lists for yason."
 
 (defun log-event (session kind control &rest args)
   (let ((text (apply #'format nil control args)))
-    (setf (session-log session)
-          (append (session-log session) (list (list (get-universal-time) kind text))))
+    ;; the agent's thread, the external agent's tool calls and the doors
+    ;; all log; an unlocked append-and-set loses entries
+    (with-session-lock (session)
+      (setf (session-log session)
+            (append (session-log session) (list (list (get-universal-time) kind text)))))
     text))
 
 
@@ -211,8 +214,8 @@ a gate that keeps a community pot, what the pot holds."
     (when credits (setf (session-credits session) credits))))
 
 (defun call-messages-api (session)
-  "POST the session's next request.  Returns the parsed response (a hash
-table) or signals an error."
+  "POST the session's next request.  Values: the parsed response (a hash
+table) and the HTTP status; signals an error when the answer is not JSON."
   (let ((key (api-key)))
     (multiple-value-bind (status text headers)
         (post-json *messages-url* (request-body session)
@@ -226,10 +229,11 @@ table) or signals an error."
       ;; A gate or a proxy may answer with something other than JSON
       ;; (an HTML error page); say what came back, with its status,
       ;; rather than fall over inside the parser.
-      (handler-case (yason:parse text)
-        (error ()
-          (error "The API answered ~a with a body that is not JSON: ~a"
-                 status (subseq text 0 (min 200 (length text)))))))))
+      (values (handler-case (yason:parse text)
+                (error ()
+                  (error "The API answered ~a with a body that is not JSON: ~a"
+                         status (subseq text 0 (min 200 (length text))))))
+              status))))
 
 (defun add-usage (session usage)
   (when usage
@@ -247,6 +251,56 @@ table) or signals an error."
 
 (defun block-type (block) (gethash "type" block))
 
+(defun close-dangling-tool-uses! (session reason)
+  "When the conversation ends on an assistant turn that asked for tools,
+answer each of those calls with an error result saying REASON.  The API
+refuses a conversation in which a tool_use is not followed by its
+tool_result, so a turn left that way -- the round cap, a reply cut off
+by max_tokens, a loop that died -- would refuse every later prompt of
+the session, and the record on disk would carry the fault across a
+restart.  Returns true when it closed any."
+  (with-session-lock (session)
+    (let* ((last (car (last (session-messages session))))
+           (calls (and (hash-table-p last)
+                       (equal (gethash "role" last) "assistant")
+                       (listp (gethash "content" last))
+                       (remove-if-not #'(lambda (block)
+                                          (and (hash-table-p block)
+                                               (equal (block-type block) "tool_use")))
+                                      (gethash "content" last)))))
+      (when calls
+        (setf (session-messages session)
+              (append (session-messages session)
+                      (list (h "role" "user"
+                               "content" (mapcar #'(lambda (block)
+                                                     (h "type" "tool_result"
+                                                        "tool_use_id" (gethash "id" block)
+                                                        "content" (format nil "Not run: ~a" reason)
+                                                        "is_error" t))
+                                                 calls)))))
+        t))))
+
+(defun add-user-prompt! (session prompt)
+  "Append the visitor's PROMPT to the conversation.  When the conversation
+already ends on a user turn (tool results closed by
+close-dangling-tool-uses!, a loop that stopped after running its
+tools, or a prompt the API never answered -- an error, a gate's
+refusal), the prompt joins that turn as a text block, so two user turns
+never stand together."
+  (with-session-lock (session)
+    (let ((last (car (last (session-messages session)))))
+      (if (and (hash-table-p last) (equal (gethash "role" last) "user"))
+          (let ((content (gethash "content" last)))
+            (setf (gethash "content" last)
+                  (append (if (stringp content) (list (h "type" "text" "text" content)) content)
+                          (list (h "type" "text" "text" prompt)))))
+          (setf (session-messages session)
+                (append (session-messages session)
+                        (list (h "role" "user" "content" prompt))))))))
+
+(defun yason-text (object)
+  (with-output-to-string (out) (yason:encode object out)))
+
 (defun claim! (session)
   "Mark SESSION busy and return true, or return nil when it already was."
   (bt:with-lock-held (*sessions-lock*)
@@ -262,6 +316,7 @@ started; nil when the session was busy."
          (handler-case (run-prompt session prompt :claimed? t)
            (error (condition)
              (log-event session :stopped "The agent stopped: ~a" condition)
+             (close-dangling-tool-uses! session "the agent stopped")
              (setf (session-busy? session) nil))))
      :name (format nil "prompt-lab ~a" (session-id session)))
     t))
@@ -277,18 +332,32 @@ the session busy (start-prompt!)."
   (unwind-protect
        (progn
          (log-event session :prompt "~a" prompt)
-         (setf (session-messages session)
-               (append (session-messages session)
-                       (list (h "role" "user" "content" prompt))))
+         ;; a session saved with a dangling tool call (before this was
+         ;; guarded) is mended before the prompt goes on
+         (close-dangling-tool-uses! session "the previous request ended before this tool ran")
+         (add-user-prompt! session prompt)
          (loop for round from 1
-               do (let* ((response (handler-case (call-messages-api session)
-                                     (error (condition)
-                                       (return (log-event session :stopped "~a" condition)))))
-                         (content (gethash "content" response))
-                         (stop (gethash "stop_reason" response)))
-                    (when (equal (gethash "type" response) "error")
+               do (multiple-value-bind (response status)
+                      (handler-case (call-messages-api session)
+                        (error (condition)
+                          (return (log-event session :stopped "~a" condition))))
+                   (let ((content (and (hash-table-p response) (gethash "content" response)))
+                         (stop (and (hash-table-p response) (gethash "stop_reason" response))))
+                    (when (and (hash-table-p response) (equal (gethash "type" response) "error"))
                       (return (log-event session :stopped "API error: ~a"
                                          (gethash "message" (gethash "error" response)))))
+                    ;; anything else without a message in it -- a gate's or
+                    ;; proxy's own JSON, an error status -- stops here, and
+                    ;; nothing is appended: an assistant turn with no content
+                    ;; would make the conversation one the API refuses
+                    (when (or (not (hash-table-p response))
+                              (and (integerp status) (>= status 400))
+                              (null content) (not (listp content)))
+                      (return (log-event session :stopped "The API answered ~a without a message~@[: ~a~]."
+                                         status
+                                         (and (hash-table-p response)
+                                              (let ((text (yason-text response)))
+                                                (subseq text 0 (min 200 (length text))))))))
                     (add-usage session (gethash "usage" response))
                     (when (and (session-wallet session) (null (session-credits session)))
                       ;; a wallet named but never priced: ask once
@@ -306,6 +375,7 @@ the session busy (start-prompt!)."
                     (cond
                       ((equal stop "tool_use")
                        (when (> round *max-rounds*)
+                         (close-dangling-tool-uses! session "the round cap was reached")
                          (return (log-event session :stopped "Stopped after ~a rounds of tool calls."
                                             *max-rounds*)))
                        (let ((results
@@ -317,7 +387,12 @@ the session busy (start-prompt!)."
                                                                  (make-hash-table :test #'equal)))))
                                                  (log-event session :tool "~a" name)
                                                  (multiple-value-bind (blocks error?)
-                                                     (run-tool session name input)
+                                                     ;; a tool that signals is an error
+                                                     ;; result, never a tool_use left
+                                                     ;; unanswered
+                                                     (handler-case (run-tool session name input)
+                                                       (error (condition)
+                                                         (values (list (text-result "~a failed: ~a" name condition)) t)))
                                                    (when error?
                                                      (log-event session :tool-error "~a: ~a" name
                                                                 (or (cdr (assoc "text" (first blocks)
@@ -338,7 +413,10 @@ the session busy (start-prompt!)."
                       ((equal stop "refusal")
                        (return (log-event session :stopped "The model declined this request.")))
                       ((equal stop "max_tokens")
+                       ;; a reply cut off may end inside a tool call
+                       (close-dangling-tool-uses! session "the reply hit its length limit")
                        (return (log-event session :stopped "The reply hit its length limit.")))
-                      (t (return (log-event session :stopped "Stopped: ~a" stop)))))))
+                      (t (close-dangling-tool-uses! session (format nil "the reply stopped (~a)" stop))
+                         (return (log-event session :stopped "Stopped: ~a" stop))))))))
     (setf (session-busy? session) nil)
     (save-session! session)))

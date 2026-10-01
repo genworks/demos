@@ -76,9 +76,28 @@
                       (loop repeat 16 collect (random 256 state))))))
     (format nil "~(~{~2,'0x~}~)" (coerce octets 'list))))
 
-(defun make-session (&key (id (new-session-id)) address wallet (owner (new-owner-key)))
+;; One lock per session, for what several threads write at once: the log
+;; (the agent's thread, the external agent's tool calls, the doors) and
+;; the session's record on disk (the agent's end, confirm, privacy).
+;; Kept beside the struct rather than in it: a reload that adds a slot
+;; to the struct strands the sessions already in the table, whose old
+;; layout fails in the printer.
+(defvar *session-locks* (make-hash-table :test #'equal))
+
+(defun session-lock (session)
+  (bt:with-lock-held (*sessions-lock*)
+    (or (gethash (session-id session) *session-locks*)
+        (setf (gethash (session-id session) *session-locks*)
+              (bt:make-recursive-lock (format nil "prompt-lab session ~a" (session-id session)))))))
+
+(defmacro with-session-lock ((session) &body body)
+  `(bt:with-recursive-lock-held ((session-lock ,session)) ,@body))
+
+(defun make-session (&key (id (new-session-id)) address wallet (owner (new-owner-key))
+                          (register? t))
   "Create a session: a fresh package defined like gdl-user, and a directory
-under *workspace-root*.  Returns the session."
+under *workspace-root*.  Returns the session.  REGISTER? nil leaves it out
+of the table, for a caller that fills it in first (restore-session)."
   (let* ((keyword (intern (string-upcase (format nil "pl-~a" id)) :keyword))
          (package (progn (eval `(gdl:define-package ,keyword))
                          (find-package keyword)))
@@ -87,9 +106,12 @@ under *workspace-root*.  Returns the session."
                                          :directory directory :address address :wallet wallet
                                          :owner owner)))
     (ensure-directories-exist directory)
-    (bt:with-lock-held (*sessions-lock*)
-      (setf (gethash id *sessions*) session))
+    (when register? (register-session! session))
     session))
+
+(defun register-session! (session)
+  (bt:with-lock-held (*sessions-lock*)
+    (setf (gethash (session-id session) *sessions*) session)))
 
 (defvar *restore-lock* (bt:make-lock "prompt-lab restore"))
 
@@ -122,7 +144,10 @@ restart has emptied the table (see save-session!); nil when neither."
 
 (defun save-session! (session)
   "Write SESSION's record beside its model file, atomically, then its copy,
-transcript and model file to the archive (archive.lisp).  Never signals."
+transcript and model file to the archive (archive.lisp).  Never signals.
+One writer at a time per session: the agent's end, a confirm and a
+privacy switch can all save at once, and shared session.tmp."
+  (with-session-lock (session)
   (prog1
    (ignore-errors
    (let* ((file (session-state-file session))
@@ -158,7 +183,7 @@ transcript and model file to the archive (archive.lisp).  Never signals."
      (when (probe-file file) (delete-file file))
      (rename-file tmp file)
      file))
-    (archive-session! session)))
+    (archive-session! session))))
 
 (defun repair-messages (messages)
   "MESSAGES as parsed from a session file, with every tool_result's
@@ -192,7 +217,10 @@ is on disk for it."
                          (let ((yason:*parse-json-booleans-as-symbols* t))
                            (yason:parse in)))))))
       (when (hash-table-p json)
-        (let ((session (make-session :id id :address (gethash "address" json)
+        ;; filled in before it goes into the table: a request finding it
+        ;; there must find all of it (find-session's first look is unlocked
+        ;; by *restore-lock*)
+        (let ((session (make-session :id id :register? nil :address (gethash "address" json)
                                      :wallet (let ((w (gethash "wallet" json))) (and (stringp w) w))
                                      ;; nil for a session older than owners
                                      :owner (let ((o (gethash "owner" json))) (and (stringp o) o)))))
@@ -225,6 +253,7 @@ is on disk for it."
             (ignore-errors (load-model-file session)))
           (log-event session :note "The workshop restarted; your session was restored from its file.")
           (save-session! session)
+          (register-session! session)
           session)))))
 
 (defun delete-session (session)
@@ -232,7 +261,8 @@ is on disk for it."
 copy of what it holds goes to the archive."
   (archive-session! session)
   (bt:with-lock-held (*sessions-lock*)
-    (remhash (session-id session) *sessions*))
+    (remhash (session-id session) *sessions*)
+    (remhash (session-id session) *session-locks*))
   (let ((package (find-package (session-package-name session))))
     (when package (delete-package package)))
   (let ((directory (session-directory session)))
@@ -296,7 +326,8 @@ a no-op when one is running."
     (setf *reaper-thread*
           (bt:make-thread #'(lambda ()
                               (loop (sleep *reaper-interval*)
-                                    (handler-case (progn (reap-sessions!) (reap-replays!) (prune-addresses!))
+                                    (handler-case (progn (reap-external-claims!) (reap-sessions!)
+                                                         (reap-replays!) (prune-addresses!))
                                       (error (condition)
                                         (format *error-output* "~&prompt-lab reaper: ~a~%" condition)))))
                           :name "prompt-lab reaper")))

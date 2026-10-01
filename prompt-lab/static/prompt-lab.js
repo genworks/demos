@@ -106,6 +106,7 @@
   };
 
   function edited() {
+    if (!sourceDirty) editBase = lastSource;
     sourceDirty = true;
     $('save').disabled = false;
     $('source-state').textContent = 'edited';
@@ -680,6 +681,8 @@
   }
 
   var logCount = 0, builds = 0, sourceDirty = false, lastSource = null, viewerUrl = null, timer = null, viewerLoaded = false;
+  // the model file the viewer last drew, and the one an edit began from
+  var drawnSource = null, editBase = null;
   var rendered = false, viewerPrivate = false;
   window.addEventListener('pageshow', function (event) { if (event.persisted) viewerLoaded = false; });
   // Cloudflare Turnstile: rendered when the lab has a site key; each
@@ -942,6 +945,11 @@
       lastSource = state.model_source;
       if (!sourceDirty) source.set(state.model_source || '');
     }
+    // the agent wrote a new version under an edit in progress: say so,
+    // and Save asks before it replaces that version
+    if (sourceDirty && lastSource !== editBase) {
+      $('source-state').textContent = 'the model changed since your edit began; Save replaces it';
+    }
     $('save').disabled = state.busy || !sourceDirty;
 
     // closing the session to watchers, once it has bought credits
@@ -962,7 +970,12 @@
     // A browser coming back from the payment page may restore the
     // iframe's old instance URL, which the server has since forgotten
     // (a 404 in the viewer); a fresh src on the first render fixes it.
-    if (state.model_defined && (completed !== builds || $('viewer').hidden || !viewerLoaded)) {
+    // A build that wrote the model and then stopped (the round cap, a
+    // timeout, an API error) logs no done: the file the viewer drew is
+    // the test then, once the session is idle.
+    if (state.model_defined && (completed !== builds || $('viewer').hidden || !viewerLoaded
+                                || (!state.busy && state.model_source !== drawnSource))) {
+      drawnSource = state.model_source;
       // on a phone a model just built, or one found here on arrival,
       // takes the screen: it is what the visitor came for
       if (phone() && screen === 'prompt' && !checkout && (rendered ? completed !== builds : true)) show('model');
@@ -1205,6 +1218,8 @@
   $('unfold-all').addEventListener('click', function () { if (editor) editor.unfoldAll(); });
 
   $('save').addEventListener('click', function () {
+    if (sourceDirty && lastSource !== editBase
+        && !window.confirm('The model file changed since your edit began (the agent wrote a new version). Save your edit over it?')) return;
     showError('source-error', '');
     $('save').disabled = true;
     api('model', { session: session, source: source.get() }).then(function (r) {
