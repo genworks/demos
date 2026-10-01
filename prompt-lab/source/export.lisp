@@ -146,13 +146,21 @@ its size."
         (if solid (push solid solids) (push leaf left-out))))
     (values (nreverse solids) (nreverse left-out))))
 
+(defun reference-of (object)
+  "OBJECT's reference from its root, (the (legs 1) post): gwl's own where
+the image has it (gendl since 2026-09-30), its root-path printed otherwise."
+  (let ((gwl (find-symbol (image-case "ROOT-PATH-REFERENCE") :gwl)))
+    (if (and gwl (fboundp gwl))
+        (funcall gwl object)
+        (format nil "~(~s~)" (cons 'the (reverse (the-object object root-path)))))))
+
 (defun left-out-note (solids left-out)
   "A line saying which leaves a STEP or IGES file leaves out, or nil."
   (when left-out
     (format nil "~a of ~a parts written as solids; left out: ~{~a~^, ~}~@[ and ~a more~]"
             (length solids) (+ (length solids) (length left-out))
             (mapcar #'(lambda (leaf)
-                        (format nil "~a (~(~a~))" (root-path-reference leaf)
+                        (format nil "~a (~(~a~))" (reference-of leaf)
                                 (ignore-errors (the-object leaf type))))
                     (subseq left-out 0 (min 5 (length left-out))))
             (when (> (length left-out) 5) (- (length left-out) 5)))))
