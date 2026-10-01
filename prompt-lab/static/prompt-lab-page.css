@@ -377,6 +377,18 @@ ol.log li.stopped time { color: var(--pl-status-fail); }
 }
 .meter span { display: block; height: 100%; width: 0; background: var(--pl-accent); }
 #checkout-box { margin-top: 0.5rem; }
+/* the card line (Stripe's card control, in a frame of its own): a field
+   in the lab's look; the Pay button beside Close */
+#card-box { display: grid; gap: 0.35rem; }
+.card-line {
+  padding: 0.55rem 0.6rem;
+  background: var(--pl-panel);
+  border: var(--pl-rule) solid var(--pl-line);
+  border-radius: var(--pl-radius);
+}
+#card-error:empty { display: none; }
+#card-pay { background: var(--pl-accent); color: var(--pl-accent-ink); border-color: var(--pl-accent); font-weight: 700; }
+#card-pay:disabled { opacity: 0.6; }
 #checkout-box .row { margin-top: 0.4rem; }
 #topup-buttons button { padding: 0.15rem 0.6rem; }
 #topup-buttons button:disabled { opacity: 0.45; cursor: default; }
@@ -584,7 +596,23 @@ ul.sessions a:hover { background: var(--pl-hover-bg); outline-color: var(--pl-ho
 ul.sessions .title { display: block; overflow-wrap: anywhere; font-weight: 700; }
 ul.sessions .title.none { color: var(--pl-ink-dimmer); font-style: italic; font-weight: 400; }
 ul.sessions .meta { display: flex; gap: 0.3rem 0.8rem; flex-wrap: wrap; margin-top: 0.2rem; font-size: 0.88em; color: var(--pl-ink-dim); }
+/* the archive: a thumbnail of the model beside each session */
+ul.sessions a.has-thumb { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: 0 0.8rem; align-items: center; }
+ul.sessions .body { display: block; min-width: 0; }
+ul.sessions .thumb {
+  width: 5.5rem; height: 4.4rem;
+  display: grid; place-items: center;
+  background: var(--pl-viewport-bg);
+  border: var(--pl-rule) solid var(--pl-line-soft);
+  border-radius: var(--pl-radius);
+  overflow: hidden;
+}
+ul.sessions .thumb img { width: 100%; height: 100%; object-fit: contain; filter: var(--pl-viewport-filter); }
+ul.sessions .thumb.none { background: var(--pl-panel-alt); }
 .pill { padding: 0 0.4rem; border: var(--pl-rule) solid var(--pl-line-soft); border-radius: var(--pl-radius-pill); }
+/* what a model wants of solid modelling (thumbs.lisp) */
+.pill.solids-needs { border-color: var(--pl-line); color: var(--pl-ink); }
+.pill.solids-benefits { border-style: dashed; border-color: var(--pl-line); }
 .pill.live { border-color: var(--pl-line); color: var(--pl-ink); font-weight: 700; }
 .pill.mine { background: var(--pl-accent); border-color: var(--pl-accent); color: var(--pl-accent-ink); }
 

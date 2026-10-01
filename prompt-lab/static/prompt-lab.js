@@ -382,6 +382,15 @@
     var sold = offer.topup_credits && offer.topup_credits[i];
     return sold > 0 ? sold : amount;
   }
+  // the prices on sale, in cents.  A gate older than its configuration
+  // answers each offer as the (cents credits) pair it was given, and
+  // refuses every amount at checkout: nothing is offered then, rather
+  // than buttons that fail (they read $NaN before, 2026-10-01).
+  function topupAmounts(offer) {
+    var amounts = offer.topup_amounts || [];
+    if (amounts.some(Array.isArray)) return [];
+    return amounts.filter(function (a) { return a > 0; });
+  }
   var publishableKey = '', embeddedCheckout = null, chosenAmount = null;
 
   // what is left, in large figures above the meter; low is a tenth of
@@ -412,9 +421,9 @@
     $('status-credits').textContent = credits(used) + ' of ' + credits(free) + ' free credits'
       + (spend.credits_balance ? ' \u00b7 balance ' + credits(spend.credits_balance) : '');
     if (spend.publishable_key) publishableKey = spend.publishable_key;
-    if (spend.topup && !topupButtonsMade && spend.topup_amounts && spend.topup_amounts.length) {
+    if (spend.topup && !topupButtonsMade && topupAmounts(spend).length) {
       topupButtonsMade = true;
-      spend.topup_amounts.forEach(function (amount, i) {
+      topupAmounts(spend).forEach(function (amount, i) {
         var sold = creditsSold(spend, amount, i);
         var b = document.createElement('button');
         b.type = 'button';
@@ -464,7 +473,7 @@
     $('pot-empty').hidden = !empty;
     $('status-credits').textContent = empty ? 'the pot is empty' : 'pot: ' + credits(p.credits) + ' credits';
     if (p.publishable_key) publishableKey = p.publishable_key;
-    var amounts = p.topup_amounts || [];
+    var amounts = topupAmounts(p);
     if (p.topup && !topupButtonsMade && amounts.length) {
       topupButtonsMade = true;
       $('topup-label').textContent = 'Add to the pot:';
@@ -521,8 +530,92 @@
 
   function closeCheckout() {
     if (embeddedCheckout) { try { embeddedCheckout.destroy(); } catch (e) {} embeddedCheckout = null; }
+    if (cardElement) { try { cardElement.destroy(); } catch (e) {} cardElement = null; }
     $('checkout-box').hidden = true;
+    $('card-box').hidden = true;
+    $('card-pay').hidden = true;
+    $('card-error').textContent = '';
     $('checkout').innerHTML = '';
+  }
+
+  // A colour token as #rrggbb for Stripe's card control, which lives in a
+  // frame of its own and takes no CSS variables (the Donate page's way).
+  function tokenHex(name, fallback) {
+    try {
+      var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      var c = document.createElement('canvas'); c.width = c.height = 1;
+      var g = c.getContext('2d');
+      g.fillStyle = '#010203'; g.fillStyle = v;
+      if (!v || g.fillStyle === '#010203') return fallback;
+      g.fillRect(0, 0, 1, 1);
+      var p = g.getImageData(0, 0, 1, 1).data;
+      return '#' + [p[0], p[1], p[2]].map(function (n) { return ('0' + n.toString(16)).slice(-2); }).join('');
+    } catch (e) { return fallback; }
+  }
+
+  // The card line: Stripe's one-line card control and a Pay button, for a
+  // gate that made a PaymentIntent (flow "card").  'more payment options'
+  // opens Stripe's full form instead (openFullCheckout).
+  var cardElement = null;
+  function openCard(r, amount) {
+    var stripe = window.Stripe(r.publishable_key || publishableKey);
+    cardElement = stripe.elements().create('card', { style: {
+      base: { color: tokenHex('--pl-ink', '#101010'), fontFamily: getComputedStyle(document.body).fontFamily || 'system-ui, sans-serif',
+              fontSize: '16px', '::placeholder': { color: tokenHex('--pl-ink-dimmer', '#6f6e68') } },
+      invalid: { color: tokenHex('--pl-status-fail', '#b00018') } } });
+    $('checkout').innerHTML = '';
+    $('card-amount').textContent = credits(creditsFor(amount)) + ' modeling credits for ' + dollars(amount) + (pot ? ', into the community pot' : '');
+    $('checkout-box').hidden = false;
+    $('card-box').hidden = false;
+    cardElement.mount('#card-line');
+    cardElement.on('change', function (e) { $('card-error').textContent = e.error ? e.error.message : ''; });
+    var pay = $('card-pay');
+    pay.hidden = false; pay.disabled = false; pay.textContent = 'Pay ' + dollars(amount);
+    pay.onclick = function () {
+      pay.disabled = true; pay.textContent = 'Paying\u2026'; $('card-error').textContent = '';
+      stripe.confirmCardPayment(r.client_secret, { payment_method: { card: cardElement } }).then(function (res) {
+        if (res.error) {
+          $('card-error').textContent = res.error.message || 'The card was not accepted. Nothing was charged.';
+          pay.disabled = false; pay.textContent = 'Pay ' + dollars(amount);
+        } else if (res.paymentIntent && res.paymentIntent.status === 'succeeded') {
+          checkout = r.checkout;
+          closeCheckout();
+          note('Paid. Adding the credits\u2026');
+          confirmTopup();
+        } else {
+          $('card-error').textContent = 'The payment did not go through. Nothing was charged.';
+          pay.disabled = false; pay.textContent = 'Pay ' + dollars(amount);
+        }
+      });
+    };
+    note('');
+  }
+
+  // what the price AMOUNT buys, from the offers on show
+  function creditsFor(amount) {
+    var offer = pot || {};
+    var i = topupAmounts(offer).indexOf(amount);
+    return i >= 0 ? creditsSold(offer, amount, i) : amount;
+  }
+
+  // Stripe's full form in the page: every way of paying the account offers.
+  // The human check passed for the card line covers this second request.
+  function openFullCheckout(amount) {
+    note('Opening the payment options\u2026');
+    ensureSession().then(function () {
+      return Promise.all([api('topup', { session: session, amount_cents: amount, embedded: true }), loadStripeJs()]);
+    }).then(function (results) {
+      var r = results[0];
+      if (r.error) { note(r.error); return; }
+      keepWallet(r);
+      if (!r.client_secret) return startHostedTopup(amount, true);
+      return window.Stripe(r.publishable_key || publishableKey).initEmbeddedCheckout({ clientSecret: r.client_secret }).then(function (co) {
+        embeddedCheckout = co;
+        $('checkout-box').hidden = false;
+        co.mount('#checkout');
+        note('');
+      });
+    }).catch(function (e) { note('Could not open the payment options: ' + e); });
   }
 
   // The card form on this page (Stripe's embedded Checkout) when the
@@ -538,12 +631,15 @@
     note('Preparing the card form\u2026');
     var token = takeToken();
     ensureSession().then(function () {
-      return Promise.all([api('topup', { session: session, amount_cents: amount, embedded: true, turnstile: token }), loadStripeJs()]);
+      // the card line first; a gate that does not know it answers with
+      // the full form, as before
+      return Promise.all([api('topup', { session: session, amount_cents: amount, embedded: true, flow: 'card', turnstile: token }), loadStripeJs()]);
     }).then(function (results) {
       var r = results[0];
       if (r.error) { note(r.error); return; }
       keepWallet(r);
-      if (!r.client_secret) return startHostedTopup(amount);
+      if (!r.client_secret) return startHostedTopup(amount, true);
+      if (r.flow === 'card') return openCard(r, amount);
       var stripe = window.Stripe(r.publishable_key || publishableKey);
       return stripe.initEmbeddedCheckout({ clientSecret: r.client_secret }).then(function (co) {
         embeddedCheckout = co;
@@ -551,13 +647,15 @@
         co.mount('#checkout');
         note('');
       });
-    }).catch(function (e) { note('Could not open the card form: ' + e); startHostedTopup(amount); });
+    }).catch(function (e) { note('Could not open the card form: ' + e); startHostedTopup(amount, true); });
   }
 
-  function startHostedTopup(amount) {
-    if (!turnstileReady()) { note('Complete the human check first.'); return; }
+  // COVERED: a card line or a full form was opened for this purchase a
+  // moment ago, and the human check it passed covers this request too
+  function startHostedTopup(amount, covered) {
+    if (!covered && !turnstileReady()) { note('Complete the human check first.'); return; }
     note('Opening the payment page\u2026');
-    var token = takeToken();
+    var token = covered ? null : takeToken();
     ensureSession().then(function () {
       return api('topup', { session: session, amount_cents: amount, turnstile: token });
     }).then(function (r) {
@@ -957,27 +1055,50 @@
   // The listings: live sessions, and the archive by day.
   //
 
+  // what a listing says of a model's need for solids (thumbs.lisp)
+  var SOLIDS = {
+    needs: ['needs solids', 'Built from solid bodies: it runs only in the solid modelling lab.'],
+    benefits: ['better with solids', 'Runs without solid modelling, and is better with it: holes cut, parts joined, real volumes.'],
+    none: ['no solids needed', 'Runs without solid modelling, and would gain nothing from it.']
+  };
+
   function sessionItem(s, href) {
     var li = document.createElement('li');
     var a = document.createElement('a');
     a.href = href;
     a.setAttribute('data-doc', 'Open this session, read-only.');
+    // the archive's thumbnail, dated so a new drawing is fetched anew
+    var thumb = document.createElement('span');
+    thumb.className = 'thumb';
+    if (s.thumb) {
+      var img = document.createElement('img');
+      img.src = base + '/api/thumb?id=' + encodeURIComponent(s.id) + '&v=' + s.thumb;
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      thumb.appendChild(img);
+    } else if (s.thumb === null) thumb.classList.add('none');
+    if (s.thumb !== undefined) { a.classList.add('has-thumb'); a.appendChild(thumb); }
+    var body = document.createElement('span');
+    body.className = 'body';
+    a.appendChild(body);
     var title = document.createElement('span');
     title.className = 'title' + (s.title ? '' : ' none');
     title.textContent = s.title || (s.model ? 'a model written by hand' : 'no prompt yet');
-    a.appendChild(title);
+    body.appendChild(title);
     var meta = document.createElement('span');
     meta.className = 'meta';
-    function pill(text, cls) { var p = document.createElement('span'); p.className = 'pill' + (cls ? ' ' + cls : ''); p.textContent = text; meta.appendChild(p); }
+    function pill(text, cls) { var p = document.createElement('span'); p.className = 'pill' + (cls ? ' ' + cls : ''); p.textContent = text; meta.appendChild(p); return p; }
     function text(t) { var p = document.createElement('span'); p.textContent = t; meta.appendChild(p); }
     if (owners[s.id]) pill('yours', 'mine');
     if (s.busy) pill('building now', 'live');
     else if (s.live) pill('live', 'live');
     pill(s.engine === 'solid' ? 'solid' : 'gendl');
+    if (SOLIDS[s.solids]) pill(SOLIDS[s.solids][0], 'solids-' + s.solids).setAttribute('data-doc', SOLIDS[s.solids][1]);
     text(s.prompts + (s.prompts === 1 ? ' prompt' : ' prompts'));
     text('opened ' + formatDate(s.created));
     if (s.last_used && s.last_used !== s.created) text('last active ' + formatDate(s.last_used));
-    a.appendChild(meta);
+    body.appendChild(meta);
     li.appendChild(a);
     return li;
   }
@@ -1114,10 +1235,13 @@
   });
 
   $('checkout-close').addEventListener('click', function () { closeCheckout(); note(''); });
+  // from the card line: Stripe's full form; from the full form: Stripe's own page
   $('checkout-hosted').addEventListener('click', function (event) {
     event.preventDefault();
+    var fromCard = !!cardElement;
     closeCheckout();
-    if (chosenAmount) startHostedTopup(chosenAmount);
+    if (!chosenAmount) return;
+    if (fromCard) openFullCheckout(chosenAmount); else startHostedTopup(chosenAmount, true);
   });
 
 

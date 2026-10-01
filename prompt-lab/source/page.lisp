@@ -466,20 +466,42 @@ One address opens at most *max-sessions-per-address* a day."
                                    "spend" (spend-state session)
                                    "pot" (pot-state)))))))
 
+(defvar *topup-checked* (make-hash-table :test #'equal)
+  "session id -> universal time its last top-up passed the human check.")
+
+(defparameter *topup-check-seconds* 300
+  "Integer. How long a passed human check covers the session's next top-up
+request: the card line first, then 'more payment options' if the payer
+wants them, is one purchase and one check.")
+
 (defun topup-door (req ent)
-  "POST <prefix>/api/topup {session, amount_cents, embedded?}: a Stripe
-Checkout through the gate.  Answers {url, wallet} for Stripe's hosted
-page, or {client_secret, publishable_key, wallet} for the in-page form."
+  "POST <prefix>/api/topup {session, amount_cents, embedded?, flow?}: a
+payment through the gate.  Answers {url, wallet} for Stripe's hosted
+page, {client_secret, publishable_key, wallet} for the in-page form, and
+with flow \"card\" (a gate that knows it) {flow \"card\", client_secret,
+checkout, publishable_key, wallet} for Stripe's one-line card control."
   (let* ((json (request-json req))
          (session (requested-session req json))
          (amount (and json (gethash "amount_cents" json)))
          (embedded? (and json (eq (gethash "embedded" json) t)))
+         (flow (and json (equal (gethash "flow" json) "card") "card"))
          (address (client-address req)))
     (let ((verdict :unchecked))
       (flet ((verified? ()
                (when (eq verdict :unchecked)
-                 (setf verdict (multiple-value-list
-                                (verify-turnstile (and json (gethash "turnstile" json)) address))))
+                 (let ((checked (and session (gethash (session-id session) *topup-checked*))))
+                   (setf verdict
+                         (if (and checked (< (- (get-universal-time) checked) *topup-check-seconds*))
+                             (list t)
+                             (multiple-value-list
+                              (verify-turnstile (and json (gethash "turnstile" json)) address)))))
+                 (when (and (first verdict) session)
+                   (let ((now (get-universal-time)))
+                     ;; the old ones go as a new one comes: the table stays small
+                     (maphash #'(lambda (id at) (when (> (- now at) *topup-check-seconds*)
+                                                  (remhash id *topup-checked*)))
+                              *topup-checked*)
+                     (setf (gethash (session-id session) *topup-checked*) now))))
                (first verdict))
              (reason () (or (second verdict) "Complete the human check first.")))
     (cond ((null session) (no-such-session req ent))
@@ -497,7 +519,8 @@ page, or {client_secret, publishable_key, wallet} for the in-page form."
                                        "amount_cents" amount
                                        "success_url" url
                                        "cancel_url" (concatenate 'string url "&topup=cancelled")
-                                       "embedded" (if embedded? t 'yason:false)))
+                                       "embedded" (if embedded? t 'yason:false)
+                                       "flow" flow))
                (let ((checkout-url (and answer (gethash "url" answer)))
                      (client-secret (and answer (gethash "client_secret" answer)))
                      (wallet (and answer (gethash "wallet" answer))))
@@ -506,14 +529,26 @@ page, or {client_secret, publishable_key, wallet} for the in-page form."
                         (log-event session :note (if (pot)
                                                      "Adding ~:d modeling credits to the community pot.  They arrive when the payment completes."
                                                      "Buying ~:d modeling credits.  They arrive when the payment completes.")
-                                   amount)
+                                   (credits-for-amount amount))
                         (respond-json req ent (h "url" checkout-url
                                                  "client_secret" client-secret
+                                                 ;; a gate that made a PaymentIntent says so
+                                                 "flow" (gethash "flow" answer)
+                                                 "checkout" (gethash "checkout" answer)
                                                  "publishable_key" (gethash "publishable_key" (spend-state session))
                                                  "wallet" (session-wallet session))))
                        (t (refuse req ent net.aserve:*response-service-unavailable* "~a"
                                   (or (ignore-errors (gethash "message" (gethash "error" answer)))
                                       "The top-up could not be started; try again in a moment.")))))))))))))
+
+(defun credits-for-amount (cents)
+  "The credits CENTS buys, as the gate last said (its offers may sell more
+credits than cents); CENTS itself from a gate that said nothing."
+  (let* ((pot (pot))
+         (amounts (coerce (or (getf pot :amounts) #()) 'list))
+         (sold (coerce (or (getf pot :credits-sold) #()) 'list))
+         (at (position cents amounts)))
+    (or (and at (realp (nth at sold)) (nth at sold)) cents)))
 
 (defun format-cents (cents)
   (if (and (realp cents) (>= cents 100))
@@ -817,6 +852,8 @@ archived, replay; agent), the tools' door for an external agent at
     (net.aserve:publish :path (door-path "archive") :server server :host host :function #'archive-door)
     (net.aserve:publish :path (door-path "archived") :server server :host host :function #'archived-door)
     (net.aserve:publish :path (door-path "replay") :server server :host host :function #'replay-door)
+    ;; the archive's thumbnails (thumbs.lisp)
+    (net.aserve:publish :path (door-path "thumb") :server server :host host :function #'thumb-door)
     ;; the model as files (export.lisp)
     (net.aserve:publish :path (door-path "download") :server server :host host :function #'download-door)
     ;; an agent that runs elsewhere (external.lisp); shut unless *external-agent?*
@@ -825,4 +862,5 @@ archived, replay; agent), the tools' door for an external agent at
                         :server server :host host :function #'mcp-door)
     (publish-gwl-app (format nil "~a/viewer" *url-prefix*) 'viewer :server server :host host))
   (start-reaper!)
+  (start-thumbnailer!)
   *url-prefix*)

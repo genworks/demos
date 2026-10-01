@@ -14,4 +14,5 @@
   (:file "source/agent") (:file "source/docs") (:file "source/meter")
   (:file "source/guards") (:file "source/skins") (:file "source/app")
   (:file "source/page") (:file "source/browse")
-  (:file "source/export") (:file "source/external")))
+  (:file "source/thumbs") (:file "source/export")
+  (:file "source/external")))

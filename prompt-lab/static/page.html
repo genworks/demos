@@ -124,8 +124,14 @@
             </div>
             <div id="pot-full" class="muted" hidden><span id="pot-full-text"></span> <a id="own-lab" href="#" target="_blank" rel="noopener" hidden></a></div>
             <div id="checkout-box" hidden>
+              <div id="card-box" hidden>
+                <div id="card-amount" class="muted"></div>
+                <div id="card-line" class="card-line"></div>
+                <div id="card-error" class="error" role="alert"></div>
+              </div>
               <div id="checkout"></div>
               <div class="row">
+                <button id="card-pay" type="button" hidden>Pay</button>
                 <button id="checkout-close" type="button">Close</button>
                 <a id="checkout-hosted" href="#" class="muted">more payment options</a>
               </div>

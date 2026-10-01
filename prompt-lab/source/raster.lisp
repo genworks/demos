@@ -210,22 +210,33 @@ drawing's width and height as second and third values."
                    (draw-line canvas (+ x0 (* ux s)) (+ y0 (* uy s)) (+ x0 (* ux e)) (+ y0 (* uy e))
                               :weight weight))))))
 
-(defun render-svg-to-png (svg &key (max-pixels *raster-max-pixels*))
-  "SVG (the drawing system's output, a string) as PNG octets."
+(defun render-svg-to-png (svg &key (max-pixels *raster-max-pixels*) fit)
+  "SVG (the drawing system's output, a string) as PNG octets: the whole
+sheet, or with FIT (a margin in pixels, or t for 6) the drawing's own
+extent filling the picture -- a thumbnail wants the model, not the page."
   (multiple-value-bind (segments width height) (svg-segments svg)
-    (let* ((scale (/ max-pixels (max width height 1d0)))
-           (pw (max 1 (round (* width scale))))
-           (ph (max 1 (round (* height scale))))
-           (canvas (make-canvas pw ph)))
-      (dolist (segment segments)
-        (destructuring-bind (x0 y0 x1 y1 dashed) segment
-          (if dashed
-              (draw-dashed-line canvas (* x0 scale) (* y0 scale) (* x1 scale) (* y1 scale))
-              (progn
-                (draw-line canvas (* x0 scale) (* y0 scale) (* x1 scale) (* y1 scale))
-                ;; a second pass one pixel over thickens the stroke to ~1.5 px
-                (draw-line canvas (+ (* x0 scale) 0.5d0) (+ (* y0 scale) 0.5d0)
-                           (+ (* x1 scale) 0.5d0) (+ (* y1 scale) 0.5d0) :weight 0.6d0)))))
+    (let ((left 0d0) (top 0d0) (margin 0))
+      (when (and fit segments)
+        (setq margin (if (realp fit) fit 6)
+              left (reduce #'min segments :key #'(lambda (s) (min (first s) (third s))))
+              top (reduce #'min segments :key #'(lambda (s) (min (second s) (fourth s))))
+              width (- (reduce #'max segments :key #'(lambda (s) (max (first s) (third s)))) left)
+              height (- (reduce #'max segments :key #'(lambda (s) (max (second s) (fourth s)))) top)))
+      (let* ((scale (/ (- max-pixels (* 2 margin)) (max width height (if fit 1d-9 1d0))))
+             (pw (max 1 (+ (* 2 margin) (round (* width scale)))))
+             (ph (max 1 (+ (* 2 margin) (round (* height scale)))))
+             (canvas (make-canvas pw ph)))
+        (flet ((px (x) (+ margin (* (- x left) scale)))
+               (py (y) (+ margin (* (- y top) scale))))
+          (dolist (segment segments)
+            (destructuring-bind (x0 y0 x1 y1 dashed) segment
+              (if dashed
+                  (draw-dashed-line canvas (px x0) (py y0) (px x1) (py y1))
+                  (progn
+                    (draw-line canvas (px x0) (py y0) (px x1) (py y1))
+                    ;; a second pass one pixel over thickens the stroke to ~1.5 px
+                    (draw-line canvas (+ (px x0) 0.5d0) (+ (py y0) 0.5d0)
+                               (+ (px x1) 0.5d0) (+ (py y1) 0.5d0) :weight 0.6d0))))))
       (unless (raster-available?)
         (error "No PNG writer is loaded (zpng)."))
       ;; the class name through (string :png), not "PNG": on a modern-mode
@@ -240,7 +251,7 @@ drawing's width and height as second and third values."
             (setf (aref data y x 0) (aref canvas y x))))
         (let ((out (uiop:symbol-call :flexi-streams :make-in-memory-output-stream)))
           (uiop:symbol-call :zpng :write-png-stream png out)
-          (uiop:symbol-call :flexi-streams :get-output-stream-sequence out))))))
+          (uiop:symbol-call :flexi-streams :get-output-stream-sequence out)))))))
 
 (defun png-base64 (octets)
   (uiop:symbol-call :cl-base64 :usb8-array-to-base64-string octets))

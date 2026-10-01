@@ -53,7 +53,10 @@ holds it: (time kind text), the kind a keyword or a string."
        "prompts" (length prompts)
        "title" (let ((first (first prompts)))
                  (if (and (stringp first) (> (length first) *title-length*))
-                     (concatenate 'string (subseq first 0 *title-length*) "…")
+                     ;; the ellipsis by its code, so the file reads the same
+                     ;; under any external format (Allegro's default is not
+                     ;; UTF-8: a hot load there made it mojibake, 2026-10-01)
+                     (concatenate 'string (subseq first 0 *title-length*) (string (code-char 8230)))
                      first))
        "engine" (or engine "gendl")
        "model" (if model? t 'yason:false)
@@ -65,10 +68,13 @@ holds it: (time kind text), the kind a keyword or a string."
   (eq (gethash "private" json) 'yason:true))
 
 (defun record-summary (json model-file)
-  (summary :id (gethash "id" json) :created (gethash "created" json)
-           :last-used (gethash "last_used" json) :log (gethash "log" json)
-           :engine (gethash "engine" json) :model? (probe-file model-file)
-           :private? (record-private? json)))
+  (let ((summary (summary :id (gethash "id" json) :created (gethash "created" json)
+                          :last-used (gethash "last_used" json) :log (gethash "log" json)
+                          :engine (gethash "engine" json) :model? (probe-file model-file)
+                          :private? (record-private? json))))
+    ;; whether the model wants solids (thumbs.lisp); nil without a model
+    (setf (gethash "solids" summary) (record-solids json model-file))
+    summary))
 
 ;; A record holds the whole conversation, rendered images and all; a
 ;; listing reads a summary once per version of the file.
@@ -154,10 +160,18 @@ the archive holds none."
     (first (directory (merge-pathnames (format nil "*/~a/" id) *archive-root*)))))
 
 (defun archive-summaries ()
+  "Every archived session worth listing, each with \"thumb\": the date of
+its thumbnail (thumbs.lisp), which dates the address, or nil."
   (when *archive-root*
     (remove-if-not
      #'worth-listing?
-     (remove nil (mapcar #'file-summary
+     (remove nil (mapcar #'(lambda (file)
+                             (let ((summary (file-summary file)))
+                               (when summary
+                                 (let ((copy (alexandria:copy-hash-table summary))
+                                       (thumb (file-date (merge-pathnames "thumb.png" file))))
+                                   (setf (gethash "thumb" copy) (and thumb (epoch-seconds thumb)))
+                                   copy))))
                          (directory (merge-pathnames "*/*/session.json" *archive-root*)))))))
 
 (defun archive-door (req ent)
