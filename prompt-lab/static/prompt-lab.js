@@ -378,6 +378,17 @@
   function dollars(c) { return '$' + (c / 100).toFixed(c % 100 ? 2 : 0); }
   var publishableKey = '', embeddedCheckout = null, chosenAmount = null;
 
+  // what is left, in large figures above the meter; low is a tenth of
+  // the most there can be, or less
+  function showCreditsLeft(left, unit, most) {
+    $('credits-left').textContent = credits(Math.max(0, left));
+    $('credits-left-unit').textContent = unit;
+    var figure = $('credits-figure');
+    figure.hidden = false;
+    figure.classList.toggle('low', left > 0 && most > 0 && left <= most / 10);
+    figure.classList.toggle('out', !(left > 0));
+  }
+
   function renderSpend(spend) {
     if (!spend) return;
     document.body.classList.add('has-spend');
@@ -386,6 +397,8 @@
     if (spend.credits_from_wallet > 0) text += ' \u00b7 ' + credits(spend.credits_from_wallet) + ' from your balance';
     if (spend.credits_balance != null) text += ' \u00b7 balance: ' + credits(spend.credits_balance) + ' credits';
     $('spend').textContent = text;
+    showCreditsLeft(Math.max(0, free - used) + (spend.credits_balance || 0),
+                    'modeling credits left', free + (spend.credits_balance || 0));
     var meter = $('spend-meter'), most = free || 100;
     meter.setAttribute('aria-valuemax', most);
     meter.setAttribute('aria-valuenow', Math.min(used, most));
@@ -429,7 +442,8 @@
     document.body.classList.add('has-spend');
     document.body.classList.add('has-pot');
     document.body.classList.toggle('pot-empty', empty);
-    var text = 'the community pot: ' + credits(p.credits) + ' of at most ' + credits(p.max) + ' modeling credits';
+    showCreditsLeft(p.credits, 'modeling credits left in the community pot', p.max);
+    var text = 'it holds at most ' + credits(p.max);
     if (spend && spend.credits_used > 0) text += DOT + 'this session has drawn ' + credits(spend.credits_used);
     if (spend && spend.contributed > 0) text += DOT + 'you have added ' + credits(spend.contributed);
     $('spend').textContent = text;
@@ -591,6 +605,70 @@
 
   var siblingUrl = null, engineHere = null;
 
+  //
+  // Downloads: the model as a file, from the download door.  Fetched
+  // rather than followed, so a refusal (no solids to write, credits
+  // spent) is said on the page and not saved as a file; the owner's key
+  // goes as the header, as on every door.  downloadQuery names what to
+  // build: the live session or an archived session's replay.
+  //
+
+  var downloadQuery = null;
+
+  function makeDownloads(formats) {
+    var select = $('download');
+    formats.forEach(function (f) {
+      var option = document.createElement('option');
+      option.value = f.format;
+      option.textContent = f.label;
+      select.appendChild(option);
+    });
+    if (!formats.length) return;
+    select.addEventListener('change', function () {
+      var format = select.value;
+      select.value = '';
+      if (format && downloadQuery) download(format);
+    });
+  }
+
+  function offerDownloads(query) {
+    downloadQuery = query;
+    $('download-row').hidden = !query || $('download').options.length < 2;
+  }
+
+  function download(format) {
+    var headers = {}, key = archiveId ? owners[archiveId] : ownerKey();
+    if (key) headers['X-Prompt-Lab-Owner'] = key;
+    downloadSays('Writing ' + format.toUpperCase() + '\u2026');
+    fetch(base + '/api/download?' + downloadQuery + '&format=' + encodeURIComponent(format), { headers: headers })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || ('download failed: ' + r.status)); });
+        var name = (/filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '') || [])[1] || ('model.' + format);
+        var note = r.headers.get('X-Prompt-Lab-Note');
+        return r.blob().then(function (blob) {
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = name;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+          downloadSays(note ? name + ': ' + note + '.' : 'Saved ' + name + '.', note ? 20000 : 5000);
+        });
+      })
+      .catch(function (e) { downloadSays(e.message, 20000, true); });
+  }
+
+  // what a download did, in a note over the page for a while
+  var downloadTimer = null;
+  function downloadSays(text, ms, error) {
+    var el = $('toast');
+    el.textContent = text;
+    el.className = error ? 'failed' : '';
+    el.hidden = false;
+    clearTimeout(downloadTimer);
+    if (ms) downloadTimer = setTimeout(function () { el.hidden = true; }, ms);
+  }
+
   function loadConfig() {
     if (configLoaded) return Promise.resolve();
     return fetch(base + '/api/config').then(function (r) { return r.json(); }).then(function (config) {
@@ -610,6 +688,7 @@
       }
       // a community pot shows before there is a session to spend from it
       if (config.pot) renderPot(config.pot);
+      makeDownloads(config.downloads || []);
       if (config.browsing) {
         $('browse-live').hidden = $('browse-archive').hidden = $('about-browsing').hidden = false;
         if (browse === 'live') $('browse-live').className = 'current';
@@ -770,6 +849,7 @@
     $('viewer-tab').href = viewerTabUrl();
     $('viewer-tab').hidden = !state.model_defined;
     $('viewer-menu').hidden = !state.model_defined;
+    offerDownloads(state.model_defined ? 'session=' + encodeURIComponent(state.session) : null);
     if (state.console_url) { $('console-tab').href = state.console_url; $('console-tab').hidden = false; }
 
     var completed = log.filter(function (e) { return e.kind === 'done' || e.kind === 'reload'; }).length;
@@ -855,6 +935,7 @@
           var url = r.viewer_url + (key ? '&owner=' + encodeURIComponent(key) : '');
           $('viewer-tab').href = dressed(url, false); $('viewer-tab').hidden = false;
           $('viewer-menu').hidden = false;
+          offerDownloads('replay=' + encodeURIComponent(a.id));
           $('viewer').src = dressed(url, true) + '&t=' + Date.now();
           $('viewer').hidden = false;
           $('viewer-empty').hidden = true;

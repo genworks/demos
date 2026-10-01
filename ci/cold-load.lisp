@@ -375,6 +375,29 @@ the body, the status, the final path."
                      (and (eq (gethash "model_defined" state) t)
                           (eq (gethash "editable" state) t)
                           (search "define-object model" (gethash "model_source" state))))))
+          ;; the model as files (export.lisp): every format the config
+          ;; door offers answers a file that starts as its kind does --
+          ;; STEP and IGES on the solids engine, where the box and the
+          ;; cylinder are written as the solids of their shapes
+          (smoke "prompt-lab download door answers every format it offers"
+                 (lambda ()
+                   (let ((magic '(("pdf" . "%PDF") ("svg" . "<") ("png" . "PNG")
+                                  ("step" . "ISO-10303") ("iges" . "S      1"))))
+                     (dolist (offer (coerce (gethash "downloads" (json-of :get (door "config"))) 'list) t)
+                       (let ((kind (gethash "format" offer)))
+                         (multiple-value-bind (body status)
+                             (net.aserve.client:do-http-request
+                                 (format nil "http://127.0.0.1:~a~a?session=~a&format=~a"
+                                         (http-port) (door "download") session kind)
+                               :format :binary :timeout 180 :headers (owner-headers))
+                           (unless (eql status 200) (error "~a answered ~a" kind status))
+                           (let ((head (map 'string #'code-char (subseq body 0 (min 80 (length body)))))
+                                 (expected (cdr (assoc kind magic :test #'string=))))
+                             (unless (and expected (search expected head))
+                               (error "~a does not start as one: ~s" kind (subseq head 0 (min 20 (length head))))))))))))
+          (smoke "prompt-lab download door refuses a format it does not offer"
+                 (lambda ()
+                   (eql 400 (nth-value 1 (http :get (format nil "~a?session=~a&format=dwg" (door "download") session))))))
           ;; an agent that runs elsewhere (external.lisp): its doors are
           ;; shut until the switch is thrown, then the session's tools
           ;; answer its owner over MCP and the agent door keeps the log

@@ -232,7 +232,8 @@ body .tree-node {
    is the lab's ink instead, or a dark skin would hide the tree */
 body .tree-node[style*="#000000"] { color: var(--pl-ink) !important; }
 body .tree-node[style*="color"]:not([style*="#000000"]) { filter: var(--pl-viewport-filter); }
-body .tree-node:hover {
+body .tree-node:hover,
+body .tree-node.sluice-lit {
   background: var(--pl-hover-bg);
   outline-color: var(--pl-hover-line);
 }

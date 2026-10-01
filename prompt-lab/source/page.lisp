@@ -422,6 +422,8 @@ behind this room and the sibling lab on the other engine, if any."
                            "sibling_url" (car *sibling-lab*)
                            "sibling_label" (cdr *sibling-lab*)
                            "browsing" (if *browsing?* t 'yason:false)
+                           ;; the files the model may be had as (export.lisp)
+                           "downloads" (coerce (downloads-state) 'vector)
                            ;; the community pot, where the gate keeps one
                            "pot" (pot-state))))
 
@@ -807,6 +809,8 @@ archived, replay; agent), the tools' door for an external agent at
     (net.aserve:publish :path (door-path "archive") :server server :host host :function #'archive-door)
     (net.aserve:publish :path (door-path "archived") :server server :host host :function #'archived-door)
     (net.aserve:publish :path (door-path "replay") :server server :host host :function #'replay-door)
+    ;; the model as files (export.lisp)
+    (net.aserve:publish :path (door-path "download") :server server :host host :function #'download-door)
     ;; an agent that runs elsewhere (external.lisp); shut unless *external-agent?*
     (net.aserve:publish :path (door-path "agent") :server server :host host :function #'agent-door)
     (net.aserve:publish :path (format nil "~a/mcp" *url-prefix*)

@@ -58,6 +58,7 @@
     <a id="viewer-tab" href="#" target="_blank" rel="noopener" data-doc="Open the model's viewer in a tab of its own." hidden>Viewer in Own Tab</a>
     <a id="viewer-menu" href="#" class="phone-only" data-doc="Show or hide the viewer's menus." hidden>Viewer Menus</a>
     <a id="console-tab" href="#" target="_blank" rel="noopener" data-doc="Open the model file in Emacs, in a terminal in the browser." hidden>Source in Emacs</a>
+    <label id="download-row" data-doc="Download the model as a file: a drawing (PDF, SVG), a picture (PNG), or its solids (STEP, IGES) where the lab builds solids." hidden>Download <select id="download"><option value="">&hellip;</option></select></label>
     <label id="skin-row" data-doc="Choose how the lab looks.  The choice is kept in this browser." hidden>Skin <select id="skin"></select></label>
     <a id="install" href="#" data-doc="Install the lab on this device; it opens from its icon, in a window of its own." hidden>Install</a>
     <a id="about-open" href="#" data-doc="What this page is, and what becomes of what you type.">About</a>
@@ -112,6 +113,7 @@
         <header class="pane-head"><h2 class="label">Modeling Credits</h2></header>
         <div class="pane-body">
           <div id="pot-empty" class="banner beg" role="status" hidden>The pot is empty, so the lab has stopped building. Add modeling credits and it builds again, for everyone.</div>
+          <div id="credits-figure" class="credits-figure" hidden><span id="credits-left" class="figure"></span> <span id="credits-left-unit" class="figure-unit"></span></div>
           <div id="spend" class="muted">Builds spend modeling credits. The running count shows here.</div>
           <div id="spend-meter" class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Free credits used"><span></span></div>
           <div id="pot-note" class="muted" hidden>One pot for everybody: every build here, by anyone, draws on it, and anyone can add to it.</div>
@@ -183,6 +185,8 @@
     <span id="status-credits"></span>
   </div>
 </footer>
+
+<div id="toast" role="status" hidden></div>
 
 <nav id="tabs" aria-label="Screens">
   <button type="button" data-screen="prompt" aria-pressed="true">
