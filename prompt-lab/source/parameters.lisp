@@ -201,7 +201,7 @@ room at its factor.")
 
 (defparameter *engine-labels*
   '(:gendl "open-source Gendl"
-    :solid "Genworks GDL with the SMLib solid modelling kernel")
+    :solid "GDL + SMLib")
   "Plist, engine -> what the page calls it.")
 
 (defparameter *engine-titles*
