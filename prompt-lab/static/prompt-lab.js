@@ -376,6 +376,12 @@
   // only dollars are on the buy buttons.  A credit is a cent of balance.
   function credits(n) { return (n == null ? 0 : Math.round(n)).toLocaleString(); }
   function dollars(c) { return '$' + (c / 100).toFixed(c % 100 ? 2 : 0); }
+  // what the I-th price on sale buys: the gate's topup_credits, beside
+  // its topup_amounts; a cent a credit from a gate that sends none
+  function creditsSold(offer, amount, i) {
+    var sold = offer.topup_credits && offer.topup_credits[i];
+    return sold > 0 ? sold : amount;
+  }
   var publishableKey = '', embeddedCheckout = null, chosenAmount = null;
 
   // what is left, in large figures above the meter; low is a tenth of
@@ -408,11 +414,12 @@
     if (spend.publishable_key) publishableKey = spend.publishable_key;
     if (spend.topup && !topupButtonsMade && spend.topup_amounts && spend.topup_amounts.length) {
       topupButtonsMade = true;
-      spend.topup_amounts.forEach(function (amount) {
+      spend.topup_amounts.forEach(function (amount, i) {
+        var sold = creditsSold(spend, amount, i);
         var b = document.createElement('button');
         b.type = 'button';
-        b.textContent = credits(amount) + ' credits for ' + dollars(amount);
-        b.setAttribute('data-doc', 'Buy ' + credits(amount) + ' modeling credits by card.');
+        b.textContent = credits(sold) + ' credits for ' + dollars(amount);
+        b.setAttribute('data-doc', 'Buy ' + credits(sold) + ' modeling credits by card.');
         b.addEventListener('click', function () { startTopup(amount); });
         $('topup-buttons').appendChild(b);
       });
@@ -461,25 +468,26 @@
     if (p.topup && !topupButtonsMade && amounts.length) {
       topupButtonsMade = true;
       $('topup-label').textContent = 'Add to the pot:';
-      amounts.forEach(function (amount) {
+      amounts.forEach(function (amount, i) {
+        var sold = creditsSold(p, amount, i);
         var b = document.createElement('button');
         b.type = 'button';
-        b.textContent = credits(amount) + ' credits for ' + dollars(amount);
+        b.textContent = credits(sold) + ' credits for ' + dollars(amount);
         b.addEventListener('click', function () { startTopup(amount); });
         $('topup-buttons').appendChild(b);
-        potButtons.push({ amount: amount, button: b });
+        potButtons.push({ amount: amount, credits: sold, button: b });
       });
       $('topup').hidden = false;
     }
-    // a pot sells no more than it has room for
+    // a pot sells no more than it has room for, in credits
     var fits = 0;
     potButtons.forEach(function (entry) {
-      var fit = entry.amount <= p.room;
+      var fit = entry.credits <= p.room;
       if (fit) fits++;
       entry.button.disabled = !fit;
       entry.button.setAttribute('data-doc', fit
-        ? 'Add ' + credits(entry.amount) + ' modeling credits to the pot, by card. Everyone builds on them.'
-        : 'The pot has no room for ' + credits(entry.amount) + ' more credits.');
+        ? 'Add ' + credits(entry.credits) + ' modeling credits to the pot, by card. Everyone builds on them.'
+        : 'The pot has no room for ' + credits(entry.credits) + ' more credits.');
     });
     var full = potButtons.length > 0 && fits === 0;
     $('pot-full').hidden = !full;
@@ -979,7 +987,9 @@
     $('browse-main').hidden = false;
     document.body.classList.add('browsing');
     var archive = browse === 'archive';
-    document.title = archive ? 'Prompt Lab archive' : 'Prompt Lab: live sessions';
+    // the lab's own name, as the server put it in the page
+    var labTitle = document.title;
+    document.title = archive ? labTitle + ' archive' : labTitle + ': live sessions';
     $('browse-title').textContent = archive ? 'The Archive' : 'Live Sessions';
     status(archive ? 'Archive' : 'Listing');
     $('browse-note').textContent = archive

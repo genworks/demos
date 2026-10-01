@@ -322,12 +322,14 @@ again when any of them changes, and the worker keeps a new cache."
                  (cons "{{icon}}" (static-url "icons/icon-192.png"))
                  (cons "{{touch-icon}}" (static-url "icons/apple-touch-icon.png"))
                  (cons "{{app-name}}" (app-short-name))
+                 ;; which lab: the free one or the solids one (parameters.lisp)
+                 (cons "{{title}}" (lab-title))
                  (cons "{{boot}}" (page-boot)))
            :initial-value text)))
 
 (defun page-text ()
   "String. The page, filled in; read again when a static file has changed."
-  (let ((signature (list *url-prefix* *default-skin* (app?) (app-short-name) (static-signature)
+  (let ((signature (list *url-prefix* *default-skin* (app?) (app-short-name) (lab-title) (static-signature)
                          ;; the sluice's side: its tokens, its skins, its script
                          (tokens-url) (split-url) (mapcar #'(lambda (skin) (getf skin :href)) (skins))))
         (cache *page-cache*))

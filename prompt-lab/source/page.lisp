@@ -201,6 +201,9 @@ answer that is no balance -- a refusal, an error -- says nothing of it."
                            :room (gethash "pot_room" json)
                            :topup? (eq (gethash "topup" json) t)
                            :amounts (gethash "topup_amounts" json)
+                           ;; what each amount buys; an older gate sends
+                           ;; none, and a cent buys a credit
+                           :credits-sold (gethash "topup_credits" json)
                            :key (gethash "publishable_key" json))))))
 
 (defun note-pot-credits! (credits)
@@ -244,6 +247,7 @@ to go for a lab of one's own when it is full."
             "room" (max 0 (floor (or (getf pot :room) 0)))
             "topup" (if (getf pot :topup?) t 'yason:false)
             "topup_amounts" (or (getf pot :amounts) #())
+            "topup_credits" (or (getf pot :credits-sold) (getf pot :amounts) #())
             "publishable_key" (or (getf pot :key) "")
             "own_lab_url" (car *own-lab*)
             "own_lab_label" (cdr *own-lab*)))))
@@ -348,6 +352,10 @@ one scale.  Tokens never appear."
        "wallet" (session-wallet session)
        "topup" (if (and balance (eq (gethash "topup" balance) t)) t 'yason:false)
        "topup_amounts" (or (and balance (gethash "topup_amounts" balance)) #())
+       ;; what each amount buys (an older gate sends none: a cent a credit)
+       "topup_credits" (or (and balance (or (gethash "topup_credits" balance)
+                                            (gethash "topup_amounts" balance)))
+                           #())
        "publishable_key" (or (and balance (gethash "publishable_key" balance)) ""))))
 
 (defun page-url (req session)
