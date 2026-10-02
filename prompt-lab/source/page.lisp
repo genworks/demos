@@ -358,15 +358,16 @@ one scale.  Tokens never appear."
                            #())
        "publishable_key" (or (and balance (gethash "publishable_key" balance)) ""))))
 
-(defun page-url (req session)
+(defun page-url (req session &key (path ""))
   "The page's own public URL for SESSION, as the visitor's browser has
-it: the scheme and host the proxies forwarded."
+it: the scheme and host the proxies forwarded.  PATH follows the prefix
+(\"/sheet\" for the sheet)."
   (flet ((header (value) (and (stringp value) (plusp (length value)) value)))
     (let ((host (or (header (net.aserve:header-slot-value req :x-cyclops-forwarded-host))
                     (header (net.aserve:header-slot-value req :host))
                     "localhost"))
           (proto (or (header (net.aserve:header-slot-value req :x-forwarded-proto)) "http")))
-      (format nil "~a://~a~a?session=~a" proto host *url-prefix* (session-id session)))))
+      (format nil "~a://~a~a~a?session=~a" proto host *url-prefix* path (session-id session)))))
 
 (defun log-vector (log)
   "A session's log, (time kind text) entries, as the page reads it."
@@ -527,6 +528,50 @@ One address opens at most *max-sessions-per-address* a day."
 request: the card line first, then 'more payment options' if the payer
 wants them, is one purchase and one check.")
 
+(defun topup-check! (session token address)
+  "Whether a purchase in SESSION passes the human check: a check passed for
+the session in the last *topup-check-seconds* covers it (the card line,
+then 'more payment options', is one purchase), else TOKEN is verified --
+once, a token is single-use.  Values: true, or nil and the reason."
+  (let ((checked (gethash (session-id session) *topup-checked*)))
+    (if (and checked (< (- (get-universal-time) checked) *topup-check-seconds*))
+        t
+        (multiple-value-bind (ok? reason) (verify-turnstile token address)
+          (cond (ok?
+                 (let ((now (get-universal-time)))
+                   ;; the old ones go as a new one comes: the table stays small
+                   (maphash #'(lambda (id at) (when (> (- now at) *topup-check-seconds*)
+                                                (remhash id *topup-checked*)))
+                            *topup-checked*)
+                   (setf (gethash (session-id session) *topup-checked*) now))
+                 t)
+                (t (values nil (or reason "Complete the human check first."))))))))
+
+(defun begin-topup! (session amount return-url &key embedded? flow)
+  "Ask the gate for a payment of AMOUNT cents in SESSION, coming back to
+RETURN-URL.  Values: the gate's answer (a hash table: url for Stripe's
+hosted page, or client_secret for a form in the page, and the wallet), or
+nil and the reason."
+  (multiple-value-bind (answer status)
+      (gate-post "topup" (h "wallet" (session-wallet session)
+                            "amount_cents" amount
+                            "success_url" return-url
+                            "cancel_url" (concatenate 'string return-url "&topup=cancelled")
+                            "embedded" (if embedded? t 'yason:false)
+                            "flow" flow))
+    (let ((checkout-url (and answer (gethash "url" answer)))
+          (client-secret (and answer (gethash "client_secret" answer)))
+          (wallet (and answer (gethash "wallet" answer))))
+      (cond ((and (eql status 200) (or (stringp checkout-url) (stringp client-secret)))
+             (when (wallet-id? wallet) (setf (session-wallet session) wallet))
+             (log-event session :note (if (pot)
+                                          "Adding ~:d modeling credits to the community pot.  They arrive when the payment completes."
+                                          "Buying ~:d modeling credits.  They arrive when the payment completes.")
+                        (credits-for-amount amount))
+             answer)
+            (t (values nil (or (ignore-errors (gethash "message" (gethash "error" answer)))
+                               "The top-up could not be started; try again in a moment.")))))))
+
 (defun topup-door (req ent)
   "POST <prefix>/api/topup {session, amount_cents, embedded?, flow?}: a
 payment through the gate.  Answers {url, wallet} for Stripe's hosted
@@ -537,62 +582,29 @@ checkout, publishable_key, wallet} for Stripe's one-line card control."
          (session (requested-session req json))
          (amount (and json (gethash "amount_cents" json)))
          (embedded? (and json (eq (gethash "embedded" json) t)))
-         (flow (and json (equal (gethash "flow" json) "card") "card"))
-         (address (client-address req)))
-    (let ((verdict :unchecked))
-      (flet ((verified? ()
-               (when (eq verdict :unchecked)
-                 (let ((checked (and session (gethash (session-id session) *topup-checked*))))
-                   (setf verdict
-                         (if (and checked (< (- (get-universal-time) checked) *topup-check-seconds*))
-                             (list t)
-                             (multiple-value-list
-                              (verify-turnstile (and json (gethash "turnstile" json)) address)))))
-                 (when (and (first verdict) session)
-                   (let ((now (get-universal-time)))
-                     ;; the old ones go as a new one comes: the table stays small
-                     (maphash #'(lambda (id at) (when (> (- now at) *topup-check-seconds*)
-                                                  (remhash id *topup-checked*)))
-                              *topup-checked*)
-                     (setf (gethash (session-id session) *topup-checked*) now))))
-               (first verdict))
-             (reason () (or (second verdict) "Complete the human check first.")))
+         (flow (and json (equal (gethash "flow" json) "card") "card")))
     (cond ((null session) (no-such-session req ent))
           ((not (owner-request? req session json)) (not-yours req ent))
           ((not (integerp amount)) (refuse req ent "Say how much."))
-          ;; a public Checkout for small amounts draws card testers: a
-          ;; fresh Turnstile token before every purchase, as before every
-          ;; prompt (checked once -- a token is single-use)
-          ((not (verified?))
-           (refuse req ent net.aserve:*response-forbidden* "~a" (reason)))
           (t
-           (let ((url (page-url req session)))
-             (multiple-value-bind (answer status)
-                 (gate-post "topup" (h "wallet" (session-wallet session)
-                                       "amount_cents" amount
-                                       "success_url" url
-                                       "cancel_url" (concatenate 'string url "&topup=cancelled")
-                                       "embedded" (if embedded? t 'yason:false)
-                                       "flow" flow))
-               (let ((checkout-url (and answer (gethash "url" answer)))
-                     (client-secret (and answer (gethash "client_secret" answer)))
-                     (wallet (and answer (gethash "wallet" answer))))
-                 (cond ((and (eql status 200) (or (stringp checkout-url) (stringp client-secret)))
-                        (when (wallet-id? wallet) (setf (session-wallet session) wallet))
-                        (log-event session :note (if (pot)
-                                                     "Adding ~:d modeling credits to the community pot.  They arrive when the payment completes."
-                                                     "Buying ~:d modeling credits.  They arrive when the payment completes.")
-                                   (credits-for-amount amount))
-                        (respond-json req ent (h "url" checkout-url
-                                                 "client_secret" client-secret
-                                                 ;; a gate that made a PaymentIntent says so
-                                                 "flow" (gethash "flow" answer)
-                                                 "checkout" (gethash "checkout" answer)
-                                                 "publishable_key" (gethash "publishable_key" (spend-state session))
-                                                 "wallet" (session-wallet session))))
-                       (t (refuse req ent net.aserve:*response-service-unavailable* "~a"
-                                  (or (ignore-errors (gethash "message" (gethash "error" answer)))
-                                      "The top-up could not be started; try again in a moment.")))))))))))))
+           ;; a public Checkout for small amounts draws card testers: a
+           ;; fresh Turnstile token before every purchase, as before every
+           ;; prompt
+           (multiple-value-bind (ok? reason)
+               (topup-check! session (gethash "turnstile" json) (client-address req))
+             (if (not ok?)
+                 (refuse req ent net.aserve:*response-forbidden* "~a" reason)
+                 (multiple-value-bind (answer reason)
+                     (begin-topup! session amount (page-url req session) :embedded? embedded? :flow flow)
+                   (if (null answer)
+                       (refuse req ent net.aserve:*response-service-unavailable* "~a" reason)
+                       (respond-json req ent (h "url" (gethash "url" answer)
+                                                "client_secret" (gethash "client_secret" answer)
+                                                ;; a gate that made a PaymentIntent says so
+                                                "flow" (gethash "flow" answer)
+                                                "checkout" (gethash "checkout" answer)
+                                                "publishable_key" (gethash "publishable_key" (spend-state session))
+                                                "wallet" (session-wallet session)))))))))))
 
 (defun credits-for-amount (cents)
   "The credits CENTS buys, as the gate last said (its offers may sell more
@@ -608,6 +620,25 @@ credits than cents); CENTS itself from a gate that said nothing."
       (format nil "$~,2f" (/ cents 100))
       (format nil "~,1f cents" (or cents 0))))
 
+(defun confirm-topup! (session wallet checkout)
+  "The visitor is back from paying: have the gate credit CHECKOUT on WALLET
+once.  Values: the outcome (\"credited\", \"already\", ...) and the gate's text."
+  (setf (session-wallet session) wallet)
+  (multiple-value-bind (answer status)
+      (gate-post "confirm" (h "wallet" wallet "checkout" checkout "session" (session-id session)))
+    (declare (ignore status))
+    (when answer (note-balance session answer))
+    (let ((outcome (and answer (gethash "outcome" answer))))
+      (when (equal outcome "credited")
+        (if *pot*
+            (log-event session :note "Thank you: the community pot holds ~:d modeling credits now, for everyone's builds."
+                       (max 0 (floor (or (getf *pot* :credits) 0))))
+            (log-event session :note "Credits added: ~:d on your balance.  Builds beyond the free credits draw on it."
+                       (round (or (session-credits session) 0)))))
+      (save-session! session)
+      (values (or outcome "failed")
+              (or (and answer (gethash "text" answer)) "The gate did not answer.")))))
+
 (defun confirm-door (req ent)
   "POST <prefix>/api/confirm {session, wallet, checkout}: the visitor is
 back from Stripe; have the gate credit the checkout once and answer the
@@ -619,24 +650,11 @@ spend state with the outcome."
     (cond ((null session) (no-such-session req ent))
           ((not (owner-request? req session json)) (not-yours req ent))
           ((not (wallet-id? wallet)) (refuse req ent "No wallet named."))
-          (t
-           (setf (session-wallet session) wallet)
-           (multiple-value-bind (answer status)
-               (gate-post "confirm" (h "wallet" wallet "checkout" checkout "session" (session-id session)))
-             (declare (ignore status))
-             (when answer (note-balance session answer))
-             (let ((outcome (and answer (gethash "outcome" answer))))
-               (when (equal outcome "credited")
-                 (if *pot*
-                     (log-event session :note "Thank you: the community pot holds ~:d modeling credits now, for everyone's builds."
-                                (max 0 (floor (or (getf *pot* :credits) 0))))
-                     (log-event session :note "Credits added: ~:d on your balance.  Builds beyond the free credits draw on it."
-                                (round (or (session-credits session) 0)))))
-               (save-session! session)
-               (respond-json req ent (h "outcome" (or outcome "failed")
-                                        "text" (or (and answer (gethash "text" answer)) "The gate did not answer.")
+          (t (multiple-value-bind (outcome text) (confirm-topup! session wallet checkout)
+               (respond-json req ent (h "outcome" outcome
+                                        "text" text
                                         "spend" (spend-state session)
-                                        "pot" (pot-state)))))))))
+                                        "pot" (pot-state))))))))
 
 (defun state-door (req ent)
   "GET <prefix>/api/state?session=<id>: everything the page shows.  The

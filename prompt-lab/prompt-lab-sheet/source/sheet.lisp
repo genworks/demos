@@ -112,6 +112,79 @@ history.replaceState(null,'',~a)})()"
 (defparameter *log-shown* 200
   "Integer. The most log entries the sheet shows, the newest.")
 
+(defun dollars (cents)
+  (if (zerop (mod cents 100))
+      (format nil "$~d" (floor cents 100))
+      (format nil "$~,2f" (/ cents 100))))
+
+(defun offers (amounts sold)
+  "List of (cents credits): what each amount on sale buys; a cent a credit
+from a gate that names no credits."
+  (let ((amounts (coerce (or amounts #()) 'list))
+        (sold (coerce (or sold #()) 'list)))
+    (loop for cents in amounts
+          for i from 0
+          when (integerp cents)
+            collect (list cents (let ((c (nth i sold))) (if (realp c) (round c) cents))))))
+
+(defun credits-html (sheet pot spend)
+  "String of HTML: the credits pane's body for SHEET, from the gate's POT
+(a plist, or nil) and the owner's SPEND (spend-state, or nil)."
+  (flet ((buttons (offers room label)
+           (with-output-to-string (out)
+             (when (and offers (the-object sheet editable?))
+               (format out "<div class=\"pl-topup\"><span>~a</span>" label)
+               (dolist (offer offers)
+                 (destructuring-bind (cents credits) offer
+                   (let ((fits? (or (null room) (<= credits room))))
+                     (format out "<button type=\"button\" class=\"pl-buy\"~:[ disabled~;~] data-indicator:paying=\"\" data-attr:disabled=\"~a\" data-on:click=\"~a\" title=\"~a\">~:d credits for ~a</button>"
+                             fits?
+                             (if fits?
+                                 (format nil "$paying~@[ || !$turnstile~]" *turnstile-site-key*)
+                                 "true")
+                             (escape-string-minimal-plus-quotes
+                              (format nil "$amount = ~d; ~a" cents
+                                      (the-object sheet (datastar-action :topup :options "{filterSignals: {include: /^(amount|turnstile|owner|wallet)$/}}"))))
+                             (if fits? "Pay by card on Stripe's page" "The pot has no room for that many")
+                             credits (dollars cents)))))
+               (format out "</div>")))))
+    (cond
+      (pot
+       (let* ((held (max 0 (floor (or (getf pot :credits) 0))))
+              (most (or (getf pot :max) 0))
+              (room (max 0 (floor (or (getf pot :room) 0))))
+              (offers (and (getf pot :topup?) (offers (getf pot :amounts) (getf pot :credits-sold))))
+              (fit (remove-if-not #'(lambda (o) (<= (second o) room)) offers)))
+         (with-output-to-string (out)
+           (format out "<div class=\"pl-figure~:[~; pl-out~]\"><b>~:d</b> modeling credits left in the community pot</div>"
+                   (zerop held) held)
+           (when (plusp most)
+             (format out "<div class=\"pl-meter\"><span style=\"width:~,1f%\"></span></div>"
+                     (* 100 (/ (min held most) most))))
+           (format out "<p class=\"pl-line\">it holds at most ~:d~@[ &middot; this session has drawn ~:d~]~@[ &middot; you have added ~:d~]</p>"
+                   most
+                   (let ((n (and spend (gethash "credits_used" spend)))) (and n (plusp n) n))
+                   (let ((n (and spend (gethash "contributed" spend)))) (and n (plusp n) n)))
+           (when (zerop held)
+             (format out "<p class=\"pl-begging\">The pot is empty: nothing builds until someone tops it up.</p>"))
+           (write-string (buttons offers room "Add to the pot:") out)
+           (when (and offers (null fit))
+             (format out "<p class=\"pl-line\">The pot is as full as it gets.~@[ To build without sharing one, <a href=\"~a\">~a</a>.~]</p>"
+                     (car *own-lab*) (or (cdr *own-lab*) "run a lab of your own"))))))
+      (spend
+       (let* ((used (or (gethash "credits_used" spend) 0))
+              (free (or (gethash "credits_free" spend) 0))
+              (balance (gethash "credits_balance" spend))
+              (offers (and (eq (gethash "topup" spend) t)
+                           (offers (gethash "topup_amounts" spend) (gethash "topup_credits" spend)))))
+         (with-output-to-string (out)
+           (format out "<div class=\"pl-figure\"><b>~:d</b> modeling credits left</div>"
+                   (+ (max 0 (- free used)) (or balance 0)))
+           (format out "<p class=\"pl-line\">this session: ~:d of ~:d free credits~@[ &middot; balance ~:d~]</p>"
+                   used free balance)
+           (write-string (buttons offers nil "Buy:") out))))
+      (t "<p class=\"pl-line\">Credits show here once you build.</p>"))))
+
 (defparameter *tree-max-nodes* 400
   "Integer. The most parts the sheet's tree lists; a larger model shows
 the first ones and says how many are left out.")
@@ -200,7 +273,16 @@ and inspects itself when clicked."
 #sluice-panes svg path.sluice-lit{stroke:#2b4c7e!important;stroke-width:3!important}
 .pl-inputs{font-size:.85rem;max-height:40vh;overflow:auto}
 .sluice-apply{margin-left:.3rem;padding:0 .5rem;border:1px solid #2b4c7e;border-radius:3px;background:#fff;color:#2b4c7e;cursor:pointer}
-.sluice-apply.sluice-pending{background:#2b4c7e;color:#fff}"
+.sluice-apply.sluice-pending{background:#2b4c7e;color:#fff}
+.pl-notice{color:#1d4d1d;margin:0 0 .8rem}
+.pl-figure{font-size:.85rem;color:#444}.pl-figure b{font-size:2rem;color:#1d1d1b;margin-right:.3rem;font-variant-numeric:tabular-nums}
+.pl-figure.pl-out b{color:#a12}
+.pl-meter{height:.45rem;background:#e6e6e2;border-radius:3px;overflow:hidden;margin:.3rem 0}.pl-meter span{display:block;height:100%;background:#2b4c7e}
+.pl-line{color:#555;font-size:.85rem;margin:.3rem 0}.pl-begging{color:#a12;font-weight:600;margin:.3rem 0}
+.pl-topup{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem;font-size:.85rem}
+.pl-buy,.pl-download{font:inherit;font-size:.85rem;padding:.2rem .6rem;border:1px solid #2b4c7e;border-radius:3px;background:#fff;color:#2b4c7e;cursor:pointer}
+.pl-buy:disabled{border-color:#bbb;color:#999;cursor:default}
+.pl-downloads .pl-download{margin:0 .3rem .3rem 0}"
   "String. The sheet's own look, until it wears the lab's skins.")
 
 (defparameter *sheet-editor-script*
@@ -220,6 +302,14 @@ window.plConfirmSave=function(){return !(dirty&&last!==base)||confirm('The model
 window.plSaved=function(ok,text){if(ok){dirty=false;base=null}state(ok?'saved and loaded':'saved; see the log',!ok)};
 window.plLock=function(flag){if(ed)ed.setReadOnly(!!flag);else if(area())area().readOnly=!!flag};
 window.plFold=function(all){if(ed){if(all)ed.foldAll();else ed.unfoldAll()}};
+window.plDownload=function(url,owner){var n=document.getElementById('pl-download-note');function say(t){if(n)n.textContent=t||''}
+ say('Making the file...');
+ fetch(url,{headers:owner?{'X-Prompt-Lab-Owner':owner}:{}}).then(function(r){
+  if(!r.ok)return r.json().then(function(j){say(j.error||('The file could not be made ('+r.status+').'))},function(){say('The file could not be made ('+r.status+').')});
+  var cd=r.headers.get('Content-Disposition')||'',m=/filename=\"?([^\";]+)/.exec(cd),left=r.headers.get('X-Prompt-Lab-Note');
+  return r.blob().then(function(b){var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=m?m[1]:'model';
+   document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000);say(left||'')})
+ }).catch(function(e){say('The file could not be fetched: '+e)})};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount);else mount();
 })();"
   "String. The model file's editor on the sheet: the lab's CodeMirror bundle
@@ -256,7 +346,7 @@ panel sets on the page that holds it."
 
   :computed-slots
   ((title (lab-title))
-   (datastar-actions (list :build :claim :save :inspect))
+   (datastar-actions (list :build :claim :save :inspect :topup))
 
    ;; the node the inputs panel is on: the inspected path followed from
    ;; the model, or the model when that path no longer leads anywhere (a
@@ -305,11 +395,22 @@ panel sets on the page that holds it."
       (:script (str *sheet-editor-script*))
       (:style (str *sheet-css*))))
 
+   ;; back from Stripe the address carries the checkout and the wallet;
+   ;; the wallet otherwise comes from where the page keeps it
+   (query-checkout (let ((c (cdr (assoc "checkout" (the query-toplevel) :test #'string-equal)))) (and (stringp c) c)))
+   (query-wallet (let ((w (cdr (assoc "wallet" (the query-toplevel) :test #'string-equal)))) (and (wallet-id? w) w)))
+   (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
+
    (initial-signals
-    (format nil "{prompt: '', turnstile: '', source: '', inspect: '', error: '', sending: false, saving: false, busy: ~a, editable: ~a, owner: ~a}"
+    (format nil "{prompt: '', turnstile: '', source: '', inspect: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+            (if (the cancelled?) "'The payment was cancelled; nothing was charged.'" "''")
             (json-boolean (and (the session) (session-busy? (the session))))
             (json-boolean (the editable?))
-            (if (the session) (owner-signal-expression (session-id (the session))) "''")))
+            (if (the session) (owner-signal-expression (session-id (the session))) "''")
+            (js-string-literal (or (the query-checkout) ""))
+            (if (the query-wallet)
+                (js-string-literal (the query-wallet))
+                "(function(){try{return localStorage.getItem('prompt-lab-wallet')||''}catch(e){return ''}})()")))
 
    (body
     (with-lhtml-string ()
@@ -328,7 +429,10 @@ panel sets on the page that holds it."
             (:main :class "pl-grid"
                    (:section :class "pl-left"
                              (str (the prompt-form))
+                             (:p :class "pl-notice" :|data-show| "$notice" :|data-text| "$notice")
                              (str (the status-section div))
+                             (str (the credits-section div))
+                             (str (the downloads-section div))
                              (str (the log-section div)))
                    (:section :class "pl-right"
                              (:div :id "sluice-panes" :class "pl-viewport" (str (the viewport div)))
@@ -373,7 +477,7 @@ panel sets on the page that holds it."
             (:input :type "hidden" :id "pl-turnstile" :|data-bind:turnstile| "")
             (:div :class "pl-row"
                   (:button :class "pl-build"
-                           :|data-on:click| (the (datastar-action :build :options "{filterSignals: {include: /^(prompt|turnstile|owner)$/}}"))
+                           :|data-on:click| (the (datastar-action :build :options "{filterSignals: {include: /^(prompt|turnstile|owner|wallet)$/}}"))
                            :|data-indicator:sending| ""
                            ;; with a human check, a build waits for its token
                            :|data-attr:disabled| (format nil "$busy || $sending || !$prompt.trim()~@[ || !$turnstile~]"
@@ -428,6 +532,49 @@ panel sets on the page that holds it."
                                 (htm (:div :class (format nil "pl-entry pl-~(~a~)" kind)
                                            (:span :class "pl-kind" (fmt "~(~a~)" kind))
                                            (:span :class "pl-text" (esc text)))))))))))
+
+   ;; Modeling credits, the one unit a visitor sees: the community pot
+   ;; where the gate keeps one (what it holds, its cap, what this session
+   ;; drew and this browser added, the offers that fit its room), else the
+   ;; session's free credits and the wallet's balance.  Recomputed at every
+   ;; change to the session; the pot itself is asked of the gate at most
+   ;; every *pot-refresh-seconds* (pot).
+   (credits-section
+    :type 'base-html-div
+    :inner-html (progn
+                  (the revision)
+                  (let* ((session (the session))
+                         (spend (and session (the owner?) (spend-state session))))
+                    (with-lhtml-string ()
+                      (:div :class "pl-card pl-credits"
+                            (:h2 "Modeling credits")
+                            (str (credits-html self (pot) spend)))))))
+
+   ;; The model's files, from the download door (export.lisp): fetched, so
+   ;; a refusal is a line on the page and not a saved file, and with the
+   ;; owner's key, which the door needs for a private session and to
+   ;; meter the run on the owner.
+   (downloads-section
+    :type 'base-html-div
+    :inner-html (progn
+                  (the revision)
+                  (let ((session (the session)))
+                    (with-lhtml-string ()
+                      (:div :class "pl-card pl-downloads"
+                            (:h2 "Download")
+                            (if (and session (model-defined? session))
+                                (dolist (entry (download-formats))
+                                  (htm (:button :type "button" :class "pl-download"
+                                                ;; cl-who writes attribute values raw
+                                                :|data-on:click|
+                                                (escape-string-minimal-plus-quotes
+                                                 (format nil "plDownload(~a, $owner)"
+                                                         (js-string-literal
+                                                          (format nil "~a?session=~a&format=~a"
+                                                                  (door-path "download") (session-id session) (first entry)))))
+                                                (esc (fourth entry)))))
+                                (htm (:p "The model's drawings and files, once it is built.")))
+                            (:p :id "pl-download-note" :class "pl-line"))))))
 
    (tree-section
     :type 'base-html-div
@@ -523,45 +670,89 @@ panel sets on the page that holds it."
 
    (claim
     (signals)
+    ;; the owner's browser holds the key; and back from paying, the
+    ;; checkout it brings is credited once (as the page's confirm door)
     (let ((session (the session))
-          (key (gethash "owner" signals)))
+          (key (gethash "owner" signals))
+          (checkout (gethash "checkout" signals))
+          (wallet (gethash "wallet" signals)))
       (when (and session (stringp key) (owner? session key))
         (the (set-slot! :owner-key key))
         (touch session)
-        (sheet-send! self (datastar-signals-event "{\"editable\": true}")))))
+        (sheet-send! self (datastar-signals-event "{\"editable\": true}"))
+        (when (and (stringp checkout) (plusp (length checkout)) (wallet-id? wallet))
+          (multiple-value-bind (outcome text) (confirm-topup! session wallet checkout)
+            (sheet-send! self
+                         (datastar-signals-event (with-output-to-string (s)
+                                                   (yason:encode (h "checkout" "" "notice" text) s)))
+                         (datastar-script-event
+                          (format nil "try{localStorage.setItem('prompt-lab-wallet',~a)}catch(e){};history.replaceState(null,'',~a)"
+                                  (js-string-literal wallet)
+                                  (js-string-literal (format nil "~a/sheet?session=~a" *url-prefix* (session-id session))))))
+            (unless (member outcome '("credited" "already") :test #'equal)
+              (the (tell-error! text))))))))
+
+   (own-session!
+    (address wallet)
+    ;; the session of a visitor who has none yet, opened for this sheet;
+    ;; nil with the refusal shown when the address is over its cap
+    (or (the session)
+        (multiple-value-bind (session reason) (open-session! address (and (wallet-id? wallet) wallet))
+          (cond (session
+                 (the (set-slot! :session session))
+                 (the (set-slot! :owner-key (session-owner session)))
+                 (watch-session! self session)
+                 (sheet-send! self (datastar-script-event (owners-script session)))
+                 session)
+                (t (the (tell-error! reason)) nil)))))
+
+   (spent-token!
+    ()
+    ;; a Turnstile token is single-use
+    (when *turnstile-site-key*
+      (sheet-send! self
+                   (datastar-signals-event "{\"turnstile\": \"\"}")
+                   (datastar-script-event "if(window.turnstile)turnstile.reset()"))))
 
    (build
     (signals)
-    (let* ((address (client-address *datastar-request*))
-           (prompt (gethash "prompt" signals))
-           (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
-      (flet ((refuse! (reason)
-               (sheet-send! self (datastar-signals-event
-                                  (with-output-to-string (s) (yason:encode (h "error" reason) s))))))
-        (cond
-          ((and (the session) (not (the owner?)))
-           (refuse! "This session is someone else's; start your own to build."))
-          (t
-           ;; a new visitor's first build opens the session
-           (unless (the session)
-             (multiple-value-bind (session reason) (open-session! address)
-               (if session
-                   (progn (the (set-slot! :session session))
-                          (the (set-slot! :owner-key (session-owner session)))
-                          (watch-session! self session)
-                          (sheet-send! self (datastar-script-event (owners-script session))))
-                   (refuse! reason))))
-           (when (the session)
+    (let ((address (client-address *datastar-request*))
+          (prompt (gethash "prompt" signals))
+          (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
+      (cond ((and (the session) (not (the owner?)))
+             (the (tell-error! "This session is someone else's; start your own to build.")))
+            ((the (own-session! address (gethash "wallet" signals)))
              (multiple-value-bind (started reason) (begin-prompt! (the session) prompt address token)
                (if started
                    (sheet-send! self (datastar-signals-event "{\"error\": \"\", \"prompt\": \"\"}"))
-                   (refuse! reason))
-               ;; a Turnstile token is single-use
-               (when *turnstile-site-key*
-                 (sheet-send! self
-                              (datastar-signals-event "{\"turnstile\": \"\"}")
-                              (datastar-script-event "if(window.turnstile)turnstile.reset()"))))))))))))
+                   (the (tell-error! reason)))
+               (the spent-token!))))))
 
+   (topup
+    (signals)
+    ;; modeling credits by card: the human check, then Stripe's hosted
+    ;; Checkout, which comes back to this sheet with the checkout and the
+    ;; wallet on the address (claim confirms it)
+    (let ((address (client-address *datastar-request*))
+          (amount (gethash "amount" signals))
+          (token (gethash "turnstile" signals)))
+      (cond ((and (the session) (not (the owner?)))
+             (the (tell-error! "This session is someone else's; start your own to add credits.")))
+            ((not (integerp amount)) (the (tell-error! "Say how much.")))
+            ((the (own-session! address (gethash "wallet" signals)))
+             (let ((session (the session)))
+               (multiple-value-bind (ok? reason) (topup-check! session token address)
+                 (the spent-token!)
+                 (if (not ok?)
+                     (the (tell-error! reason))
+                     (multiple-value-bind (answer reason)
+                         (begin-topup! session amount (page-url *datastar-request* session :path "/sheet"))
+                       (if (and answer (stringp (gethash "url" answer)))
+                           (sheet-send! self (datastar-script-event
+                                              (format nil "try{localStorage.setItem('prompt-lab-wallet',~a)}catch(e){};location.href=~a"
+                                                      (js-string-literal (or (session-wallet session) ""))
+                                                      (js-string-literal (gethash "url" answer)))))
+                           (the (tell-error! (or reason "The top-up could not be started."))))))))))))))
 
 (defun publish-lab-sheet! (&key host)
   "Publish the sheet at <prefix>/sheet, beside the page."
