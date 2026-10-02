@@ -9,26 +9,25 @@
 (in-package :prompt-lab)
 
 ;;;;
-;;;; The lab as one gwl sheet, at <prefix>/sheet.
+;;;; The lab as one gwl sheet, at <prefix>/sheet: THE SLUICE, opened on
+;;;; the session's model, with the lab's own sections as its tiles.
 ;;;;
 ;;;; The same sessions, agent, guards and archive as the page at
 ;;;; <prefix>; what differs is the page.  There the browser polls a JSON
 ;;;; door every two seconds and redraws by hand; here each part of the
-;;;; page is a section of a gwl sheet, and the sheet hears every change
-;;;; to its session (*session-change-hooks*: each log entry, each save)
-;;;; and pushes the sections that changed over its stream (gwl's
-;;;; datastar-mixin).  The model is drawn by a viewport of the same sheet.
+;;;; page is a section, the sheet hears every change to its session
+;;;; (*session-change-hooks*: each log entry, each save) and pushes the
+;;;; sections that changed over its stream (gwl's datastar-mixin, which
+;;;; the sluice carries).  The tree, the inspector with the model's
+;;;; inputs, the panes (wireframe, shaded, several of them) and the
+;;;; menus are the sluice's; the lab adds the prompt, status, credits,
+;;;; downloads and log at the left and the model file under the panes.
 ;;;;
 ;;;; Ownership is the page's: the owner key is kept in the browser
 ;;;; (localStorage prompt-lab-owners, id -> key), so a session opened
 ;;;; here carries on at <prefix> and the other way round.  A sheet opened
 ;;;; on ?session=<id> shows it to anyone it is visible to, and the claim
 ;;;; action makes it the owner's when the browser holds the key.
-;;;;
-;;;; Not yet here (the page at <prefix> has them): the editor and Save,
-;;;; the sluice's tree and inputs (the viewer link opens them), credits
-;;;; and top-ups, downloads, privacy, the browsing listings, the phone
-;;;; layout, skins.
 ;;;;
 
 ;;
@@ -89,7 +88,11 @@ stale.  A session gone private closes on every sheet but its owner's."
        (the-object sheet (set-slot! :revision (1+ (the-object sheet revision))))
        (let ((stamp (model-stamp session)))
          (unless (eql stamp (the-object sheet model-stamp))
-           (the-object sheet (set-slot! :model-stamp stamp))))
+           (the-object sheet (set-slot! :model-stamp stamp))
+           ;; the session's first model: the sluice opens on it.  A
+           ;; rebuild after that redefines the model's class, and the
+           ;; sluice redraws itself (its refresh-redefined!)
+           (the-object sheet show-model!)))
        ;; the editor is no section: a new version of the file (as it is,
        ;; compiled or not) goes to it as a call, which an edit in
        ;; progress does not take
@@ -230,122 +233,37 @@ from a gate that names no credits."
               (unless here? engine))
       (format out "</a>"))))
 
-(defparameter *tree-max-nodes* 400
-  "Integer. The most parts the sheet's tree lists; a larger model shows
-the first ones and says how many are left out.")
-
-(defun tree-label (object)
-  "String. What the tree calls OBJECT: its name in its parent, with its
-index in a sequence; `model' for the root."
-  (let ((step (first (ignore-errors (the-object object root-path)))))
-    (cond ((null step) "model")
-          ((consp step) (format nil "~(~a~)[~{~a~^,~}]" (first step) (rest step)))
-          (t (format nil "~(~a~)" step)))))
-
-(defun tree-more-html (out sheet path depth left)
-  "Writes to OUT the row standing for the LEFT children of the part at PATH
-that the tree does not list yet: a click lists *tree-condense-limit* more,
-a shift-click all of them."
-  (format out "<div class=\"tree-more\" style=\"padding-left:~,1frem\" title=\"~a\" data-on:click=\"~a\">&hellip; ~:d more</div>"
-          (* 0.9 depth)
-          (format nil "Click for ~d more, shift-click for all of them"
-                  (min left sluice::*tree-condense-limit*))
-          (escape-string-minimal-plus-quotes
-           (format nil "$more = ~a; $moreAll = evt.shiftKey; ~a"
-                   (js-string-literal (let ((*package* (find-package :keyword)))
-                                        (format nil "~s" path)))
-                   (the-object sheet (datastar-action :more :options "{filterSignals: {include: /^more/}}"))))
-          left))
-
-(defun tree-html (sheet model inspected &optional shown)
-  "String of HTML: MODEL's parts as an indented outline, each a node that
-carries its data-root-path (as the drawing's paths do, for the hover)
-and inspects itself when clicked.  Each part lists its first
-sluice::*tree-condense-limit* children, or as many as SHOWN (an alist
-from a part's root-path to a count) says, and a \"...\" row for the rest."
-  (let ((count 0) (left-out 0))
-    (with-output-to-string (out)
-      (labels ((walk (object depth)
-                 (if (>= count *tree-max-nodes*)
-                     (incf left-out)
-                     (let ((path (ignore-errors (the-object object root-path))))
-                       (incf count)
-                       (format out "<div class=\"tree-node~:[~; pl-inspected~]\" style=\"padding-left:~,1frem\" data-root-path=\"~a\" data-on:click=\"~a\">~a<span class=\"tree-type\">~(~a~)</span></div>"
-                               (eq object inspected)
-                               (* 0.9 depth)
-                               (escape-string-minimal-plus-quotes
-                                (or (ignore-errors (gwl:root-path-reference object)) ""))
-                               (escape-string-minimal-plus-quotes
-                                (format nil "$inspect = ~a; ~a"
-                                        (js-string-literal (let ((*package* (find-package :keyword)))
-                                                             (format nil "~s" path)))
-                                        (the-object sheet (datastar-action :inspect :options "{filterSignals: {include: /^inspect$/}}"))))
-                               (escape-string-minimal-plus-quotes (tree-label object))
-                               (type-of object))
-                       (let* ((children (ignore-errors (the-object object children)))
-                              (total (length children))
-                              (limit (min total (or (cdr (assoc path shown :test #'equal))
-                                                    sluice::*tree-condense-limit*))))
-                         (loop for child in children
-                               repeat limit
-                               do (walk child (1+ depth)))
-                         (when (< limit total)
-                           (tree-more-html out sheet path (1+ depth) (- total limit))))))))
-        (walk model 0))
-      (when (plusp left-out)
-        (format out "<p class=\"tree-type\">~:d more parts not listed.</p>" left-out)))))
-
-
 ;;
 ;; The sheet.
 ;;
 
 (defparameter *sheet-css*
-  "body{margin:0;font-family:var(--pl-font);font-size:var(--pl-size);line-height:1.45;background:var(--pl-bg);color:var(--pl-ink)}
-a{color:var(--pl-link)}
-.pl-head{display:flex;gap:1rem;align-items:center;padding:.4rem 1rem;background:var(--pl-label-bg);color:var(--pl-label-ink)}
-.pl-head h1{font-size:1.05rem;margin:0;font-family:var(--pl-font-label);font-weight:var(--pl-label-weight);text-transform:var(--pl-label-case);letter-spacing:var(--pl-label-tracking)}
-.pl-head a,.pl-engine{color:var(--pl-label-ink);opacity:.85}
-.pl-head nav{margin-left:auto;display:flex;gap:.8rem;align-items:center}
-.pl-head select{font:inherit;font-size:.9em;background:var(--pl-panel);color:var(--pl-ink);border:var(--pl-rule) solid var(--pl-line-soft);border-radius:var(--pl-radius)}
-.pl-grid{display:grid;grid-template-columns:minmax(18rem,2fr) minmax(0,3fr);gap:.8rem;padding:.8rem}
-.pl-left,.pl-right{min-width:0}
-.pl-inputs .bg-white,.pl-inputs .bg-gray-50,.pl-viewport .bg-white\\/80{background-color:var(--pl-panel)}
-.pl-inputs .bg-gray-100{background-color:var(--pl-bg)}.pl-inputs .bg-gray-200{background-color:var(--pl-panel-alt)}
-.pl-inputs .text-gray-900,.pl-inputs .text-gray-700{color:var(--pl-ink)}
-.pl-inputs .text-gray-600,.pl-inputs .text-gray-500{color:var(--pl-ink-dim)}.pl-inputs .text-gray-400{color:var(--pl-ink-dimmer)}
-.pl-inputs .text-red-700{color:var(--pl-status-fail)}
-.pl-inputs .text-blue-700,.pl-inputs .text-blue-800{color:var(--pl-link);text-decoration:underline;text-underline-offset:2px}
-.pl-inputs .border-gray-300,.pl-viewport .border-gray-300{border-color:var(--pl-line)}.pl-inputs .border-gray-200{border-color:var(--pl-line-soft)}
-.pl-inputs .rounded,.pl-viewport .rounded-md{border-radius:var(--pl-radius)}
-.pl-inputs input:not([type=checkbox]):not([type=range]),.pl-inputs select{border:var(--pl-rule) solid var(--pl-line);border-radius:var(--pl-radius);background:var(--pl-panel);color:var(--pl-ink);font-family:var(--pl-font-mono)}
-.pl-inputs input:focus,.pl-inputs select:focus{border-color:var(--pl-focus);outline:var(--pl-rule) solid var(--pl-focus)}
-.pl-inputs input[type=checkbox]{accent-color:var(--pl-accent)}
-.pl-viewport button[id$=-reset-size]{background:var(--pl-panel);color:var(--pl-ink);border:var(--pl-rule) solid var(--pl-line);box-shadow:none}
-.pl-card{background:var(--pl-panel);border:var(--pl-rule) solid var(--pl-line);border-radius:var(--pl-radius);box-shadow:var(--pl-shadow);padding:.7rem;margin-bottom:.8rem}
-.pl-card h2{font-size:.9rem;margin:0 0 .4rem;font-family:var(--pl-font-label);font-weight:var(--pl-label-weight);text-transform:var(--pl-label-case);letter-spacing:var(--pl-label-tracking)}
-#pl-prompt{width:100%;box-sizing:border-box;font:inherit;padding:.4rem;background:var(--pl-panel);color:var(--pl-ink);border:var(--pl-rule) solid var(--pl-line-soft);border-radius:var(--pl-radius)}
+  ".pl-head{display:flex;gap:1rem;align-items:center;padding:.3rem 1rem;background:var(--pl-label-bg,#26262b);color:var(--pl-label-ink,#fff);flex:none}
+.pl-head h1{font-size:1rem;margin:0;font-family:var(--pl-font-label);font-weight:var(--pl-label-weight,700);text-transform:var(--pl-label-case);letter-spacing:var(--pl-label-tracking)}
+.pl-head a,.pl-engine{color:var(--pl-label-ink,#fff);opacity:.85}
+.pl-head nav{margin-left:auto;display:flex;gap:.8rem;align-items:center;font-size:.9em}
+.pl-card{background:var(--pl-panel,#fff);color:var(--pl-ink,#111);border:var(--pl-rule,1px) solid var(--pl-line,#ccc);border-radius:var(--pl-radius,4px);padding:.6rem}
+.pl-card h2{font-size:.85rem;margin:0 0 .4rem;font-family:var(--pl-font-label);font-weight:var(--pl-label-weight,700);text-transform:var(--pl-label-case);letter-spacing:var(--pl-label-tracking)}
+.sluice-tile .pl-card{border:0;border-radius:0}
+#pl-prompt{width:100%;box-sizing:border-box;font:inherit;padding:.4rem;background:var(--pl-panel,#fff);color:var(--pl-ink,#111);border:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd);border-radius:var(--pl-radius,4px)}
 .pl-row{display:flex;gap:.8rem;align-items:center;margin-top:.5rem}
-.pl-build{padding:.35rem 1.2rem;font:inherit;background:var(--pl-accent);color:var(--pl-accent-ink);border:0;border-radius:var(--pl-radius);cursor:pointer;font-weight:var(--pl-label-weight);text-transform:var(--pl-label-case)}
-.pl-build:disabled{opacity:.4;cursor:default}.pl-busy{color:var(--pl-status-busy)}
-.pl-error{color:var(--pl-status-fail);margin:0 0 .8rem}.pl-notice{color:var(--pl-status-pass);margin:0 0 .8rem}
-.pl-status{display:flex;flex-wrap:wrap;gap:.3rem 1rem;color:var(--pl-ink-dim)}
-.pl-log{max-height:55vh;overflow:auto}
-.pl-entry{display:grid;grid-template-columns:5.5rem 1fr;gap:.5rem;padding:.2rem 0;border-bottom:var(--pl-rule) solid var(--pl-line-soft)}
-.pl-kind{color:var(--pl-ink-dimmer);font-size:.8rem}.pl-text{white-space:pre-wrap;word-break:break-word}
-.pl-prompt .pl-text{font-weight:600}.pl-done .pl-text{color:var(--pl-status-pass)}
-.pl-stopped .pl-text,.pl-tool-error .pl-text{color:var(--pl-status-fail)}
-.pl-tool .pl-text{color:var(--pl-ink-dim);font-family:var(--pl-font-mono);font-size:.8rem}
-.pl-viewport{position:relative;height:60vh;background-color:var(--pl-viewport-bg);background-image:var(--pl-viewport-image);background-size:var(--pl-viewport-image-size);border:var(--pl-rule) solid var(--pl-line);border-radius:var(--pl-radius);margin-bottom:.8rem;overflow:hidden}
-.pl-viewport svg{filter:var(--pl-viewport-filter)}
+.pl-build{padding:.35rem 1.2rem;font:inherit;background:var(--pl-accent,#366fc5);color:var(--pl-accent-ink,#fff);border:0;border-radius:var(--pl-radius,4px);cursor:pointer;font-weight:var(--pl-label-weight,700);text-transform:var(--pl-label-case)}
+.pl-build:disabled{opacity:.4;cursor:default}.pl-busy{color:var(--pl-status-busy,#a60)}
+.pl-error{color:var(--pl-status-fail,#b00);margin:.4rem 0 0}.pl-notice{color:var(--pl-status-pass,#060);margin:.4rem 0 0}
+.pl-status{display:flex;flex-wrap:wrap;gap:.3rem 1rem;color:var(--pl-ink-dim,#555);font-size:.9em}
+.pl-entry{display:grid;grid-template-columns:5rem 1fr;gap:.5rem;padding:.2rem 0;border-bottom:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd)}
+.pl-kind{color:var(--pl-ink-dimmer,#888);font-size:.8rem}.pl-text{white-space:pre-wrap;word-break:break-word;font-size:.9em}
+.pl-prompt .pl-text{font-weight:600}.pl-done .pl-text{color:var(--pl-status-pass,#060)}
+.pl-stopped .pl-text,.pl-tool-error .pl-text{color:var(--pl-status-fail,#b00)}
+.pl-tool .pl-text{color:var(--pl-ink-dim,#555);font-family:var(--pl-font-mono,monospace);font-size:.8rem}
 .pl-source-head{display:flex;gap:.6rem;align-items:baseline;margin-bottom:.4rem}.pl-source-head h2{margin:0}
-.pl-source-state{color:var(--pl-ink-dimmer);font-size:.8rem}.pl-source-state.pl-warn{color:var(--pl-status-fail)}
+.pl-source-state{color:var(--pl-ink-dimmer,#888);font-size:.8rem}.pl-source-state.pl-warn{color:var(--pl-status-fail,#b00)}
 .pl-source-head .pl-save{margin-left:auto}
-#pl-source{width:100%;box-sizing:border-box;min-height:16rem;font:12px/1.4 var(--pl-font-mono)}
-.pl-source .cm-editor{max-height:45vh;font-size:12px;font-family:var(--pl-font-mono);background:var(--pl-panel);color:var(--pl-ink);border:var(--pl-rule) solid var(--pl-line-soft)}
-.pl-source .cm-editor.cm-focused{outline:none;border-color:var(--pl-focus)}
-.pl-source .cm-gutters{background:var(--pl-panel-alt);color:var(--pl-ink-dimmer);border-right:var(--pl-rule) solid var(--pl-line-soft)}
-.pl-source .cm-cursor{border-left-color:var(--pl-ink)}
+#pl-source{width:100%;box-sizing:border-box;min-height:12rem;font:12px/1.4 var(--pl-font-mono,monospace)}
+.pl-source .cm-editor{font-size:12px;font-family:var(--pl-font-mono,monospace);background:var(--pl-panel,#fff);color:var(--pl-ink,#111);border:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd)}
+.pl-source .cm-editor.cm-focused{outline:none;border-color:var(--pl-focus,#36c)}
+.pl-source .cm-gutters{background:var(--pl-panel-alt,#f3f3f3);color:var(--pl-ink-dimmer,#888);border-right:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd)}
+.pl-source .cm-cursor{border-left-color:var(--pl-ink,#111)}
 .code-editor .tok-comment{color:var(--pl-code-comment,var(--pl-ink-dimmer));font-style:italic}
 .code-editor .tok-keyword{color:var(--pl-code-keyword,#6a1b9a);font-weight:700}
 .code-editor .tok-heading{color:var(--pl-code-section,#00695c);font-weight:700}
@@ -353,58 +271,29 @@ a{color:var(--pl-link)}
 .code-editor .tok-number{color:var(--pl-code-number,#9a4a00)}
 .code-editor .tok-string,.code-editor .tok-string2{color:var(--pl-code-string,#2a6e2f)}
 .code-editor .tok-punctuation{color:var(--pl-code-paren,var(--pl-ink-dimmer))}.code-editor .tok-invalid{color:var(--pl-status-fail)}
-.pl-parts{display:grid;grid-template-columns:minmax(10rem,1fr) minmax(14rem,1.4fr);gap:.8rem}
-@media (max-width:1100px){.pl-parts{grid-template-columns:1fr}}
-#tree{max-height:40vh;overflow:auto;font-size:.9em}
-#tree .tree-node{cursor:pointer;padding:.05rem .3rem;border:var(--pl-rule) solid transparent;border-radius:var(--pl-radius);white-space:nowrap}
-#tree .tree-node:hover,#tree .tree-node.sluice-lit{background:var(--pl-hover-bg);border-color:var(--pl-hover-line)}
-#tree .tree-node.pl-inspected{background:var(--pl-accent);color:var(--pl-accent-ink)}
-#tree .tree-more{cursor:pointer;color:var(--pl-ink-dimmer);font-style:italic;padding:.05rem .3rem;white-space:nowrap}
-#tree .tree-more:hover{color:var(--pl-ink)}
-#tree .tree-type{color:var(--pl-ink-dimmer);margin-left:.4rem;font-size:.85em}
-#tree .tree-node.pl-inspected .tree-type{color:var(--pl-accent-ink);opacity:.75}
-#sluice-panes svg path.sluice-lit{stroke:var(--pl-focus)!important;stroke-width:3!important}
-.pl-inputs{font-size:.9em;max-height:40vh;overflow:auto}
-.pl-buy,.pl-download,.sluice-apply,.pl-source-head button{font:inherit;font-size:.9em;padding:.2rem .6rem;border:var(--pl-rule) solid var(--pl-line);border-radius:var(--pl-radius);background:var(--pl-panel);color:var(--pl-link);cursor:pointer}
-.sluice-apply.sluice-pending{background:var(--pl-accent);color:var(--pl-accent-ink)}
+.pl-buy,.pl-download,.pl-source-head button{font:inherit;font-size:.85em;padding:.2rem .6rem;border:var(--pl-rule,1px) solid var(--pl-line,#ccc);border-radius:var(--pl-radius,4px);background:var(--pl-panel,#fff);color:var(--pl-link,#1550a8);cursor:pointer}
 .pl-buy:disabled{opacity:.4;cursor:default}
 .pl-downloads .pl-download{margin:0 .3rem .3rem 0}
-.pl-figure{font-size:.9em;color:var(--pl-ink-dim)}.pl-figure b{font-size:2rem;color:var(--pl-ink);margin-right:.3rem;font-variant-numeric:tabular-nums}
-.pl-figure.pl-out b{color:var(--pl-status-fail)}
-.pl-meter{height:.45rem;background:var(--pl-panel-alt);border:var(--pl-rule) solid var(--pl-line-soft);border-radius:var(--pl-radius-pill);overflow:hidden;margin:.3rem 0}
-.pl-meter span{display:block;height:100%;background:var(--pl-accent)}
-.pl-line{color:var(--pl-ink-dim);font-size:.9em;margin:.3rem 0}.pl-begging{color:var(--pl-status-fail);font-weight:600;margin:.3rem 0}
+.pl-figure{font-size:.9em;color:var(--pl-ink-dim,#555)}.pl-figure b{font-size:1.8rem;color:var(--pl-ink,#111);margin-right:.3rem;font-variant-numeric:tabular-nums}
+.pl-figure.pl-out b{color:var(--pl-status-fail,#b00)}
+.pl-meter{height:.45rem;background:var(--pl-panel-alt,#eee);border:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd);border-radius:var(--pl-radius-pill,9px);overflow:hidden;margin:.3rem 0}
+.pl-meter span{display:block;height:100%;background:var(--pl-accent,#366fc5)}
+.pl-line{color:var(--pl-ink-dim,#555);font-size:.9em;margin:.3rem 0}.pl-begging{color:var(--pl-status-fail,#b00);font-weight:600;margin:.3rem 0}
 .pl-topup{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem;font-size:.9em}
 .pl-private{display:inline-flex;gap:.3rem;align-items:center;cursor:pointer}
-.pl-private input{accent-color:var(--pl-accent)}
+.pl-private input{accent-color:var(--pl-accent,#366fc5)}
 .pl-list{max-width:60rem;margin:0 auto;padding:1rem}
 .pl-list h2{font-family:var(--pl-font-label);font-weight:var(--pl-label-weight);text-transform:var(--pl-label-case);letter-spacing:var(--pl-label-tracking)}
 .pl-entry-card{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:.8rem;align-items:center;padding:.6rem .7rem;margin-bottom:.5rem;background:var(--pl-panel);border:var(--pl-rule) solid var(--pl-line);border-radius:var(--pl-radius);color:var(--pl-ink);text-decoration:none}
 .pl-entry-card:hover{background:var(--pl-hover-bg);outline:var(--pl-rule) solid var(--pl-hover-line)}
 .pl-thumb{grid-row:1/3;width:96px;height:72px;object-fit:contain;background:#fff;border:var(--pl-rule) solid var(--pl-line-soft)}
 .pl-entry-title{font-weight:600;overflow-wrap:anywhere;font-size:.95em}
-@media (max-width:760px){.pl-thumb{width:72px;height:54px}.pl-list{padding:.5rem}}
-.pl-tabs{display:none}
-@media (max-width:760px){
- body{font-size:15px}
- .pl-head{padding:.4rem .6rem;gap:.5rem;flex-wrap:wrap}.pl-head .pl-engine{display:none}
- .pl-head nav{gap:.5rem;font-size:.85em}
- .pl-tabs{display:flex;position:sticky;top:0;z-index:30;background:var(--pl-panel);border-bottom:var(--pl-rule) solid var(--pl-line)}
- .pl-tabs button{flex:1;padding:.65rem 0;font:inherit;background:none;border:0;color:var(--pl-ink-dim);font-weight:var(--pl-label-weight);text-transform:var(--pl-label-case)}
- .pl-tabs button.pl-tab-on{background:var(--pl-accent);color:var(--pl-accent-ink)}
- .pl-grid{display:block;padding:.5rem}
- #pl-sheet .pl-g{display:none}
- #pl-sheet[data-tab=prompt] .pl-g-prompt,#pl-sheet[data-tab=model] .pl-g-model,
- #pl-sheet[data-tab=parts] .pl-g-parts,#pl-sheet[data-tab=code] .pl-g-code{display:block}
- .pl-viewport{height:calc(100dvh - 9rem)}
- #pl-sheet:not([data-tab=model]) .pl-viewport{position:absolute;left:-300vw;top:0;width:calc(100vw - 1rem)}
- .pl-parts{grid-template-columns:1fr}
- #tree,.pl-inputs,.pl-log{max-height:none}
- .pl-source .cm-editor{max-height:calc(100dvh - 12rem)}
-}"
-  "String. The sheet's look, in the skin tokens (the sluice's tokens.css,
-SKIN-API.md): a skin restyles the sheet as it does the page and the
-sluice.  At 760px and under the sheet is an app of four tabs.")
+@media (max-width:47.99rem){.pl-head{padding:.3rem .6rem;gap:.5rem;flex-wrap:wrap}.pl-head .pl-engine{display:none}.pl-head nav{gap:.5rem;font-size:.8em}
+ .pl-thumb{width:72px;height:54px}.pl-list{padding:.5rem}}"
+  "String. The lab's own cards on the sheet (its tiles), in the skin tokens
+(the sluice's tokens.css, SKIN-API.md), with fallbacks for the classic
+look, which links no tokens.  The frame, the panes, the tree and the
+inspector are the sluice's.")
 
 (defparameter *sheet-editor-script*
   "(function(){
@@ -441,7 +330,16 @@ calls; an edit in progress keeps its text and says the file changed.")
 
 
 
-(define-object lab-sheet (datastar-mixin session-control-mixin base-html-page)
+(define-object lab-sheet (sluice:assembly)
+
+  :documentation
+  (:description "The lab as one page: the sluice, opened on the session's
+model, with the lab's own sections as its tiles -- the prompt, the
+status, the credits, the downloads and the log in a column at the left,
+the model file's editor under the panes.  A phone shows them as four
+tabs: Prompt, Model, Parts, Code.  Only the sluice's INPUTS are
+overridden here (where its package is locked its computed slots are
+reserved words); the lab's own slots and children are its own.")
 
   :input-slots
   (("The session shown, a struct (session.lisp); nil until a new visitor's
@@ -451,47 +349,34 @@ first build opens one."
 build minted here."
     owner-key nil :settable)
    ("Integer. Bumped at every change to the session (sheets-hear): what the
-log, status and source sections are recomputed from."
+log, status, credits and downloads sections are recomputed from."
     revision 0 :settable)
-   ("When the model was last compiled: what the viewport is recomputed from."
+   ("When the model was last compiled (sheets-hear)."
     model-stamp nil :settable)
    ("The model file's text as the editor was last sent it (sheets-hear)."
     shown-source "" :settable)
    ("String or nil. The id of a private session named on the address, which
 the sheet shows only once its owner's key is proven (claim)."
-    private-id nil :settable)
-   ("List. The root-path, from the model, of the node whose inputs the
-panel shows; nil for the model itself."
-    inspected-path nil :settable)
-   ("Boolean. The sluice inputs panel's auto-apply switch, which the
-panel sets on the page that holds it."
-    inputs-auto-apply? t :settable)
-   ("List. How many children the tree lists of each part whose \"...\" row
-has been clicked: an alist from the part's root-path to a count."
-    tree-shown nil :settable)
-   ;; the sheet draws in svg: base-html-page's x3dom (834 KB) is not
-   ;; wanted, nor FontAwesome (the sluice's inputs panel draws its own
-   ;; icons since gendl's step 1)
-   (use-x3dom? nil))
+    private-id nil :settable))
 
   :computed-slots
-  ((title (lab-title))
-   (datastar-actions (list :build :claim :save :inspect :more :topup :privacy))
+  (;; the sluice's inputs
+   (title (lab-title))
+   (audience :public)
+   (tiles (list (list :object (the prompt-tile) :place :left :tab "Prompt")
+                (list :object (the status-section) :place :left :tab "Prompt")
+                (list :object (the credits-section) :place :left :tab "Prompt")
+                (list :object (the downloads-section) :place :left :tab "Prompt")
+                (list :object (the log-section) :place :left :tab "Prompt")
+                (list :object (the editor-tile) :place :under-panes :tab "Code")))
+   (tabs (list "Prompt" "Model" "Parts" "Code"))
+   (head-html (the lab-head-html))
+   (body-html (the lab-body-html))
+   ;; on a phone the inspector holds the inputs alone
+   (user-mode?-default nil)
 
-   ;; the gdlAjax calls the page makes: the viewport's, and the inputs
-   ;; panel's (a call with no function only sets its fields); any other
-   ;; is refused, whatever a crafted request names
-   (ajax-callable-functions (append '(:reset! :reset-all! (:set-slot! :open? :inputs-auto-apply?))
-                                    gwl:*viewport-ajax-functions*))
-
-   ;; the node the inputs panel is on: the inspected path followed from
-   ;; the model, or the model when that path no longer leads anywhere (a
-   ;; rebuild renamed or dropped the node)
-   (inspected-node (let ((model (the model-object)))
-                     (and model
-                          (or (and (the inspected-path)
-                                   (ignore-errors (the-object model (follow-root-path (the inspected-path)))))
-                              model))))
+   ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
+   (datastar-actions (list :build :claim :save :topup :privacy))
 
    (owner? (let ((session (the session)))
              (and session (the owner-key) (owner? session (the owner-key)) t)))
@@ -504,72 +389,34 @@ has been clicked: an alist from the part's root-path to a count."
    ;; waiting for its owner's key
    (shown-id (or (and (the session) (session-id (the session))) (the private-id)))
 
-   ;; ?browse=live or ?browse=archive: the listings instead of the lab
-   (browse (let ((b (cdr (assoc "browse" (the query-toplevel) :test #'string-equal))))
-             (and (member b '("live" "archive") :test #'equal) b)))
-
-   ;; The model is a root of its own, as in the sluice (so the inputs
-   ;; panel offers all its inputs), made afresh at every compile.
-   ;; Dependencies are recorded only within one tree or between trees a
-   ;; god-parent link joins (gendl same-tree?): without the link, an
-   ;; input set in the model changed nothing on the page.  The model
-   ;; names the sheet -- the direction every image honours.
-   (model-object (progn (the model-stamp)
-                        (let* ((session (the session))
-                               (model (and session (model-defined? session)
-                                           (ignore-errors (make-model session)))))
-                          (when model (add-godparent model self))
-                          model)))
-
-   (leaf-count (let ((model (the model-object)))
-                 (or (and model (ignore-errors (length (the-object model leaves)))) 0)))
-
-   (additional-header-content
+   (lab-head-html
     (with-lhtml-string ()
       (:meta :name "viewport" :content "width=device-width, initial-scale=1")
-      (str (the datastar-head-content))
       (when *turnstile-site-key*
         (htm (:script :src "https://challenges.cloudflare.com/turnstile/v0/api.js" :async "async" :defer "defer")
              (:script "window.plTurnstile=function(t){var e=document.getElementById('pl-turnstile');if(e){e.value=t;e.dispatchEvent(new Event('input',{bubbles:true}))}};")))
       (:script :defer "defer" :src (static-url "editor.js"))
-      ;; the sluice's inputs panel wears the sluice's utility classes,
-      ;; and its hover script lights a drawn part and its tree node together
-      (:link :rel "stylesheet" :href "/static/sluice/css/sluice.css")
-      (:script (str (or (ignore-errors (symbol-value (find-symbol "*HOVER-SCRIPT*" :sluice))) "")))
       (:script (str *sheet-editor-script*))
-      ;; the look: the tokens, the sheet's own (which says the sluice's
-      ;; utility classes in them, inside the panes that carry them: the
-      ;; sluice's skinned.css is written for the sluice's own frame), then
-      ;; the skin (skin-script picks it before the page is painted)
-      (:link :rel "stylesheet" :href (tokens-url))
-      (:style (str *sheet-css*))
-      (:link :id "pl-skin-link" :rel "stylesheet")
-      (:script (str (the skin-script)))))
+      (:style (str *sheet-css*))))
 
-   ;; The skin: ?skin= on the address, else the one this browser chose
-   ;; (localStorage prompt-lab-skin, which the page keeps too), else the
-   ;; house look.  Chosen in the header's menu; nothing reloads.
-   (skin-choices (mapcar #'(lambda (skin) (list (getf skin :name) (getf skin :label) (getf skin :href)))
-                         (skins)))
-
-   (skin-script
-    (format nil "(function(){var skins=~a,house=~a,aliases=~a;
-var l=document.getElementById('pl-skin-link');
-function name(n){return aliases[n]||n}
-function wear(n){n=name(n);if(skins[n])l.setAttribute('href',skins[n]);else l.removeAttribute('href');window.plSkin=skins[n]?n:house}
-var q=null;try{q=new URLSearchParams(location.search).get('skin')}catch(e){}
-var s=null;try{s=localStorage.getItem('prompt-lab-skin')}catch(e){}
-wear(q||s||house);
-window.plSetSkin=function(n){try{localStorage.setItem('prompt-lab-skin',n)}catch(e){}wear(n)};
-document.addEventListener('DOMContentLoaded',function(){var m=document.getElementById('pl-skin');if(m)m.value=window.plSkin})})();"
-            (with-output-to-string (s)
-              (yason:encode (alexandria:alist-hash-table
-                             (mapcar #'(lambda (c) (cons (first c) (third c))) (the skin-choices))
-                             :test #'equal)
-                            s))
-            (js-string-literal *house-skin*)
-            (with-output-to-string (s)
-              (yason:encode (alexandria:alist-hash-table *skin-aliases* :test #'equal) s))))
+   ;; Written with the page, never redrawn: the lab's header, the page's
+   ;; signals, the claim, and the phone's turn to the model when a build
+   ;; is done.  What changes is in the tiles.
+   (lab-body-html
+    (with-lhtml-string ()
+      (:div :id "pl-sheet" :style "display:contents"
+            :|data-signals| (escape-string-minimal-plus-quotes (the initial-signals))
+            ;; a browser holding this session's key makes the page its owner's
+            (when (and (the shown-id) (not (the owner?)))
+              (htm (:span :|data-init| (format nil "$owner && ~a" (the (datastar-action :claim))))))
+            (:span :|data-effect| "var b=$busy; if(window.plWasBusy && !b && window.sluiceTab && matchMedia('(max-width: 47.99rem)').matches){sluiceTab('model')} window.plWasBusy=b")
+            (:header :class "pl-head"
+                     (:h1 (esc (lab-title)))
+                     (:span :class "pl-engine" (esc (engine-label)))
+                     (:nav (str (browse-links))
+                           (:a :href (the classic-url) "the page")
+                           (when *sibling-lab*
+                             (htm (:a :href (format nil "~a/sheet" (car *sibling-lab*)) (esc (cdr *sibling-lab*))))))))))
 
    ;; back from Stripe the address carries the checkout and the wallet;
    ;; the wallet otherwise comes from where the page keeps it
@@ -578,7 +425,7 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{tab: 'prompt', private: false, prompt: '', turnstile: '', source: '', inspect: '', more: '', moreAll: false, amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             (if (the cancelled?) "'The payment was cancelled; nothing was charged.'" "''")
             (json-boolean (and (the session) (session-busy? (the session))))
             ;; a browser holding the session's key shows the owner's page
@@ -593,144 +440,69 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
                 (js-string-literal (the query-wallet))
                 "(function(){try{return localStorage.getItem('prompt-lab-wallet')||''}catch(e){return ''}})()")))
 
-   (body (if (the browse) (the listing-body) (the lab-body)))
-
-   ;; The listings (browse.lisp's own summaries): the live sessions, or
-   ;; every archived one with its thumbnail.  A session goes to its sheet
-   ;; when it is live here, to the page's archive view when it is not (the
-   ;; sheet has none yet), and to the other lab when that one built it.
-   (listing-body
-    (let* ((archive? (equal (the browse) "archive"))
-           (summaries (and *browsing?*
-                           (newest-first (if archive? (archive-summaries) (live-summaries))))))
-      (with-lhtml-string ()
-        (:div :id "pl-sheet" :class "pl-listing"
-              (:header :class "pl-head"
-                       (:h1 (esc (lab-title)))
-                       (:span :class "pl-engine" (esc (engine-label)))
-                       (:nav (str (the browse-links))
-                             (:a :href (format nil "~a/sheet" *url-prefix*) "start your own")))
-              (:main :class "pl-list"
-                     (:h2 (str (if archive? "Archived sessions" "Live sessions")))
-                     (cond ((not *browsing?*)
-                            (htm (:p :class "pl-line" "Sessions are not listed on this lab.")))
-                           ((null summaries)
-                            (htm (:p :class "pl-line" "Nothing to list yet.")))
-                           (t
-                            (dolist (s summaries)
-                              (str (listing-entry s archive?))))))))))
-
-   (browse-links
-    (with-lhtml-string ()
-      (when *browsing?*
-        (htm (:a :href (format nil "~a/sheet?browse=live" *url-prefix*) "sessions")
-             (:a :href (format nil "~a/sheet?browse=archive" *url-prefix*) "archive")))))
-
-   (lab-body
-    (with-lhtml-string ()
-      (:div :id "pl-sheet"
-            :|data-signals| (escape-string-minimal-plus-quotes (the initial-signals))
-            :|data-init| (the datastar-stream-attribute)
-            ;; the phone's tab, for the stylesheet
-            :|data-attr:data-tab| "$tab"
-            ;; a browser holding this session's key makes the page its owner's
-            (when (and (the shown-id) (not (the owner?)))
-              (htm (:span :|data-init| (format nil "$owner && ~a" (the (datastar-action :claim))))))
-            ;; on a phone, a build that finishes takes the screen to the model
-            (:span :|data-effect| "var b=$busy; if(window.plWasBusy && !b && matchMedia('(max-width: 760px)').matches){$tab='model'} window.plWasBusy=b")
-            (:header :class "pl-head"
-                     (:h1 (esc (lab-title)))
-                     (:span :class "pl-engine" (esc (engine-label)))
-                     (:nav (str (the browse-links))
-                           (:a :href (the classic-url) "the page")
-                           (when *sibling-lab*
-                             (htm (:a :href (format nil "~a/sheet" (car *sibling-lab*)) (esc (cdr *sibling-lab*)))))
-                           (:select :id "pl-skin" :title "How the lab looks" :onchange "plSetSkin(this.value)"
-                                    (:option :value *house-skin* (esc (or (ignore-errors (token-value (format nil "~a/tokens.css" sluice:*static*) "--pl-skin-label")) "Workstation")))
-                                    (dolist (choice (the skin-choices))
-                                      (htm (:option :value (first choice) (esc (second choice))))))))
-            ;; the phone's four screens; on a desk everything shows at once
-            (:nav :class "pl-tabs"
-                  (dolist (tab '(("prompt" "Prompt") ("model" "Model") ("parts" "Parts") ("code" "Code")))
-                    (htm (:button :type "button"
-                                  :|data-on:click| (format nil "$tab = '~a'" (first tab))
-                                  :|data-class:pl-tab-on| (format nil "$tab === '~a'" (first tab))
-                                  (str (second tab))))))
-            (:main :class "pl-grid"
-                   (:section :class "pl-left"
-                             (:div :class "pl-g pl-g-prompt"
-                                   (str (the prompt-form))
-                                   (:p :class "pl-notice" :|data-show| "$notice" :|data-text| "$notice")
-                                   (str (the status-section div))
-                                   (str (the credits-section div))
-                                   (str (the log-section div))))
-                   (:section :class "pl-right"
-                             ;; never hidden: off the screen on a phone's other tabs, so
-                             ;; the drawing keeps its size
-                             (:div :id "sluice-panes" :class "pl-viewport" (str (the viewport div)))
-                             (:div :class "pl-g pl-g-model" (str (the downloads-section div)))
-                             (:div :class "pl-g pl-g-parts"
-                                   (:div :class "pl-parts"
-                                         (str (the tree-section div))
-                                         (str (the inputs-section div))))
-                             (:div :class "pl-g pl-g-code" (str (the editor-card))))))))
-
-   ;; Not a section either: the editor keeps its text, folds and caret
-   ;; through every push.  New versions of the file arrive as
-   ;; plSetSource calls (sheets-hear); Save sends the text as the
-   ;; `source' signal and nothing else.
-   (editor-card
-    (with-lhtml-string ()
-      (:div :class "pl-card pl-source"
-            :|data-effect| "window.plLock && plLock(!$editable || $busy)"
-            (:div :class "pl-source-head"
-                  (:h2 "Model file")
-                  (:span :id "pl-source-state" :class "pl-source-state")
-                  (:button :type "button" :|data-on:click| "plFold(true)" "fold all")
-                  (:button :type "button" :|data-on:click| "plFold(false)" "unfold all")
-                  (:button :type "button" :class "pl-save"
-                           :|data-show| "$editable"
-                           :|data-indicator:saving| ""
-                           :|data-attr:disabled| "$busy || $saving"
-                           :|data-on:click|
-                           (format nil "plConfirmSave() && ($source = plSourceText(), ~a)"
-                                   (the (datastar-action :save :options "{filterSignals: {include: /^(source|owner)$/}}")))
-                           "Save"))
-            (:textarea :id "pl-source" :spellcheck "false"
-                       (esc (the shown-source))))))
-
-   ;; Not a section: never redrawn, so what is being typed stays.  What
-   ;; it shows changes through signals.
-   (prompt-form
-    (with-lhtml-string ()
-      (:div :class "pl-card" :|data-show| "$editable"
-            (:textarea :id "pl-prompt" :rows "4" :|data-bind:prompt| ""
-                       :placeholder "Describe what to build, e.g. a picnic table with two benches")
-            (when *turnstile-site-key*
-              (htm (:div :class "cf-turnstile" :data-sitekey *turnstile-site-key* :data-callback "plTurnstile")))
-            (:input :type "hidden" :id "pl-turnstile" :|data-bind:turnstile| "")
-            (:div :class "pl-row"
-                  (:button :class "pl-build"
-                           :|data-on:click| (the (datastar-action :build :options "{filterSignals: {include: /^(prompt|turnstile|owner|wallet)$/}}"))
-                           :|data-indicator:sending| ""
-                           ;; with a human check, a build waits for its token
-                           :|data-attr:disabled| (format nil "$busy || $sending || !$prompt.trim()~@[ || !$turnstile~]"
-                                                         *turnstile-site-key*)
-                           "Build")
-                  (:span :class "pl-busy" :|data-show| "$busy" "the agent is working...")))
-      (:p :class "pl-error" :|data-show| "$error" :|data-text| "$error")
-      ;; hidden until Datastar has read the signals: no banner flashes at
-      ;; an owner while the script loads
-      (:div :class "pl-card pl-watch" :style "display:none" :|data-show| "!$editable"
-            "You are watching this session as it is built.  "
-            (:a :href *url-prefix* "Start your own") ".")))
-
    (classic-url (if (the session)
                     (format nil "~a?session=~a" *url-prefix* (session-id (the session)))
                     *url-prefix*)))
 
   :objects
-  ((status-section
+  (;; The prompt, as a tile that never goes stale (it reads nothing that
+   ;; changes): what is typed stays.  What it shows changes through
+   ;; signals.
+   (prompt-tile
+    :type 'base-html-div
+    :inner-html (with-lhtml-string ()
+                  (:div :class "pl-card"
+                        (:div :|data-show| "$editable"
+                              (:textarea :id "pl-prompt" :rows "4" :|data-bind:prompt| ""
+                                         :placeholder "Describe what to build, e.g. a picnic table with two benches")
+                              (when *turnstile-site-key*
+                                (htm (:div :class "cf-turnstile" :data-sitekey *turnstile-site-key* :data-callback "plTurnstile")))
+                              (:input :type "hidden" :id "pl-turnstile" :|data-bind:turnstile| "")
+                              (:div :class "pl-row"
+                                    (:button :class "pl-build"
+                                             :|data-on:click| (the (datastar-action :build :options "{filterSignals: {include: /^(prompt|turnstile|owner|wallet)$/}}"))
+                                             :|data-indicator:sending| ""
+                                             ;; with a human check, a build waits for its token
+                                             :|data-attr:disabled| (format nil "$busy || $sending || !$prompt.trim()~@[ || !$turnstile~]"
+                                                                           *turnstile-site-key*)
+                                             "Build")
+                                    (:span :class "pl-busy" :|data-show| "$busy" "the agent is working...")))
+                        ;; hidden until Datastar has read the signals: no
+                        ;; banner flashes at an owner while the script loads
+                        (:div :class "pl-watch" :style "display:none" :|data-show| "!$editable"
+                              "You are watching this session as it is built.  "
+                              (:a :href (format nil "~a/sheet" *url-prefix*) "Start your own") ".")
+                        (:p :class "pl-notice" :|data-show| "$notice" :|data-text| "$notice")
+                        (:p :class "pl-error" :|data-show| "$error" :|data-text| "$error"))))
+
+   ;; The model file's editor, under the panes.  Its card is never
+   ;; morphed (data-ignore-morph): CodeMirror builds its own DOM beside
+   ;; the textarea, which a patch would strip.  New versions of the file
+   ;; arrive as plSetSource calls (sheets-hear); Save sends the text as
+   ;; the `source' signal and nothing else.
+   (editor-tile
+    :type 'base-html-div
+    :inner-html (let ((session (the session)))
+                  (with-lhtml-string ()
+                    (:div :class "pl-card pl-source" :|data-ignore-morph| ""
+                          :|data-effect| "window.plLock && plLock(!$editable || $busy)"
+                          (:div :class "pl-source-head"
+                                (:h2 "Model file")
+                                (:span :id "pl-source-state" :class "pl-source-state")
+                                (:button :type "button" :|data-on:click| "plFold(true)" "fold all")
+                                (:button :type "button" :|data-on:click| "plFold(false)" "unfold all")
+                                (:button :type "button" :class "pl-save"
+                                         :|data-show| "$editable"
+                                         :|data-indicator:saving| ""
+                                         :|data-attr:disabled| "$busy || $saving"
+                                         :|data-on:click|
+                                         (format nil "plConfirmSave() && ($source = plSourceText(), ~a)"
+                                                 (the (datastar-action :save :options "{filterSignals: {include: /^(source|owner)$/}}")))
+                                         "Save"))
+                          (:textarea :id "pl-source" :spellcheck "false"
+                                     (esc (or (and session (ignore-errors (model-body session))) "")))))))
+
+   (status-section
     :type 'base-html-div
     :inner-html (progn
                   (the revision)
@@ -750,9 +522,6 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
                                        (:span (fmt "tokens ~:d in, ~:d out" (getf usage :input) (getf usage :output)))
                                        (when pot
                                          (htm (:span (fmt "pot ~:d credits" (max 0 (floor (or (getf pot :credits) 0)))))))
-                                       (when (model-defined? session)
-                                         (htm (:a :href (viewer-url session) :target "_blank" "full sluice")))
-                                       (:a :href (the classic-url) "the page")
                                        ;; closing the session to watchers, once it has bought credits
                                        (when (and (the owner?) (or (paid? session) (session-private? session)))
                                          (htm (:label :class "pl-private"
@@ -773,6 +542,7 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
                          (shown (last log *log-shown*)))
                     (with-lhtml-string ()
                       (:div :class "pl-card pl-log"
+                            (:h2 "Log")
                             (when (> (length log) (length shown))
                               (htm (:p :class "pl-entry pl-note"
                                        (fmt "~d earlier entries not shown." (- (length log) (length shown))))))
@@ -823,81 +593,11 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
                                                           (format nil "~a?session=~a&format=~a"
                                                                   (door-path "download") (session-id session) (first entry)))))
                                                 (esc (fourth entry)))))
-                                (htm (:p "The model's drawings and files, once it is built.")))
-                            (:p :id "pl-download-note" :class "pl-line"))))))
-
-   (tree-section
-    :type 'base-html-div
-    :inner-html (let ((model (the model-object)))
-                  (with-lhtml-string ()
-                    (:div :class "pl-card"
-                          (:h2 "Parts")
-                          (:div :id "tree"
-                                (if model
-                                    (str (tree-html self model (the inspected-node) (the tree-shown)))
-                                    (htm (:p "No model yet."))))))))
-
-   (inputs-section
-    :type 'base-html-div
-    :inner-html (let ((node (the inspected-node)))
-                  (with-lhtml-string ()
-                    (:div :class "pl-card pl-inputs"
-                          (:h2 (if node
-                                   (fmt "Inputs of ~a" (tree-label node))
-                                   (str "Inputs")))
-                          (if node
-                              (str (the input-panel html))
-                              (htm (:p "The model's inputs appear here once it is built.")))))))
-
-   (viewport :type 'viewport-html-div
-             :image-format :svg
-             :projection-key :trimetric
-             :hidden-lines (if (<= 1 (the leaf-count) *hidden-lines-max-leaves*) :remove :draw)
-             :display-list-object-roots (let ((model (the model-object))) (when model (list model)))))
-
-  :hidden-objects
-  (;; the sluice's own inputs panel: a live control for every input of
-   ;; the node (every :settable slot below the root), set in this
-   ;; sheet's instance of the model with no agent and no compile; its
-   ;; calls are gdlAjax's, whose replies hand the redraw to the stream
-   (input-panel :type 'sluice::input-panel
-                :node (the inspected-node)
-                :sluice self))
+                                (htm (:p :class "pl-line" "The model's drawings and files, once it is built.")))
+                            (:p :id "pl-download-note" :class "pl-line")))))))
 
   :functions
-  ((input-changed!
-    (&key node slot)
-    ;; what the sluice calls after every set and reset: nothing to do
-    ;; yet (the place for a meter report on edits, as on the viewer)
-    (declare (ignore node slot))
-    nil)
-
-   (more
-    (signals)
-    ;; a "..." row: that part's children listed further, or all of them
-    (let* ((text (gethash "more" signals))
-           (path (and (stringp text) (ignore-errors (let ((*package* (find-package :keyword)))
-                                                      (read-safe-string text)))))
-           (node (and (listp path) (the model-object)
-                      (ignore-errors (the-object (the model-object) (follow-root-path path))))))
-      (when node
-        (let* ((total (length (ignore-errors (the-object node children))))
-               (shown (or (cdr (assoc path (the tree-shown) :test #'equal)) sluice::*tree-condense-limit*)))
-          (the (set-slot! :tree-shown
-                          (acons path (if (eq (gethash "moreAll" signals) t)
-                                          total
-                                          (min total (+ shown sluice::*tree-condense-limit*)))
-                                 (remove path (the tree-shown) :key #'car :test #'equal))))))))
-
-   (inspect
-    (signals)
-    (let* ((text (gethash "inspect" signals))
-           (path (and (stringp text) (ignore-errors (let ((*package* (find-package :keyword)))
-                                                      (read-safe-string text))))))
-      (when (listp path)
-        (the (set-slot! :inspected-path path)))))
-
-   (set-instantiation-time!
+  ((set-instantiation-time!
     ()
     (call-next-method)
     ;; ?session=<id>: the sheet shows that session to whoever may see it
@@ -915,7 +615,27 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
     (the (set-slot! :private-id nil))
     (the (set-slot! :model-stamp (model-stamp session)))
     (the (set-slot! :shown-source (or (ignore-errors (model-body session)) "")))
-    (watch-session! self session))
+    (watch-session! self session)
+    (the show-model!))
+
+   (show-model!
+    ()
+    ;; the sluice opens on the session's MODEL, a symbol, once there is
+    ;; one; a rebuild after that redefines the model's class, and the
+    ;; sluice hears that itself (refresh-redefined!) and redraws
+    (let ((session (the session)))
+      (when (and session (model-defined? session)
+                 (not (eq (the root-object-type) (model-symbol session))))
+        (the (set-slot! :root-object-type (model-symbol session)))
+        ;; hidden lines removed up to *hidden-lines-max-leaves* leaves
+        ;; (quadratic in the edges; View > Hidden Lines turns it on for
+        ;; a larger model), and the model's leaves drawn
+        (when (and (the root-object)
+                   (<= (or (ignore-errors (length (the root-object leaves))) 0)
+                       *hidden-lines-max-leaves*))
+          (ignore-errors (the viewport (set-slot! :hidden-lines :remove))))
+        (when (the root-object)
+          (ignore-errors (the viewport (draw-leaves! (the root-object))))))))
 
    (tell-error!
     (reason)
@@ -1059,6 +779,77 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
                                                       (js-string-literal (gethash "url" answer)))))
                            (the (tell-error! (or reason "The top-up could not be started."))))))))))))))
 
+
+(defun browse-links ()
+  "String of HTML: the links to the listings, where sessions are listed."
+  (with-lhtml-string ()
+    (when *browsing?*
+      (htm (:a :href (format nil "~a/sheet-list?browse=live" *url-prefix*) "sessions")
+           (:a :href (format nil "~a/sheet-list?browse=archive" *url-prefix*) "archive")))))
+
+(defun skin-script ()
+  "JavaScript: the listing page wears the skin this browser chose
+(localStorage prompt-lab-skin, which the page keeps too), else ?skin=,
+else the house look."
+  (format nil "(function(){var skins=~a,house=~a,aliases=~a;
+var l=document.getElementById('pl-skin-link');
+function name(n){return aliases[n]||n}
+var q=null;try{q=new URLSearchParams(location.search).get('skin')}catch(e){}
+var s=null;try{s=localStorage.getItem('prompt-lab-skin')}catch(e){}
+var n=name(q||s||house);if(skins[n])l.setAttribute('href',skins[n])})();"
+          (with-output-to-string (s)
+            (yason:encode (alexandria:alist-hash-table
+                           (mapcar #'(lambda (skin) (cons (getf skin :name) (getf skin :href))) (skins))
+                           :test #'equal)
+                          s))
+          (js-string-literal *house-skin*)
+          (with-output-to-string (s)
+            (yason:encode (alexandria:alist-hash-table *skin-aliases* :test #'equal) s))))
+
+;;
+;; The listings (browse.lisp's own summaries), a page of their own beside
+;; the sheet: the live sessions, or every archived one with its
+;; thumbnail.  A session goes to its sheet when it is live here, to the
+;; page's archive view when it is not, and to the other lab when that one
+;; built it.
+;;
+(define-object lab-listing (session-control-mixin base-html-page)
+  :computed-slots
+  ((title (format nil "~a: sessions" (lab-title)))
+   (use-x3dom? nil)
+   (browse (let ((b (cdr (assoc "browse" (the query-toplevel) :test #'string-equal))))
+             (if (equal b "archive") "archive" "live")))
+   (additional-header-content
+    (with-lhtml-string ()
+      (:meta :name "viewport" :content "width=device-width, initial-scale=1")
+      (:link :rel "stylesheet" :href (tokens-url))
+      (:style (str *sheet-css*))
+      (:link :id "pl-skin-link" :rel "stylesheet")
+      (:script (str (skin-script)))
+      (:style "body{margin:0;font-family:var(--pl-font);background:var(--pl-bg);color:var(--pl-ink)}")))
+   (body
+    (let* ((archive? (equal (the browse) "archive"))
+           (summaries (and *browsing?*
+                           (newest-first (if archive? (archive-summaries) (live-summaries))))))
+      (with-lhtml-string ()
+        (:div :id "pl-sheet" :class "pl-listing"
+              (:header :class "pl-head"
+                       (:h1 (esc (lab-title)))
+                       (:span :class "pl-engine" (esc (engine-label)))
+                       (:nav (str (browse-links))
+                             (:a :href (format nil "~a/sheet" *url-prefix*) "start your own")))
+              (:main :class "pl-list"
+                     (:h2 (str (if archive? "Archived sessions" "Live sessions")))
+                     (cond ((not *browsing?*)
+                            (htm (:p :class "pl-line" "Sessions are not listed on this lab.")))
+                           ((null summaries)
+                            (htm (:p :class "pl-line" "Nothing to list yet.")))
+                           (t
+                            (dolist (s summaries)
+                              (str (listing-entry s archive?))))))))))))
+
 (defun publish-lab-sheet! (&key host)
-  "Publish the sheet at <prefix>/sheet, beside the page."
-  (gwl::publish-gwl-app (format nil "~a/sheet" *url-prefix*) 'lab-sheet :host host))
+  "Publish the sheet at <prefix>/sheet, and its listings at
+<prefix>/sheet-list, beside the page."
+  (gwl::publish-gwl-app (format nil "~a/sheet" *url-prefix*) 'lab-sheet :host host)
+  (gwl::publish-gwl-app (format nil "~a/sheet-list" *url-prefix*) 'lab-listing :host host))
