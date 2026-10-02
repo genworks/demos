@@ -106,6 +106,37 @@ stale.  A session gone private closes on every sheet but its owner's."
 
 (pushnew 'sheets-hear *session-change-hooks*)
 
+;;
+;; The reply as it is written (agent.lisp, *session-text-hooks*): every
+;; sheet showing the session gets the text so far as the `live' signal,
+;; which the log shows as a line of its own until the block is done.  At
+;; most five times a second per session; the end of a block always goes.
+;;
+(defvar *live-sent* (make-hash-table :test #'equal)
+  "Session id -> when its live text was last sent, internal real time.")
+
+(defvar *live-sent-lock* (bt:make-lock "prompt-lab live text"))
+
+(defparameter *live-interval* (floor internal-time-units-per-second 5))
+
+(defun sheets-hear-text (session text)
+  (let ((now (get-internal-real-time))
+        (id (session-id session)))
+    (when (or (null text)
+              (bt:with-lock-held (*live-sent-lock*)
+                (let ((last (gethash id *live-sent*)))
+                  (when (or (null last) (>= (- now last) *live-interval*))
+                    (setf (gethash id *live-sent*) now)
+                    t))))
+      (when (null text)
+        (bt:with-lock-held (*live-sent-lock*) (remhash id *live-sent*)))
+      (let ((event (datastar-signals-event
+                    (with-output-to-string (s) (yason:encode (h "live" (if text (coerce text 'simple-string) "")) s)))))
+        (dolist (sheet (session-sheets session))
+          (sheet-send! sheet event))))))
+
+(pushnew 'sheets-hear-text *session-text-hooks*)
+
 
 ;;
 ;; What the browser runs: the owner's key kept where the page keeps it.
@@ -253,7 +284,7 @@ from a gate that names no credits."
 .pl-status{display:flex;flex-wrap:wrap;gap:.3rem 1rem;color:var(--pl-ink-dim,#555);font-size:.9em}
 .pl-entry{display:grid;grid-template-columns:5rem 1fr;gap:.5rem;padding:.2rem 0;border-bottom:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd)}
 .pl-kind{color:var(--pl-ink-dimmer,#888);font-size:.8rem}.pl-text{white-space:pre-wrap;word-break:break-word;font-size:.9em}
-.pl-prompt .pl-text{font-weight:600}.pl-done .pl-text{color:var(--pl-status-pass,#060)}
+.pl-prompt .pl-text{font-weight:600}.pl-live .pl-text{color:var(--pl-ink-dim,#555);font-style:italic}.pl-done .pl-text{color:var(--pl-status-pass,#060)}
 .pl-stopped .pl-text,.pl-tool-error .pl-text{color:var(--pl-status-fail,#b00)}
 .pl-tool .pl-text{color:var(--pl-ink-dim,#555);font-family:var(--pl-font-mono,monospace);font-size:.8rem}
 .pl-source-head{display:flex;gap:.6rem;align-items:baseline;margin-bottom:.4rem}.pl-source-head h2{margin:0}
@@ -436,7 +467,7 @@ the sheet shows only once its owner's key is proven (claim)."
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             (if (the cancelled?) "'The payment was cancelled; nothing was charged.'" "''")
             (json-boolean (and (the session) (session-busy? (the session))))
             ;; a browser holding the session's key shows the owner's page
@@ -554,6 +585,10 @@ the sheet shows only once its owner's key is proven (claim)."
                     (with-lhtml-string ()
                       (:div :class "pl-card pl-log"
                             (:h2 "Log")
+                            ;; the reply as it is written (sheets-hear-text)
+                            (:div :class "pl-entry pl-live" :style "display:none" :|data-show| "$live"
+                                  (:span :class "pl-kind" "writing")
+                                  (:span :class "pl-text" :|data-text| "$live"))
                             (when (> (length log) (length shown))
                               (htm (:p :class "pl-entry pl-note"
                                        (fmt "~d earlier entries not shown." (- (length log) (length shown))))))

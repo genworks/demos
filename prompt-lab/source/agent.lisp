@@ -114,10 +114,14 @@ Rules:
 ;; One API call.
 ;;
 
-(defun request-body (session)
+(defun request-body (session &key stream?)
   (let ((tools (->json (tool-definitions))))
     (encode
-     (h "model" *model*
+     (apply #'h
+      (append
+       (when stream? (list "stream" t))
+       (list
+        "model" *model*
         "max_tokens" *max-tokens*
         "output_config" (h "effort" *effort*)
         "tools" tools
@@ -125,7 +129,7 @@ Rules:
                           "cache_control" (h "type" "ephemeral")))
         ;; the growing conversation caches too
         "cache_control" (h "type" "ephemeral")
-        "messages" (session-messages session)))))
+        "messages" (session-messages session)))))))
 
 (defun api-key ()
   "The key from *api-key-file*, or nil: no file, an empty file, or a file
@@ -214,9 +218,225 @@ a gate that keeps a community pot, what the pot holds."
     (when (and charged (plusp charged) (not pot)) (incf (session-charged session) charged))
     (when credits (setf (session-credits session) credits))))
 
+;;
+;; THE REPLY AS IT IS WRITTEN (2026-10-02).  With *stream-replies?* the
+;; loop asks the API (through the gate) for its answer as a stream of
+;; server-sent events, puts the message back together from them -- the
+;; same hash table a whole answer parses to, so nothing after the call
+;; changes -- and hands the reply's text to *session-text-hooks* as it
+;; arrives: the sheet shows the agent's words while they are written.
+;; The gate's money figures, which a whole answer carries in headers,
+;; come as a last event of their own (cyclops_gate) whose fields are
+;; named as those headers.  A gate that offers no streaming refuses the
+;; first such call; the loop then asks for whole answers, as before,
+;; until the image restarts.
+;;
+
+(defparameter *stream-replies?* t
+  "Boolean. Whether the loop asks for the agent's reply as a stream of
+events (the sheet shows it as it is written).  Turned off by itself when
+the gate refuses streaming.")
+
+(defvar *session-text-hooks* nil
+  "Functions of (SESSION TEXT): called as the agent's reply is written,
+TEXT the reply's text so far in the block being written; with TEXT nil
+when that block is done.")
+
+(defun session-text-changed! (session text)
+  (dolist (hook *session-text-hooks*)
+    (ignore-errors (funcall hook session text))))
+
+(defun condition-text (condition)
+  "CONDITION's message, or its type's name when the message cannot be
+printed.  On CCL a stream error names zacl's socket, whose printer fails
+once the socket is closed; printing that from a handler raised a second
+error no handler caught, and the thread waited in the debugger for
+terminal input -- enough such threads and the room stopped answering
+(2026-10-02, the bridge, restarted by its sick bay)."
+  (or (ignore-errors (princ-to-string condition))
+      (format nil "~(~a~)" (type-of condition))))
+
+(defun post-sse (url body &key headers (seconds *call-seconds*) on-event)
+  "POST BODY to URL asking for an event stream.  An answer that is one
+(status 200, text/event-stream) is read as it comes, ON-EVENT called with
+each event's name and data; values: status, nil and the response headers.
+Any other answer is read whole; values: status, its text and headers.
+
+Asked in HTTP/1.0 and read from the socket a byte at a time: the answer
+then comes unchunked to the close, and every line is handled the moment
+it is complete.  (zacl's client-request-read-sequence fails on a chunked
+answer, and a large read-sequence would wait to fill its buffer.)"
+  (handler-case
+      (bt:with-timeout ((+ seconds 2))
+        (let ((creq (net.aserve.client:make-http-client-request
+                     url
+                     :method :post
+                     :protocol :http/1.0
+                     :content (babel:string-to-octets body :encoding :utf-8)
+                     :content-type "application/json"
+                     :accept "text/event-stream"
+                     :headers headers
+                     :keep-alive nil
+                     :timeout seconds
+                     :ssl-args (let ((host (url-host url))) (and host (list :server-name host))))))
+          (unwind-protect
+               (progn
+                 (net.aserve.client:read-client-response-headers creq)
+                 (let* ((status (net.aserve.client:client-request-response-code creq))
+                        (response-headers (net.aserve.client:client-request-headers creq))
+                        (content-type (or (response-header response-headers "content-type") ""))
+                        (stream (net.aserve.client:client-request-socket creq))
+                        (line (make-array 256 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0)))
+                   (if (and (eql status 200) (search "text/event-stream" content-type))
+                       (let ((event nil) (data nil))
+                         (flet ((take-line (text)
+                                  (let ((text (string-right-trim '(#\Return) text)))
+                                    (cond ((zerop (length text))
+                                           (when data
+                                             (funcall on-event event (format nil "~{~a~^~%~}" (reverse data))))
+                                           (setq event nil data nil))
+                                          ((char= (char text 0) #\:)) ; a comment: keepalive
+                                          ((and (>= (length text) 6) (string= "event:" text :end2 6))
+                                           (setq event (string-trim " " (subseq text 6))))
+                                          ((and (>= (length text) 5) (string= "data:" text :end2 5))
+                                           (push (string-left-trim " " (subseq text 5)) data))))))
+                           (loop for byte = (read-byte stream nil nil)
+                                 while byte
+                                 do (if (= byte 10)
+                                        (progn
+                                          (take-line (babel:octets-to-string line :encoding :utf-8))
+                                          (setf (fill-pointer line) 0))
+                                        (vector-push-extend byte line)))
+                           (when (plusp (length line))
+                             (take-line (babel:octets-to-string line :encoding :utf-8)))
+                           (take-line ""))
+                         (values status nil response-headers))
+                       (progn
+                         (loop for byte = (read-byte stream nil nil)
+                               while byte do (vector-push-extend byte line))
+                         (values status (babel:octets-to-string line :encoding :utf-8) response-headers)))))
+            (ignore-errors (net.aserve.client:client-request-close creq)))))
+    (bt:timeout ()
+      (error "~a did not answer within ~a seconds." (or (url-host url) url) seconds))
+    ;; any other failure on the way, said safely (condition-text)
+    (error (condition)
+      (error "The call to ~a failed: ~a" (or (url-host url) url) (condition-text condition)))))
+
+(defun stream-messages-api (session body headers)
+  "One call with the reply streamed.  Values: the message put back
+together (a hash table, as a whole answer parses to), the status, and
+the gate's money figures as a header alist; or, for an answer that is
+no stream (a refusal), its parsed body and status."
+  (let ((message nil)
+        (blocks (make-hash-table))
+        (texts (make-hash-table))
+        (json-parts (make-hash-table))
+        (gate nil)
+        (failure nil))
+    (flet ((on-event (name data)
+             (let ((json (ignore-errors (yason:parse data))))
+               (when (hash-table-p json)
+                 (let ((index (gethash "index" json)))
+                   (cond
+                     ((equal name "message_start")
+                      (setq message (gethash "message" json)))
+                     ((equal name "content_block_start")
+                      (let ((block (gethash "content_block" json)))
+                        (setf (gethash index blocks) block)
+                        (when (equal (gethash "type" block) "text")
+                          (setf (gethash index texts)
+                                (make-array 0 :element-type 'character :adjustable t :fill-pointer 0)))))
+                     ((equal name "content_block_delta")
+                      (let ((block (gethash index blocks))
+                            (delta (gethash "delta" json)))
+                        (when (and block (hash-table-p delta))
+                          (let ((kind (gethash "type" delta)))
+                            (cond ((equal kind "text_delta")
+                                   (let ((buffer (gethash index texts)))
+                                     (when buffer
+                                       (loop for c across (gethash "text" delta) do (vector-push-extend c buffer))
+                                       (session-text-changed! session buffer))))
+                                  ((equal kind "thinking_delta")
+                                   (setf (gethash "thinking" block)
+                                         (concatenate 'string (or (gethash "thinking" block) "")
+                                                      (gethash "thinking" delta))))
+                                  ((equal kind "signature_delta")
+                                   (setf (gethash "signature" block)
+                                         (concatenate 'string (or (gethash "signature" block) "")
+                                                      (gethash "signature" delta))))
+                                  ((equal kind "input_json_delta")
+                                   (push (gethash "partial_json" delta) (gethash index json-parts))))))))
+                     ((equal name "content_block_stop")
+                      (let ((block (gethash index blocks)))
+                        (when block
+                          (cond ((gethash index texts)
+                                 (setf (gethash "text" block) (coerce (gethash index texts) 'simple-string))
+                                 (session-text-changed! session nil))
+                                ((equal (gethash "type" block) "tool_use")
+                                 (let ((text (format nil "~{~a~}" (reverse (gethash index json-parts)))))
+                                   (setf (gethash "input" block)
+                                         (if (plusp (length text))
+                                             (yason:parse text)
+                                             (make-hash-table :test #'equal)))))))))
+                     ((equal name "message_delta")
+                      (when message
+                        (let ((delta (gethash "delta" json))
+                              (usage (gethash "usage" json)))
+                          (when (hash-table-p delta)
+                            (maphash (lambda (k v) (setf (gethash k message) v)) delta))
+                          (when (hash-table-p usage)
+                            (let ((total (or (gethash "usage" message)
+                                             (setf (gethash "usage" message) (make-hash-table :test #'equal)))))
+                              (maphash (lambda (k v) (when v (setf (gethash k total) v))) usage))))))
+                     ((equal name "error")
+                      (setq failure json))
+                     ((equal name "cyclops_gate")
+                      (setq gate (alexandria:hash-table-alist json)))))))))
+      (multiple-value-bind (status text response-headers)
+          (post-sse *messages-url* body :headers headers :seconds *call-seconds* :on-event #'on-event)
+        (cond
+          (text
+           (values (handler-case (yason:parse text)
+                     (error ()
+                       (error "The API answered ~a with a body that is not JSON: ~a"
+                              status (subseq text 0 (min 200 (length text))))))
+                   status response-headers))
+          (failure (values failure status gate))
+          ((null message)
+           (error "The API's stream ended before its message began."))
+          (t
+           (setf (gethash "content" message)
+                 (loop for i from 0 below (hash-table-count blocks)
+                       for block = (gethash i blocks)
+                       when block collect block))
+           (values message status gate)))))))
+
+(defun streaming-refused? (response status)
+  "True for a gate's refusal of a streamed call."
+  (and (eql status 400) (hash-table-p response)
+       (let ((err (gethash "error" response)))
+         (and (hash-table-p err)
+              (search "streaming" (or (gethash "message" err) ""))))))
+
 (defun call-messages-api (session)
   "POST the session's next request.  Values: the parsed response (a hash
-table) and the HTTP status; signals an error when the answer is not JSON."
+table) and the HTTP status; signals an error when the answer is not JSON.
+With *stream-replies?* the reply is streamed (stream-messages-api)."
+  (when *stream-replies?*
+    (let* ((key (api-key))
+           ;; not parsed and encoded again: yason reads false as nil
+           (body (request-body session :stream? t))
+           (headers (append (list (cons "anthropic-version" "2023-06-01"))
+                            (when key (list (cons "x-api-key" key)))
+                            (list (cons "X-Prompt-Lab-Session" (session-id session)))
+                            (when (session-wallet session)
+                              (list (cons *wallet-header* (session-wallet session)))))))
+      (multiple-value-bind (response status gate-headers) (stream-messages-api session body headers)
+        (note-gate-answer session gate-headers)
+        (if (streaming-refused? response status)
+            ;; a gate that offers no streaming: whole answers from now on
+            (setf *stream-replies?* nil)
+            (return-from call-messages-api (values response status))))))
   (let ((key (api-key)))
     (multiple-value-bind (status text headers)
         (post-json *messages-url* (request-body session)
@@ -316,7 +536,7 @@ started; nil when the session was busy."
      #'(lambda ()
          (handler-case (run-prompt session prompt :claimed? t)
            (error (condition)
-             (log-event session :stopped "The agent stopped: ~a" condition)
+             (log-event session :stopped "The agent stopped: ~a" (condition-text condition))
              (close-dangling-tool-uses! session "the agent stopped")
              (setf (session-busy? session) nil))))
      :name (format nil "prompt-lab ~a" (session-id session)))
@@ -341,7 +561,7 @@ the session busy (start-prompt!)."
                do (multiple-value-bind (response status)
                       (handler-case (call-messages-api session)
                         (error (condition)
-                          (return (log-event session :stopped "~a" condition))))
+                          (return (log-event session :stopped "~a" (condition-text condition)))))
                    (let ((content (and (hash-table-p response) (gethash "content" response)))
                          (stop (and (hash-table-p response) (gethash "stop_reason" response))))
                     (when (and (hash-table-p response) (equal (gethash "type" response) "error"))
@@ -393,7 +613,7 @@ the session busy (start-prompt!)."
                                                      ;; unanswered
                                                      (handler-case (run-tool session name input)
                                                        (error (condition)
-                                                         (values (list (text-result "~a failed: ~a" name condition)) t)))
+                                                         (values (list (text-result "~a failed: ~a" name (condition-text condition))) t)))
                                                    (when error?
                                                      (log-event session :tool-error "~a: ~a" name
                                                                 (or (cdr (assoc "text" (first blocks)
