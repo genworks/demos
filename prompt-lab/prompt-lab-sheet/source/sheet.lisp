@@ -440,7 +440,9 @@ panel shows; nil for the model itself."
    ("Boolean. The sluice inputs panel's auto-apply switch, which the
 panel sets on the page that holds it."
     inputs-auto-apply? t :settable)
-   (use-fontawesome? t))
+   (use-fontawesome? t)
+   ;; the sheet draws in svg: base-html-page's x3dom (834 KB) is not wanted
+   (use-x3dom? nil))
 
   :computed-slots
   ((title (lab-title))
