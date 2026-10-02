@@ -232,58 +232,99 @@ and inspects itself when clicked."
 ;;
 
 (defparameter *sheet-css*
-  "body{margin:0;font:14px/1.45 system-ui,sans-serif;background:#f4f4f2;color:#1d1d1b}
-.pl-head{display:flex;gap:1rem;align-items:baseline;padding:.6rem 1rem;border-bottom:1px solid #ccc;background:#fff}
-.pl-head h1{font-size:1.1rem;margin:0}.pl-engine{color:#666}.pl-head nav{margin-left:auto}.pl-head a{margin-left:.8rem}
-.pl-grid{display:grid;grid-template-columns:minmax(18rem,2fr) 3fr;gap:1rem;padding:1rem}
-@media (max-width:760px){.pl-grid{grid-template-columns:1fr}}
-.pl-card{background:#fff;border:1px solid #d6d6d2;border-radius:4px;padding:.7rem;margin-bottom:.8rem}
-.pl-card h2{font-size:.9rem;margin:0 0 .4rem}
-#pl-prompt{width:100%;box-sizing:border-box;font:inherit;padding:.4rem;border:1px solid #bbb;border-radius:3px}
+  "body{margin:0;font-family:var(--pl-font);font-size:var(--pl-size);line-height:1.45;background:var(--pl-bg);color:var(--pl-ink)}
+a{color:var(--pl-link)}
+.pl-head{display:flex;gap:1rem;align-items:center;padding:.4rem 1rem;background:var(--pl-label-bg);color:var(--pl-label-ink)}
+.pl-head h1{font-size:1.05rem;margin:0;font-family:var(--pl-font-label);font-weight:var(--pl-label-weight);text-transform:var(--pl-label-case);letter-spacing:var(--pl-label-tracking)}
+.pl-head a,.pl-engine{color:var(--pl-label-ink);opacity:.85}
+.pl-head nav{margin-left:auto;display:flex;gap:.8rem;align-items:center}
+.pl-head select{font:inherit;font-size:.9em;background:var(--pl-panel);color:var(--pl-ink);border:var(--pl-rule) solid var(--pl-line-soft);border-radius:var(--pl-radius)}
+.pl-grid{display:grid;grid-template-columns:minmax(18rem,2fr) minmax(0,3fr);gap:.8rem;padding:.8rem}
+.pl-left,.pl-right{min-width:0}
+.pl-inputs .bg-white,.pl-inputs .bg-gray-50,.pl-viewport .bg-white\\/80{background-color:var(--pl-panel)}
+.pl-inputs .bg-gray-100{background-color:var(--pl-bg)}.pl-inputs .bg-gray-200{background-color:var(--pl-panel-alt)}
+.pl-inputs .text-gray-900,.pl-inputs .text-gray-700{color:var(--pl-ink)}
+.pl-inputs .text-gray-600,.pl-inputs .text-gray-500{color:var(--pl-ink-dim)}.pl-inputs .text-gray-400{color:var(--pl-ink-dimmer)}
+.pl-inputs .text-red-700{color:var(--pl-status-fail)}
+.pl-inputs .text-blue-700,.pl-inputs .text-blue-800{color:var(--pl-link);text-decoration:underline;text-underline-offset:2px}
+.pl-inputs .border-gray-300,.pl-viewport .border-gray-300{border-color:var(--pl-line)}.pl-inputs .border-gray-200{border-color:var(--pl-line-soft)}
+.pl-inputs .rounded,.pl-viewport .rounded-md{border-radius:var(--pl-radius)}
+.pl-inputs input:not([type=checkbox]):not([type=range]),.pl-inputs select{border:var(--pl-rule) solid var(--pl-line);border-radius:var(--pl-radius);background:var(--pl-panel);color:var(--pl-ink);font-family:var(--pl-font-mono)}
+.pl-inputs input:focus,.pl-inputs select:focus{border-color:var(--pl-focus);outline:var(--pl-rule) solid var(--pl-focus)}
+.pl-inputs input[type=checkbox]{accent-color:var(--pl-accent)}
+.pl-viewport button[id$=-reset-size]{background:var(--pl-panel);color:var(--pl-ink);border:var(--pl-rule) solid var(--pl-line);box-shadow:none}
+.pl-card{background:var(--pl-panel);border:var(--pl-rule) solid var(--pl-line);border-radius:var(--pl-radius);box-shadow:var(--pl-shadow);padding:.7rem;margin-bottom:.8rem}
+.pl-card h2{font-size:.9rem;margin:0 0 .4rem;font-family:var(--pl-font-label);font-weight:var(--pl-label-weight);text-transform:var(--pl-label-case);letter-spacing:var(--pl-label-tracking)}
+#pl-prompt{width:100%;box-sizing:border-box;font:inherit;padding:.4rem;background:var(--pl-panel);color:var(--pl-ink);border:var(--pl-rule) solid var(--pl-line-soft);border-radius:var(--pl-radius)}
 .pl-row{display:flex;gap:.8rem;align-items:center;margin-top:.5rem}
-.pl-build{padding:.35rem 1.2rem;font:inherit;background:#2b4c7e;color:#fff;border:0;border-radius:3px;cursor:pointer}
-.pl-build:disabled{background:#999;cursor:default}.pl-busy{color:#2b4c7e}
-.pl-error{color:#a12;margin:0 0 .8rem}
-.pl-status{display:flex;flex-wrap:wrap;gap:.3rem 1rem;color:#444}
+.pl-build{padding:.35rem 1.2rem;font:inherit;background:var(--pl-accent);color:var(--pl-accent-ink);border:0;border-radius:var(--pl-radius);cursor:pointer;font-weight:var(--pl-label-weight);text-transform:var(--pl-label-case)}
+.pl-build:disabled{opacity:.4;cursor:default}.pl-busy{color:var(--pl-status-busy)}
+.pl-error{color:var(--pl-status-fail);margin:0 0 .8rem}.pl-notice{color:var(--pl-status-pass);margin:0 0 .8rem}
+.pl-status{display:flex;flex-wrap:wrap;gap:.3rem 1rem;color:var(--pl-ink-dim)}
 .pl-log{max-height:55vh;overflow:auto}
-.pl-entry{display:grid;grid-template-columns:5.5rem 1fr;gap:.5rem;padding:.2rem 0;border-bottom:1px solid #eee}
-.pl-kind{color:#888;font-size:.8rem}.pl-text{white-space:pre-wrap;word-break:break-word}
-.pl-prompt .pl-text{font-weight:600}.pl-done .pl-text{color:#1d4d1d}.pl-stopped .pl-text,.pl-tool-error .pl-text{color:#a12}
-.pl-tool .pl-text{color:#777;font-family:monospace;font-size:.8rem}
-.pl-viewport{position:relative;height:60vh;background:#fff;border:1px solid #d6d6d2;border-radius:4px;margin-bottom:.8rem;overflow:hidden}
-.pl-source pre{margin:0;max-height:40vh;overflow:auto;font-size:.8rem}
+.pl-entry{display:grid;grid-template-columns:5.5rem 1fr;gap:.5rem;padding:.2rem 0;border-bottom:var(--pl-rule) solid var(--pl-line-soft)}
+.pl-kind{color:var(--pl-ink-dimmer);font-size:.8rem}.pl-text{white-space:pre-wrap;word-break:break-word}
+.pl-prompt .pl-text{font-weight:600}.pl-done .pl-text{color:var(--pl-status-pass)}
+.pl-stopped .pl-text,.pl-tool-error .pl-text{color:var(--pl-status-fail)}
+.pl-tool .pl-text{color:var(--pl-ink-dim);font-family:var(--pl-font-mono);font-size:.8rem}
+.pl-viewport{position:relative;height:60vh;background-color:var(--pl-viewport-bg);background-image:var(--pl-viewport-image);background-size:var(--pl-viewport-image-size);border:var(--pl-rule) solid var(--pl-line);border-radius:var(--pl-radius);margin-bottom:.8rem;overflow:hidden}
+.pl-viewport svg{filter:var(--pl-viewport-filter)}
 .pl-source-head{display:flex;gap:.6rem;align-items:baseline;margin-bottom:.4rem}.pl-source-head h2{margin:0}
-.pl-source-state{color:#777;font-size:.8rem}.pl-source-state.pl-warn{color:#a12}
-.pl-source-head button{font:inherit;font-size:.8rem;padding:.1rem .5rem}.pl-source-head .pl-save{margin-left:auto}
-#pl-source{width:100%;box-sizing:border-box;min-height:16rem;font:12px/1.4 monospace}
-.pl-source .cm-editor{max-height:45vh;font-size:12px;border:1px solid #ddd}
-.pl-source .cm-editor.cm-focused{outline:none;border-color:#2b4c7e}
-.code-editor .tok-comment{color:#777;font-style:italic}.code-editor .tok-keyword{color:#6a1b9a;font-weight:700}
-.code-editor .tok-heading{color:#00695c;font-weight:700}.code-editor .tok-atom{color:#1550a8}
-.code-editor .tok-number{color:#9a4a00}.code-editor .tok-string,.code-editor .tok-string2{color:#2a6e2f}
-.code-editor .tok-punctuation{color:#999}.code-editor .tok-invalid{color:#a12}
+.pl-source-state{color:var(--pl-ink-dimmer);font-size:.8rem}.pl-source-state.pl-warn{color:var(--pl-status-fail)}
+.pl-source-head .pl-save{margin-left:auto}
+#pl-source{width:100%;box-sizing:border-box;min-height:16rem;font:12px/1.4 var(--pl-font-mono)}
+.pl-source .cm-editor{max-height:45vh;font-size:12px;font-family:var(--pl-font-mono);background:var(--pl-panel);color:var(--pl-ink);border:var(--pl-rule) solid var(--pl-line-soft)}
+.pl-source .cm-editor.cm-focused{outline:none;border-color:var(--pl-focus)}
+.pl-source .cm-gutters{background:var(--pl-panel-alt);color:var(--pl-ink-dimmer);border-right:var(--pl-rule) solid var(--pl-line-soft)}
+.pl-source .cm-cursor{border-left-color:var(--pl-ink)}
+.code-editor .tok-comment{color:var(--pl-code-comment,var(--pl-ink-dimmer));font-style:italic}
+.code-editor .tok-keyword{color:var(--pl-code-keyword,#6a1b9a);font-weight:700}
+.code-editor .tok-heading{color:var(--pl-code-section,#00695c);font-weight:700}
+.code-editor .tok-atom,.code-editor .tok-meta{color:var(--pl-code-atom,#1550a8)}
+.code-editor .tok-number{color:var(--pl-code-number,#9a4a00)}
+.code-editor .tok-string,.code-editor .tok-string2{color:var(--pl-code-string,#2a6e2f)}
+.code-editor .tok-punctuation{color:var(--pl-code-paren,var(--pl-ink-dimmer))}.code-editor .tok-invalid{color:var(--pl-status-fail)}
 .pl-parts{display:grid;grid-template-columns:minmax(10rem,1fr) minmax(14rem,1.4fr);gap:.8rem}
 @media (max-width:1100px){.pl-parts{grid-template-columns:1fr}}
-#tree{max-height:40vh;overflow:auto;font-size:.85rem}
-#tree .tree-node{cursor:pointer;padding:.05rem .3rem;border-radius:2px;white-space:nowrap}
-#tree .tree-node:hover,#tree .tree-node.sluice-lit{background:#dfe8f5}
-#tree .tree-node.pl-inspected{background:#2b4c7e;color:#fff}
-#tree .tree-type{color:#888;margin-left:.4rem;font-size:.75rem}
-#tree .tree-node.pl-inspected .tree-type{color:#cdd8ea}
-#sluice-panes svg path.sluice-lit{stroke:#2b4c7e!important;stroke-width:3!important}
-.pl-inputs{font-size:.85rem;max-height:40vh;overflow:auto}
-.sluice-apply{margin-left:.3rem;padding:0 .5rem;border:1px solid #2b4c7e;border-radius:3px;background:#fff;color:#2b4c7e;cursor:pointer}
-.sluice-apply.sluice-pending{background:#2b4c7e;color:#fff}
-.pl-notice{color:#1d4d1d;margin:0 0 .8rem}
-.pl-figure{font-size:.85rem;color:#444}.pl-figure b{font-size:2rem;color:#1d1d1b;margin-right:.3rem;font-variant-numeric:tabular-nums}
-.pl-figure.pl-out b{color:#a12}
-.pl-meter{height:.45rem;background:#e6e6e2;border-radius:3px;overflow:hidden;margin:.3rem 0}.pl-meter span{display:block;height:100%;background:#2b4c7e}
-.pl-line{color:#555;font-size:.85rem;margin:.3rem 0}.pl-begging{color:#a12;font-weight:600;margin:.3rem 0}
-.pl-topup{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem;font-size:.85rem}
-.pl-buy,.pl-download{font:inherit;font-size:.85rem;padding:.2rem .6rem;border:1px solid #2b4c7e;border-radius:3px;background:#fff;color:#2b4c7e;cursor:pointer}
-.pl-buy:disabled{border-color:#bbb;color:#999;cursor:default}
-.pl-downloads .pl-download{margin:0 .3rem .3rem 0}"
-  "String. The sheet's own look, until it wears the lab's skins.")
+#tree{max-height:40vh;overflow:auto;font-size:.9em}
+#tree .tree-node{cursor:pointer;padding:.05rem .3rem;border:var(--pl-rule) solid transparent;border-radius:var(--pl-radius);white-space:nowrap}
+#tree .tree-node:hover,#tree .tree-node.sluice-lit{background:var(--pl-hover-bg);border-color:var(--pl-hover-line)}
+#tree .tree-node.pl-inspected{background:var(--pl-accent);color:var(--pl-accent-ink)}
+#tree .tree-type{color:var(--pl-ink-dimmer);margin-left:.4rem;font-size:.85em}
+#tree .tree-node.pl-inspected .tree-type{color:var(--pl-accent-ink);opacity:.75}
+#sluice-panes svg path.sluice-lit{stroke:var(--pl-focus)!important;stroke-width:3!important}
+.pl-inputs{font-size:.9em;max-height:40vh;overflow:auto}
+.pl-buy,.pl-download,.sluice-apply,.pl-source-head button{font:inherit;font-size:.9em;padding:.2rem .6rem;border:var(--pl-rule) solid var(--pl-line);border-radius:var(--pl-radius);background:var(--pl-panel);color:var(--pl-link);cursor:pointer}
+.sluice-apply.sluice-pending{background:var(--pl-accent);color:var(--pl-accent-ink)}
+.pl-buy:disabled{opacity:.4;cursor:default}
+.pl-downloads .pl-download{margin:0 .3rem .3rem 0}
+.pl-figure{font-size:.9em;color:var(--pl-ink-dim)}.pl-figure b{font-size:2rem;color:var(--pl-ink);margin-right:.3rem;font-variant-numeric:tabular-nums}
+.pl-figure.pl-out b{color:var(--pl-status-fail)}
+.pl-meter{height:.45rem;background:var(--pl-panel-alt);border:var(--pl-rule) solid var(--pl-line-soft);border-radius:var(--pl-radius-pill);overflow:hidden;margin:.3rem 0}
+.pl-meter span{display:block;height:100%;background:var(--pl-accent)}
+.pl-line{color:var(--pl-ink-dim);font-size:.9em;margin:.3rem 0}.pl-begging{color:var(--pl-status-fail);font-weight:600;margin:.3rem 0}
+.pl-topup{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem;font-size:.9em}
+.pl-tabs{display:none}
+@media (max-width:760px){
+ body{font-size:15px}
+ .pl-head{padding:.4rem .6rem;gap:.5rem;flex-wrap:wrap}.pl-head .pl-engine{display:none}
+ .pl-head nav{gap:.5rem;font-size:.85em}
+ .pl-tabs{display:flex;position:sticky;top:0;z-index:30;background:var(--pl-panel);border-bottom:var(--pl-rule) solid var(--pl-line)}
+ .pl-tabs button{flex:1;padding:.65rem 0;font:inherit;background:none;border:0;color:var(--pl-ink-dim);font-weight:var(--pl-label-weight);text-transform:var(--pl-label-case)}
+ .pl-tabs button.pl-tab-on{background:var(--pl-accent);color:var(--pl-accent-ink)}
+ .pl-grid{display:block;padding:.5rem}
+ #pl-sheet .pl-g{display:none}
+ #pl-sheet[data-tab=prompt] .pl-g-prompt,#pl-sheet[data-tab=model] .pl-g-model,
+ #pl-sheet[data-tab=parts] .pl-g-parts,#pl-sheet[data-tab=code] .pl-g-code{display:block}
+ .pl-viewport{height:calc(100dvh - 9rem)}
+ #pl-sheet:not([data-tab=model]) .pl-viewport{position:absolute;left:-300vw;top:0;width:calc(100vw - 1rem)}
+ .pl-parts{grid-template-columns:1fr}
+ #tree,.pl-inputs,.pl-log{max-height:none}
+ .pl-source .cm-editor{max-height:calc(100dvh - 12rem)}
+}"
+  "String. The sheet's look, in the skin tokens (the sluice's tokens.css,
+SKIN-API.md): a skin restyles the sheet as it does the page and the
+sluice.  At 760px and under the sheet is an app of four tabs.")
 
 (defparameter *sheet-editor-script*
   "(function(){
@@ -393,7 +434,39 @@ panel sets on the page that holds it."
       (:link :rel "stylesheet" :href "/static/sluice/css/sluice.css")
       (:script (str (or (ignore-errors (symbol-value (find-symbol "*HOVER-SCRIPT*" :sluice))) "")))
       (:script (str *sheet-editor-script*))
-      (:style (str *sheet-css*))))
+      ;; the look: the tokens, the sheet's own (which says the sluice's
+      ;; utility classes in them, inside the panes that carry them: the
+      ;; sluice's skinned.css is written for the sluice's own frame), then
+      ;; the skin (skin-script picks it before the page is painted)
+      (:link :rel "stylesheet" :href (tokens-url))
+      (:style (str *sheet-css*))
+      (:link :id "pl-skin-link" :rel "stylesheet")
+      (:script (str (the skin-script)))))
+
+   ;; The skin: ?skin= on the address, else the one this browser chose
+   ;; (localStorage prompt-lab-skin, which the page keeps too), else the
+   ;; house look.  Chosen in the header's menu; nothing reloads.
+   (skin-choices (mapcar #'(lambda (skin) (list (getf skin :name) (getf skin :label) (getf skin :href)))
+                         (skins)))
+
+   (skin-script
+    (format nil "(function(){var skins=~a,house=~a,aliases=~a;
+var l=document.getElementById('pl-skin-link');
+function name(n){return aliases[n]||n}
+function wear(n){n=name(n);if(skins[n])l.setAttribute('href',skins[n]);else l.removeAttribute('href');window.plSkin=skins[n]?n:house}
+var q=null;try{q=new URLSearchParams(location.search).get('skin')}catch(e){}
+var s=null;try{s=localStorage.getItem('prompt-lab-skin')}catch(e){}
+wear(q||s||house);
+window.plSetSkin=function(n){try{localStorage.setItem('prompt-lab-skin',n)}catch(e){}wear(n)};
+document.addEventListener('DOMContentLoaded',function(){var m=document.getElementById('pl-skin');if(m)m.value=window.plSkin})})();"
+            (with-output-to-string (s)
+              (yason:encode (alexandria:alist-hash-table
+                             (mapcar #'(lambda (c) (cons (first c) (third c))) (the skin-choices))
+                             :test #'equal)
+                            s))
+            (js-string-literal *house-skin*)
+            (with-output-to-string (s)
+              (yason:encode (alexandria:alist-hash-table *skin-aliases* :test #'equal) s))))
 
    ;; back from Stripe the address carries the checkout and the wallet;
    ;; the wallet otherwise comes from where the page keeps it
@@ -402,10 +475,15 @@ panel sets on the page that holds it."
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{prompt: '', turnstile: '', source: '', inspect: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{tab: 'prompt', prompt: '', turnstile: '', source: '', inspect: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             (if (the cancelled?) "'The payment was cancelled; nothing was charged.'" "''")
             (json-boolean (and (the session) (session-busy? (the session))))
-            (json-boolean (the editable?))
+            ;; a browser holding the session's key shows the owner's page
+            ;; from the start (the claim confirms it; every action checks
+            ;; the key again), rather than a watcher's for the first second
+            (if (and (the session) (not (the editable?)))
+                (format nil "(~a !== '')" (owner-signal-expression (session-id (the session))))
+                (json-boolean (the editable?)))
             (if (the session) (owner-signal-expression (session-id (the session))) "''")
             (js-string-literal (or (the query-checkout) ""))
             (if (the query-wallet)
@@ -417,29 +495,48 @@ panel sets on the page that holds it."
       (:div :id "pl-sheet"
             :|data-signals| (escape-string-minimal-plus-quotes (the initial-signals))
             :|data-init| (the datastar-stream-attribute)
+            ;; the phone's tab, for the stylesheet
+            :|data-attr:data-tab| "$tab"
             ;; a browser holding this session's key makes the page its owner's
             (when (and (the session) (not (the owner?)))
               (htm (:span :|data-init| (format nil "$owner && ~a" (the (datastar-action :claim))))))
+            ;; on a phone, a build that finishes takes the screen to the model
+            (:span :|data-effect| "var b=$busy; if(window.plWasBusy && !b && matchMedia('(max-width: 760px)').matches){$tab='model'} window.plWasBusy=b")
             (:header :class "pl-head"
                      (:h1 (esc (lab-title)))
                      (:span :class "pl-engine" (esc (engine-label)))
-                     (:nav (:a :href *url-prefix* "the page") " "
+                     (:nav (:a :href (the classic-url) "the page")
                            (when *sibling-lab*
-                             (htm (:a :href (format nil "~a/sheet" (car *sibling-lab*)) (esc (cdr *sibling-lab*)))))))
+                             (htm (:a :href (format nil "~a/sheet" (car *sibling-lab*)) (esc (cdr *sibling-lab*)))))
+                           (:select :id "pl-skin" :title "How the lab looks" :onchange "plSetSkin(this.value)"
+                                    (:option :value *house-skin* (esc (or (ignore-errors (token-value (format nil "~a/tokens.css" sluice:*static*) "--pl-skin-label")) "Workstation")))
+                                    (dolist (choice (the skin-choices))
+                                      (htm (:option :value (first choice) (esc (second choice))))))))
+            ;; the phone's four screens; on a desk everything shows at once
+            (:nav :class "pl-tabs"
+                  (dolist (tab '(("prompt" "Prompt") ("model" "Model") ("parts" "Parts") ("code" "Code")))
+                    (htm (:button :type "button"
+                                  :|data-on:click| (format nil "$tab = '~a'" (first tab))
+                                  :|data-class:pl-tab-on| (format nil "$tab === '~a'" (first tab))
+                                  (str (second tab))))))
             (:main :class "pl-grid"
                    (:section :class "pl-left"
-                             (str (the prompt-form))
-                             (:p :class "pl-notice" :|data-show| "$notice" :|data-text| "$notice")
-                             (str (the status-section div))
-                             (str (the credits-section div))
-                             (str (the downloads-section div))
-                             (str (the log-section div)))
+                             (:div :class "pl-g pl-g-prompt"
+                                   (str (the prompt-form))
+                                   (:p :class "pl-notice" :|data-show| "$notice" :|data-text| "$notice")
+                                   (str (the status-section div))
+                                   (str (the credits-section div))
+                                   (str (the log-section div))))
                    (:section :class "pl-right"
+                             ;; never hidden: off the screen on a phone's other tabs, so
+                             ;; the drawing keeps its size
                              (:div :id "sluice-panes" :class "pl-viewport" (str (the viewport div)))
-                             (:div :class "pl-parts"
-                                   (str (the tree-section div))
-                                   (str (the inputs-section div)))
-                             (str (the editor-card)))))))
+                             (:div :class "pl-g pl-g-model" (str (the downloads-section div)))
+                             (:div :class "pl-g pl-g-parts"
+                                   (:div :class "pl-parts"
+                                         (str (the tree-section div))
+                                         (str (the inputs-section div))))
+                             (:div :class "pl-g pl-g-code" (str (the editor-card))))))))
 
    ;; Not a section either: the editor keeps its text, folds and caret
    ;; through every push.  New versions of the file arrive as
@@ -485,7 +582,9 @@ panel sets on the page that holds it."
                            "Build")
                   (:span :class "pl-busy" :|data-show| "$busy" "the agent is working...")))
       (:p :class "pl-error" :|data-show| "$error" :|data-text| "$error")
-      (:div :class "pl-card pl-watch" :|data-show| "!$editable"
+      ;; hidden until Datastar has read the signals: no banner flashes at
+      ;; an owner while the script loads
+      (:div :class "pl-card pl-watch" :style "display:none" :|data-show| "!$editable"
             "You are watching this session as it is built.  "
             (:a :href *url-prefix* "Start your own") ".")))
 
