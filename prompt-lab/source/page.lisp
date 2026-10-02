@@ -779,9 +779,14 @@ the model with one panel under it, the inputs or the tree."
   :computed-slots
   ((title "Prompt lab viewer")
 
+   ;; the sluice as the public gets it: no File or Develop menu, and
+   ;; gdlAjax answers only what its menus, tree and panes call (a sluice
+   ;; that knows the audience makes File > Open refuse too)
+   (audience :public)
+
    ;; File > Open evaluates what is typed, in the image every visitor
-   ;; shares: never offered here (and refused by a sluice that knows the
-   ;; switch, whatever a crafted request names)
+   ;; shares: never offered here (said again for a sluice older than the
+   ;; audience)
    (open-from-expression? nil)
 
    ;; the skin the page wears, named on the frame's address; nil is the

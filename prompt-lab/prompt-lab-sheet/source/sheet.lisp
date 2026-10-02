@@ -242,10 +242,27 @@ index in a sequence; `model' for the root."
           ((consp step) (format nil "~(~a~)[~{~a~^,~}]" (first step) (rest step)))
           (t (format nil "~(~a~)" step)))))
 
-(defun tree-html (sheet model inspected)
+(defun tree-more-html (out sheet path depth left)
+  "Writes to OUT the row standing for the LEFT children of the part at PATH
+that the tree does not list yet: a click lists *tree-condense-limit* more,
+a shift-click all of them."
+  (format out "<div class=\"tree-more\" style=\"padding-left:~,1frem\" title=\"~a\" data-on:click=\"~a\">&hellip; ~:d more</div>"
+          (* 0.9 depth)
+          (format nil "Click for ~d more, shift-click for all of them"
+                  (min left sluice::*tree-condense-limit*))
+          (escape-string-minimal-plus-quotes
+           (format nil "$more = ~a; $moreAll = evt.shiftKey; ~a"
+                   (js-string-literal (let ((*package* (find-package :keyword)))
+                                        (format nil "~s" path)))
+                   (the-object sheet (datastar-action :more :options "{filterSignals: {include: /^more/}}"))))
+          left))
+
+(defun tree-html (sheet model inspected &optional shown)
   "String of HTML: MODEL's parts as an indented outline, each a node that
 carries its data-root-path (as the drawing's paths do, for the hover)
-and inspects itself when clicked."
+and inspects itself when clicked.  Each part lists its first
+sluice::*tree-condense-limit* children, or as many as SHOWN (an alist
+from a part's root-path to a count) says, and a \"...\" row for the rest."
   (let ((count 0) (left-out 0))
     (with-output-to-string (out)
       (labels ((walk (object depth)
@@ -265,8 +282,15 @@ and inspects itself when clicked."
                                         (the-object sheet (datastar-action :inspect :options "{filterSignals: {include: /^inspect$/}}"))))
                                (escape-string-minimal-plus-quotes (tree-label object))
                                (type-of object))
-                       (dolist (child (ignore-errors (the-object object children)))
-                         (walk child (1+ depth)))))))
+                       (let* ((children (ignore-errors (the-object object children)))
+                              (total (length children))
+                              (limit (min total (or (cdr (assoc path shown :test #'equal))
+                                                    sluice::*tree-condense-limit*))))
+                         (loop for child in children
+                               repeat limit
+                               do (walk child (1+ depth)))
+                         (when (< limit total)
+                           (tree-more-html out sheet path (1+ depth) (- total limit))))))))
         (walk model 0))
       (when (plusp left-out)
         (format out "<p class=\"tree-type\">~:d more parts not listed.</p>" left-out)))))
@@ -335,6 +359,8 @@ a{color:var(--pl-link)}
 #tree .tree-node{cursor:pointer;padding:.05rem .3rem;border:var(--pl-rule) solid transparent;border-radius:var(--pl-radius);white-space:nowrap}
 #tree .tree-node:hover,#tree .tree-node.sluice-lit{background:var(--pl-hover-bg);border-color:var(--pl-hover-line)}
 #tree .tree-node.pl-inspected{background:var(--pl-accent);color:var(--pl-accent-ink)}
+#tree .tree-more{cursor:pointer;color:var(--pl-ink-dimmer);font-style:italic;padding:.05rem .3rem;white-space:nowrap}
+#tree .tree-more:hover{color:var(--pl-ink)}
 #tree .tree-type{color:var(--pl-ink-dimmer);margin-left:.4rem;font-size:.85em}
 #tree .tree-node.pl-inspected .tree-type{color:var(--pl-accent-ink);opacity:.75}
 #sluice-panes svg path.sluice-lit{stroke:var(--pl-focus)!important;stroke-width:3!important}
@@ -440,13 +466,22 @@ panel shows; nil for the model itself."
    ("Boolean. The sluice inputs panel's auto-apply switch, which the
 panel sets on the page that holds it."
     inputs-auto-apply? t :settable)
+   ("List. How many children the tree lists of each part whose \"...\" row
+has been clicked: an alist from the part's root-path to a count."
+    tree-shown nil :settable)
    (use-fontawesome? t)
    ;; the sheet draws in svg: base-html-page's x3dom (834 KB) is not wanted
    (use-x3dom? nil))
 
   :computed-slots
   ((title (lab-title))
-   (datastar-actions (list :build :claim :save :inspect :topup :privacy))
+   (datastar-actions (list :build :claim :save :inspect :more :topup :privacy))
+
+   ;; the gdlAjax calls the page makes: the viewport's, and the inputs
+   ;; panel's (a call with no function only sets its fields); any other
+   ;; is refused, whatever a crafted request names
+   (ajax-callable-functions (append '(:reset! :reset-all! (:set-slot! :open? :inputs-auto-apply?))
+                                    gwl:*viewport-ajax-functions*))
 
    ;; the node the inputs panel is on: the inspected path followed from
    ;; the model, or the model when that path no longer leads anywhere (a
@@ -542,7 +577,7 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{tab: 'prompt', private: false, prompt: '', turnstile: '', source: '', inspect: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{tab: 'prompt', private: false, prompt: '', turnstile: '', source: '', inspect: '', more: '', moreAll: false, amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             (if (the cancelled?) "'The payment was cancelled; nothing was charged.'" "''")
             (json-boolean (and (the session) (session-busy? (the session))))
             ;; a browser holding the session's key shows the owner's page
@@ -798,7 +833,7 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
                           (:h2 "Parts")
                           (:div :id "tree"
                                 (if model
-                                    (str (tree-html self model (the inspected-node)))
+                                    (str (tree-html self model (the inspected-node) (the tree-shown)))
                                     (htm (:p "No model yet."))))))))
 
    (inputs-section
@@ -835,6 +870,23 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
     ;; yet (the place for a meter report on edits, as on the viewer)
     (declare (ignore node slot))
     nil)
+
+   (more
+    (signals)
+    ;; a "..." row: that part's children listed further, or all of them
+    (let* ((text (gethash "more" signals))
+           (path (and (stringp text) (ignore-errors (let ((*package* (find-package :keyword)))
+                                                      (read-safe-string text)))))
+           (node (and (listp path) (the model-object)
+                      (ignore-errors (the-object (the model-object) (follow-root-path path))))))
+      (when node
+        (let* ((total (length (ignore-errors (the-object node children))))
+               (shown (or (cdr (assoc path (the tree-shown) :test #'equal)) sluice::*tree-condense-limit*)))
+          (the (set-slot! :tree-shown
+                          (acons path (if (eq (gethash "moreAll" signals) t)
+                                          total
+                                          (min total (+ shown sluice::*tree-condense-limit*)))
+                                 (remove path (the tree-shown) :key #'car :test #'equal))))))))
 
    (inspect
     (signals)
