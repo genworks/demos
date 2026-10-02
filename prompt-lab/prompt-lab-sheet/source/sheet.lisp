@@ -377,7 +377,7 @@ the sheet shows only once its owner's key is proven (claim)."
    (user-mode?-default nil)
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
-   (datastar-actions (list :build :claim :save :topup :privacy))
+   (datastar-actions (list :build :claim :save :topup :privacy :wear-skin))
 
    (owner? (let ((session (the session)))
              (and session (the owner-key) (owner? session (the owner-key)) t)))
@@ -411,6 +411,16 @@ the sheet shows only once its owner's key is proven (claim)."
             (when (and (the shown-id) (not (the owner?)))
               (htm (:span :|data-init| (format nil "$owner && ~a" (the (datastar-action :claim))))))
             (:span :|data-effect| "var b=$busy; if(window.plWasBusy && !b && window.sluiceTab && matchMedia('(max-width: 47.99rem)').matches){sluiceTab('model')} window.plWasBusy=b")
+            ;; the skin this browser chose, shared with the classic page
+            ;; (localStorage prompt-lab-skin): worn when it is not the one
+            ;; showing, and kept when View > Skin picks another
+            (:script "window.sluiceSkinChosen=function(n){try{localStorage.setItem('prompt-lab-skin',n)}catch(e){}};")
+            (:span :|data-init|
+                   ;; cl-who writes attribute values raw, between quotes
+                   (escape-string-minimal-plus-quotes
+                    (format nil "$skinPref = (function(){try{return (localStorage.getItem('prompt-lab-skin')||'').toLowerCase()}catch(e){return ''}})(); $skinPref && $skinPref !== ~a && ~a"
+                            (js-string-literal (sluice:skin-name (the skin)))
+                            (the (datastar-action :wear-skin :options "{filterSignals: {include: /^skinPref$/}}")))))
             (:header :class "pl-head"
                      (:h1 (esc (lab-title)))
                      (:span :class "pl-engine" (esc (engine-label)))
@@ -426,7 +436,7 @@ the sheet shows only once its owner's key is proven (claim)."
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             (if (the cancelled?) "'The payment was cancelled; nothing was charged.'" "''")
             (json-boolean (and (the session) (session-busy? (the session))))
             ;; a browser holding the session's key shows the owner's page
@@ -637,6 +647,18 @@ the sheet shows only once its owner's key is proven (claim)."
           (ignore-errors (the viewport (set-slot! :hidden-lines :remove))))
         (when (the root-object)
           (ignore-errors (the viewport (draw-leaves! (the root-object))))))))
+
+   (wear-skin
+    (signals)
+    ;; (not `skin': that is the sluice's input of the name, and GDL keys
+    ;; messages by name) the skin this browser chose on the classic page or here, worn in
+    ;; place (the sluice's set-skin!) -- only a name the sluice knows, so
+    ;; a skin of the page's own is left alone, not taken for the house look
+    (let ((name (gethash "skinPref" signals)))
+      (when (and (stringp name)
+                 (or (assoc name (sluice:skin-choices) :test #'string-equal)
+                     (assoc name sluice:*skin-aliases* :test #'string-equal)))
+        (the (set-skin! (string-downcase name))))))
 
    (tell-error!
     (reason)
