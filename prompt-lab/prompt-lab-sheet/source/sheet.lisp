@@ -469,8 +469,9 @@ panel sets on the page that holds it."
    ("List. How many children the tree lists of each part whose \"...\" row
 has been clicked: an alist from the part's root-path to a count."
     tree-shown nil :settable)
-   (use-fontawesome? t)
-   ;; the sheet draws in svg: base-html-page's x3dom (834 KB) is not wanted
+   ;; the sheet draws in svg: base-html-page's x3dom (834 KB) is not
+   ;; wanted, nor FontAwesome (the sluice's inputs panel draws its own
+   ;; icons since gendl's step 1)
    (use-x3dom? nil))
 
   :computed-slots
