@@ -338,8 +338,9 @@ model, with the lab's own sections as its tiles -- the prompt, the
 status, the credits, the downloads and the log in a column at the left,
 the model file's editor under the panes.  A phone shows them as four
 tabs: Prompt, Model, Parts, Code.  Only the sluice's INPUTS are
-overridden here (where its package is locked its computed slots are
-reserved words); the lab's own slots and children are its own.")
+overridden here: its other messages are reserved words to a subclass in
+another package (the sluice is in *packages-to-lock*); the lab's own
+slots and children are its own.")
 
   :input-slots
   (("The session shown, a struct (session.lisp); nil until a new visitor's

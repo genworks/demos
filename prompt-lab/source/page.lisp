@@ -804,9 +804,9 @@ the model with one panel under it, the inputs or the tree."
    ;; after the sluice's own sheets and its skin: the phone's sheet
    ;; when the page is one, and a skin of the lab's own (an older
    ;; sluice is handed the tokens and the skin here too).  Only INPUTS
-   ;; of the sluice are overridden here: where its package is locked
-   ;; (a Genworks GDL workshop) its computed slots, body-class among
-   ;; them, are reserved words.
+   ;; of the sluice are overridden here: its computed slots, body-class
+   ;; among them, are reserved words to a subclass in another package
+   ;; (the sluice is in *packages-to-lock*, GDL's reserved-word check).
    (additional-css-links (viewer-css-links (the page-skin) :phone? (the phone?)))
 
    ;; on a phone the inspector holds the inputs alone
@@ -832,9 +832,8 @@ the model with one panel under it, the inputs or the tree."
                      (and session (owner? session (the owner-key)))))
 
    ;; root-object-type is not overridden here but SET at instantiation
-   ;; (below): it is the sluice's own settable input, and on a Genworks
-   ;; GDL workshop, where the sluice package is locked, redefining it
-   ;; is a reserved-word error at load (2026-09-28).
+   ;; (below): it is a settable computed slot of the sluice's, and
+   ;; naming it here is a reserved-word error at load (2026-09-28).
 
    (empty-display-list-greeting
     (with-lhtml-string ()
