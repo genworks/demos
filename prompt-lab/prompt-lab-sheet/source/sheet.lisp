@@ -69,23 +69,37 @@
 (defun sheets-hear (session)
   "A change to SESSION: every sheet showing it takes a new revision (its
 log, status and source sections depend on it), a new model stamp when the
-model was compiled again (its viewport depends on that), and the busy
-signal; then its stream sends what went stale."
+model was compiled again (its viewport depends on that), the model file
+for its editor, and the busy signal; then its stream sends what went
+stale.  A session gone private closes on every sheet but its owner's."
   (dolist (sheet (session-sheets session))
-    (the-object sheet (set-slot! :revision (1+ (the-object sheet revision))))
-    (let ((stamp (model-stamp session)))
-      (unless (eql stamp (the-object sheet model-stamp))
-        (the-object sheet (set-slot! :model-stamp stamp))))
-    ;; the editor is no section: a new version of the file goes to it as
-    ;; a call, which an edit in progress does not take
-    ;; the file as it is, compiled or not
-    (let ((body (or (ignore-errors (model-body session)) "")))
-      (unless (equal body (the-object sheet shown-source))
-        (the-object sheet (set-slot! :shown-source body))
-        (sheet-send! sheet (datastar-script-event (format nil "plSetSource(~a)" (js-string-literal body))))))
-    (sheet-send! sheet (datastar-signals-event
-                        (format nil "{\"busy\": ~a}" (json-boolean (session-busy? session)))))
-    (sheet-changed! sheet)))
+    (cond
+      ((and (session-private? session) (not (the-object sheet owner?)))
+       ;; as the page's state door refuses a watcher: the sheet closes on
+       ;; it, its editor emptied, and it hears no more
+       (bt:with-lock-held (*session-sheets-lock*)
+         (setf (gethash (session-id session) *session-sheets*)
+               (remove sheet (gethash (session-id session) *session-sheets*))))
+       (the-object sheet (set-slot! :session nil))
+       (the-object sheet (set-slot! :private-id (session-id session)))
+       (sheet-send! sheet (datastar-script-event "plSetSource('')")
+                    (datastar-signals-event "{\"editable\": false}"))
+       (sheet-changed! sheet))
+      (t
+       (the-object sheet (set-slot! :revision (1+ (the-object sheet revision))))
+       (let ((stamp (model-stamp session)))
+         (unless (eql stamp (the-object sheet model-stamp))
+           (the-object sheet (set-slot! :model-stamp stamp))))
+       ;; the editor is no section: a new version of the file (as it is,
+       ;; compiled or not) goes to it as a call, which an edit in
+       ;; progress does not take
+       (let ((body (or (ignore-errors (model-body session)) "")))
+         (unless (equal body (the-object sheet shown-source))
+           (the-object sheet (set-slot! :shown-source body))
+           (sheet-send! sheet (datastar-script-event (format nil "plSetSource(~a)" (js-string-literal body))))))
+       (sheet-send! sheet (datastar-signals-event
+                           (format nil "{\"busy\": ~a}" (json-boolean (session-busy? session)))))
+       (sheet-changed! sheet)))))
 
 (pushnew 'sheets-hear *session-change-hooks*)
 
@@ -184,6 +198,37 @@ from a gate that names no credits."
                    used free balance)
            (write-string (buttons offers nil "Buy:") out))))
       (t "<p class=\"pl-line\">Credits show here once you build.</p>"))))
+
+(defun listing-entry (summary archive?)
+  "String of HTML: one session of a listing (a summary from browse.lisp)."
+  (let* ((id (gethash "id" summary))
+         (engine (gethash "engine" summary))
+         (here? (equal engine (engine-name)))
+         (live? (if archive? (live? id) t))
+         (href (cond ((and here? live?) (format nil "~a/sheet?session=~a" *url-prefix* id))
+                     (here? (format nil "~a?archive=~a" *url-prefix* id))
+                     ((car *sibling-lab*) (format nil "~a~:[?archive=~a~;/sheet?session=~a~]"
+                                                  (car *sibling-lab*) live? id))
+                     (t nil)))
+         (thumb (and archive? (gethash "thumb" summary)))
+         (seconds (or (gethash "last_used" summary) (gethash "created" summary))))
+    (with-output-to-string (out)
+      (format out "<a class=\"pl-entry-card\"~@[ href=\"~a\"~]>" (and href (escape-string-minimal-plus-quotes href)))
+      (when thumb
+        (format out "<img class=\"pl-thumb\" alt=\"\" loading=\"lazy\" src=\"~a?id=~a&amp;v=~a\">"
+                (door-path "thumb") id thumb))
+      (format out "<span class=\"pl-entry-title\">~a</span>"
+              (escape-string-minimal-plus-quotes (or (gethash "title" summary) "(no prompt yet)")))
+      (format out "<span class=\"pl-line\">~@[~a &middot; ~]~d prompt~:p~:[~; &middot; a model~]~:[~; &middot; working~]~:[~; &middot; live~]~@[ &middot; ~a~]</span>"
+              (and seconds (multiple-value-bind (s m h d mo y) (decode-universal-time (+ seconds (encode-universal-time 0 0 0 1 1 1970 0)) 0)
+                          (declare (ignore s))
+                          (format nil "~d-~2,'0d-~2,'0d ~2,'0d:~2,'0d UTC" y mo d h m)))
+              (gethash "prompts" summary)
+              (eq (gethash "model" summary) t)
+              (eq (gethash "busy" summary) t)
+              (and archive? live?)
+              (unless here? engine))
+      (format out "</a>"))))
 
 (defparameter *tree-max-nodes* 400
   "Integer. The most parts the sheet's tree lists; a larger model shows
@@ -304,6 +349,15 @@ a{color:var(--pl-link)}
 .pl-meter span{display:block;height:100%;background:var(--pl-accent)}
 .pl-line{color:var(--pl-ink-dim);font-size:.9em;margin:.3rem 0}.pl-begging{color:var(--pl-status-fail);font-weight:600;margin:.3rem 0}
 .pl-topup{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem;font-size:.9em}
+.pl-private{display:inline-flex;gap:.3rem;align-items:center;cursor:pointer}
+.pl-private input{accent-color:var(--pl-accent)}
+.pl-list{max-width:60rem;margin:0 auto;padding:1rem}
+.pl-list h2{font-family:var(--pl-font-label);font-weight:var(--pl-label-weight);text-transform:var(--pl-label-case);letter-spacing:var(--pl-label-tracking)}
+.pl-entry-card{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:.8rem;align-items:center;padding:.6rem .7rem;margin-bottom:.5rem;background:var(--pl-panel);border:var(--pl-rule) solid var(--pl-line);border-radius:var(--pl-radius);color:var(--pl-ink);text-decoration:none}
+.pl-entry-card:hover{background:var(--pl-hover-bg);outline:var(--pl-rule) solid var(--pl-hover-line)}
+.pl-thumb{grid-row:1/3;width:96px;height:72px;object-fit:contain;background:#fff;border:var(--pl-rule) solid var(--pl-line-soft)}
+.pl-entry-title{font-weight:600;overflow-wrap:anywhere;font-size:.95em}
+@media (max-width:760px){.pl-thumb{width:72px;height:54px}.pl-list{padding:.5rem}}
 .pl-tabs{display:none}
 @media (max-width:760px){
  body{font-size:15px}
@@ -377,6 +431,9 @@ log, status and source sections are recomputed from."
     model-stamp nil :settable)
    ("The model file's text as the editor was last sent it (sheets-hear)."
     shown-source "" :settable)
+   ("String or nil. The id of a private session named on the address, which
+the sheet shows only once its owner's key is proven (claim)."
+    private-id nil :settable)
    ("List. The root-path, from the model, of the node whose inputs the
 panel shows; nil for the model itself."
     inspected-path nil :settable)
@@ -387,7 +444,7 @@ panel sets on the page that holds it."
 
   :computed-slots
   ((title (lab-title))
-   (datastar-actions (list :build :claim :save :inspect :topup))
+   (datastar-actions (list :build :claim :save :inspect :topup :privacy))
 
    ;; the node the inputs panel is on: the inspected path followed from
    ;; the model, or the model when that path no longer leads anywhere (a
@@ -403,7 +460,15 @@ panel sets on the page that holds it."
 
    ;; a new visitor builds into a session of their own; a session's
    ;; page is the owner's to build in
-   (editable? (or (null (the session)) (the owner?)))
+   (editable? (or (and (null (the session)) (null (the private-id))) (the owner?)))
+
+   ;; the session the address names: the one shown, or a private one
+   ;; waiting for its owner's key
+   (shown-id (or (and (the session) (session-id (the session))) (the private-id)))
+
+   ;; ?browse=live or ?browse=archive: the listings instead of the lab
+   (browse (let ((b (cdr (assoc "browse" (the query-toplevel) :test #'string-equal))))
+             (and (member b '("live" "archive") :test #'equal) b)))
 
    ;; The model is a root of its own, as in the sluice (so the inputs
    ;; panel offers all its inputs), made afresh at every compile.
@@ -475,22 +540,55 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{tab: 'prompt', prompt: '', turnstile: '', source: '', inspect: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{tab: 'prompt', private: false, prompt: '', turnstile: '', source: '', inspect: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             (if (the cancelled?) "'The payment was cancelled; nothing was charged.'" "''")
             (json-boolean (and (the session) (session-busy? (the session))))
             ;; a browser holding the session's key shows the owner's page
             ;; from the start (the claim confirms it; every action checks
             ;; the key again), rather than a watcher's for the first second
-            (if (and (the session) (not (the editable?)))
-                (format nil "(~a !== '')" (owner-signal-expression (session-id (the session))))
+            (if (and (the shown-id) (not (the editable?)))
+                (format nil "(~a !== '')" (owner-signal-expression (the shown-id)))
                 (json-boolean (the editable?)))
-            (if (the session) (owner-signal-expression (session-id (the session))) "''")
+            (if (the shown-id) (owner-signal-expression (the shown-id)) "''")
             (js-string-literal (or (the query-checkout) ""))
             (if (the query-wallet)
                 (js-string-literal (the query-wallet))
                 "(function(){try{return localStorage.getItem('prompt-lab-wallet')||''}catch(e){return ''}})()")))
 
-   (body
+   (body (if (the browse) (the listing-body) (the lab-body)))
+
+   ;; The listings (browse.lisp's own summaries): the live sessions, or
+   ;; every archived one with its thumbnail.  A session goes to its sheet
+   ;; when it is live here, to the page's archive view when it is not (the
+   ;; sheet has none yet), and to the other lab when that one built it.
+   (listing-body
+    (let* ((archive? (equal (the browse) "archive"))
+           (summaries (and *browsing?*
+                           (newest-first (if archive? (archive-summaries) (live-summaries))))))
+      (with-lhtml-string ()
+        (:div :id "pl-sheet" :class "pl-listing"
+              (:header :class "pl-head"
+                       (:h1 (esc (lab-title)))
+                       (:span :class "pl-engine" (esc (engine-label)))
+                       (:nav (str (the browse-links))
+                             (:a :href (format nil "~a/sheet" *url-prefix*) "start your own")))
+              (:main :class "pl-list"
+                     (:h2 (str (if archive? "Archived sessions" "Live sessions")))
+                     (cond ((not *browsing?*)
+                            (htm (:p :class "pl-line" "Sessions are not listed on this lab.")))
+                           ((null summaries)
+                            (htm (:p :class "pl-line" "Nothing to list yet.")))
+                           (t
+                            (dolist (s summaries)
+                              (str (listing-entry s archive?))))))))))
+
+   (browse-links
+    (with-lhtml-string ()
+      (when *browsing?*
+        (htm (:a :href (format nil "~a/sheet?browse=live" *url-prefix*) "sessions")
+             (:a :href (format nil "~a/sheet?browse=archive" *url-prefix*) "archive")))))
+
+   (lab-body
     (with-lhtml-string ()
       (:div :id "pl-sheet"
             :|data-signals| (escape-string-minimal-plus-quotes (the initial-signals))
@@ -498,14 +596,15 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
             ;; the phone's tab, for the stylesheet
             :|data-attr:data-tab| "$tab"
             ;; a browser holding this session's key makes the page its owner's
-            (when (and (the session) (not (the owner?)))
+            (when (and (the shown-id) (not (the owner?)))
               (htm (:span :|data-init| (format nil "$owner && ~a" (the (datastar-action :claim))))))
             ;; on a phone, a build that finishes takes the screen to the model
             (:span :|data-effect| "var b=$busy; if(window.plWasBusy && !b && matchMedia('(max-width: 760px)').matches){$tab='model'} window.plWasBusy=b")
             (:header :class "pl-head"
                      (:h1 (esc (lab-title)))
                      (:span :class "pl-engine" (esc (engine-label)))
-                     (:nav (:a :href (the classic-url) "the page")
+                     (:nav (str (the browse-links))
+                           (:a :href (the classic-url) "the page")
                            (when *sibling-lab*
                              (htm (:a :href (format nil "~a/sheet" (car *sibling-lab*)) (esc (cdr *sibling-lab*)))))
                            (:select :id "pl-skin" :title "How the lab looks" :onchange "plSetSkin(this.value)"
@@ -600,8 +699,12 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
                   (let ((session (the session)))
                     (with-lhtml-string ()
                       (:div :class "pl-card pl-status"
-                            (if (null session)
-                                (htm (:span "No session yet: your first build opens one."))
+                            (cond
+                              ((the private-id)
+                               (htm (:span "This session is private: it opens only in the browser that owns it.")))
+                              ((null session)
+                               (htm (:span "No session yet: your first build opens one.")))
+                              (t
                                 (let ((usage (session-usage session)) (pot (pot)))
                                   (htm (:span (fmt "Session ~a" (session-id session)))
                                        (:span (str (if (session-busy? session) "working" "ready")))
@@ -611,7 +714,17 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
                                          (htm (:span (fmt "pot ~:d credits" (max 0 (floor (or (getf pot :credits) 0)))))))
                                        (when (model-defined? session)
                                          (htm (:a :href (viewer-url session) :target "_blank" "full sluice")))
-                                       (:a :href (the classic-url) "credits, downloads and more")))))))))
+                                       (:a :href (the classic-url) "the page")
+                                       ;; closing the session to watchers, once it has bought credits
+                                       (when (and (the owner?) (or (paid? session) (session-private? session)))
+                                         (htm (:label :class "pl-private"
+                                                      :title "A private session is out of the listings and opens only in the browser that owns it"
+                                                      (:input :type "checkbox"
+                                                              :checked (when (session-private? session) "checked")
+                                                              :|data-on:change|
+                                                              (format nil "$private = el.checked; ~a"
+                                                                      (the (datastar-action :privacy :options "{filterSignals: {include: /^(private|owner)$/}}"))))
+                                                      " private"))))))))))))
 
    (log-section
     :type 'base-html-div
@@ -733,13 +846,21 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
     ()
     (call-next-method)
     ;; ?session=<id>: the sheet shows that session to whoever may see it
+    ;; (a private one only to its owner: the claim opens it, once the
+    ;; browser has shown the key)
     (let* ((id (cdr (assoc "session" (the query-toplevel) :test #'string-equal)))
            (session (and (stringp id) (find-session id))))
-      (when (and session (visible-to? session nil))
-        (the (set-slot! :session session))
-        (the (set-slot! :model-stamp (model-stamp session)))
-        (the (set-slot! :shown-source (or (ignore-errors (model-body session)) "")))
-        (watch-session! self session))))
+      (cond ((null session))
+            ((visible-to? session nil) (the (show-session! session)))
+            (t (the (set-slot! :private-id (session-id session)))))))
+
+   (show-session!
+    (session)
+    (the (set-slot! :session session))
+    (the (set-slot! :private-id nil))
+    (the (set-slot! :model-stamp (model-stamp session)))
+    (the (set-slot! :shown-source (or (ignore-errors (model-body session)) "")))
+    (watch-session! self session))
 
    (tell-error!
     (reason)
@@ -771,10 +892,18 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
     (signals)
     ;; the owner's browser holds the key; and back from paying, the
     ;; checkout it brings is credited once (as the page's confirm door)
-    (let ((session (the session))
-          (key (gethash "owner" signals))
-          (checkout (gethash "checkout" signals))
-          (wallet (gethash "wallet" signals)))
+    (let* ((key (gethash "owner" signals))
+           (checkout (gethash "checkout" signals))
+           (wallet (gethash "wallet" signals))
+           (session (or (the session)
+                        ;; a private session, shown now to its owner
+                        (let ((private (and (the private-id) (find-session (the private-id)))))
+                          (when (and private (stringp key) (owner? private key))
+                            (the (show-session! private))
+                            (sheet-send! self (datastar-script-event
+                                               (format nil "plSetSource(~a)"
+                                                       (js-string-literal (the shown-source)))))
+                            private)))))
       (when (and session (stringp key) (owner? session key))
         (the (set-slot! :owner-key key))
         (touch session)
@@ -790,6 +919,28 @@ document.addEventListener('DOMContentLoaded',function(){var m=document.getElemen
                                   (js-string-literal (format nil "~a/sheet?session=~a" *url-prefix* (session-id session))))))
             (unless (member outcome '("credited" "already") :test #'equal)
               (the (tell-error! text))))))))
+
+   (privacy
+    (signals)
+    ;; the owner closes the session to watchers, or opens it again
+    (let ((session (the session))
+          (private? (eq (gethash "private" signals) t)))
+      (if (not (the owner?))
+          (the (tell-error! "Only the session's owner may change that."))
+          (multiple-value-bind (ok? reason) (set-privacy! session private?)
+            (cond (ok?
+                   ;; a session older than owner keys has one now
+                   (the (set-slot! :owner-key (session-owner session)))
+                   (sheet-send! self
+                                (datastar-script-event (owners-script session))
+                                (datastar-signals-event
+                                 (with-output-to-string (s)
+                                   (yason:encode (h "notice" (if private?
+                                                                 "Private: out of the listings, and open only in this browser."
+                                                                 "Open to view again.")
+                                                    "error" "")
+                                                 s)))))
+                  (t (the (tell-error! reason))))))))
 
    (own-session!
     (address wallet)

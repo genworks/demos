@@ -667,33 +667,41 @@ watcher is refused when *browsing?* is off."
            (respond-json req ent (session-state session :owner? nil)))
           (t (refuse req ent net.aserve:*response-forbidden* "This session is private.")))))
 
+(defun set-privacy! (session private?)
+  "The owner closes SESSION to watchers (PRIVATE? true) -- out of the
+listings, live and archived, its URL answering no one else -- or opens it
+again.  Closing takes a session that has bought credits.  A session opened
+before owner keys gets one, since the address no longer suffices once
+nobody else may look.  Values: true, or nil and the reason."
+  (cond ((and private? (not (paid? session)))
+         (values nil "A session becomes private once it has bought modeling credits."))
+        (t (unless (session-owner session) (setf (session-owner session) (new-owner-key)))
+           (unless (eq private? (session-private? session))
+             (setf (session-private? session) private?)
+             ;; a replay built from the archive while it was open would
+             ;; still show it (browse.lisp); the next is built afresh
+             (let ((replay (find-replay (session-id session))))
+               (when replay (drop-replay replay)))
+             (log-event session :note (if private?
+                                          "This session is private now: out of the listings, and closed to anyone else with its link."
+                                          "This session is open to view again.")))
+           (save-session! session)
+           t)))
+
 (defun privacy-door (req ent)
   "POST <prefix>/api/privacy {session, private}: the owner closes the
-session to watchers -- out of the listings, live and archived, its URL
-answering no one else -- or opens it again.  Closing takes a session
-that has bought credits.  A session opened before owner keys gets one
-here, answered as \"owner\", since the address no longer suffices once
-nobody else may look."
+session to watchers or opens it again (set-privacy!).  Answers the owner
+key too, which a session older than keys gets here."
   (let* ((json (request-json req))
          (session (requested-session req json))
          (private? (and json (eq (gethash "private" json) t))))
     (cond ((null session) (no-such-session req ent))
           ((not (owner-request? req session json)) (not-yours req ent))
-          ((and private? (not (paid? session)))
-           (refuse req ent "A session becomes private once it has bought modeling credits."))
-          (t (unless (session-owner session) (setf (session-owner session) (new-owner-key)))
-             (unless (eq private? (session-private? session))
-               (setf (session-private? session) private?)
-               ;; a replay built from the archive while it was open would
-               ;; still show it (browse.lisp); the next is built afresh
-               (let ((replay (find-replay (session-id session))))
-                 (when replay (drop-replay replay)))
-               (log-event session :note (if private?
-                                            "This session is private now: out of the listings, and closed to anyone else with its link."
-                                            "This session is open to view again.")))
-             (save-session! session)
-             (respond-json req ent (h "private" (if private? t 'yason:false)
-                                      "owner" (session-owner session)))))))
+          (t (multiple-value-bind (ok? reason) (set-privacy! session private?)
+               (if ok?
+                   (respond-json req ent (h "private" (if private? t 'yason:false)
+                                            "owner" (session-owner session)))
+                   (refuse req ent "~a" reason)))))))
 
 (defun prompt-door (req ent)
   "POST <prefix>/api/prompt {session, prompt}: start the agent on the
