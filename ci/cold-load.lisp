@@ -25,8 +25,8 @@
 ;;;; a session and redirects; a page whose model or markup fails
 ;;;; ends the connection early, which fails here too); the shared
 ;;;; stylesheet and the portal likewise; x3dom-page writes a page for
-;;;; a box; and the prompt lab is driven through its doors with no
-;;;; agent and no network -- config, a session, a hand-written model
+;;;; a box; and the prompt lab's page (the sheet) is fetched and the lab
+;;;; driven through its doors with no agent and no network -- config, a session, a hand-written model
 ;;;; compiled and loaded through the model door, the state door
 ;;;; reading it back, and the viewer (the sluice) drawing it.  Its gate
 ;;;; is pointed at a closed local port, so the balance and meter calls
@@ -81,10 +81,12 @@
     (read-from-string name)))
 
 (defun all-system-names ()
-  "Every system named by an .asd file one level below the checkout,
-demos-common first since everything else depends on it."
+  "Every system named by an .asd file one or two levels below the
+checkout (prompt-lab/prompt-lab-sheet), demos-common first since
+everything else depends on it."
   (let ((names (mapcar (lambda (p) (system-keyword (pathname-name p)))
-                       (directory (merge-pathnames "*/*.asd" *demos-dir*)))))
+                       (append (directory (merge-pathnames "*/*.asd" *demos-dir*))
+                               (directory (merge-pathnames "*/*/*.asd" *demos-dir*))))))
     (cons :demos-common
           (sort (remove :demos-common (remove-duplicates names)) #'string<))))
 
@@ -266,7 +268,9 @@ the body, the status, the final path."
              (let ((text (uiop:read-file-string file)))
                (and (search "<Scene>" text) (search "</html>" text)))))))
 
-(defun smoke-prompt-lab ()
+(defun smoke-prompt-lab (sheet?)
+  "Drive the prompt lab through its doors; with SHEET? (prompt-lab-sheet
+loaded) its page too."
   (flet ((lab (name) (find-symbol (symbol-name name) :prompt-lab)))
     ;; no agent, no gate, no network: the gate's doors fail at once
     (setf (symbol-value (lab '#:*messages-url*)) "http://127.0.0.1:9/llm/messages"
@@ -277,23 +281,36 @@ the body, the status, the final path."
       (flet ((door (name) (format nil "~a/api/~a" prefix name))
              (owner-headers () (list (cons "X-Prompt-Lab-Owner" owner))))
         (smoke "prompt-lab publish" (lambda () (uiop:symbol-call :prompt-lab :publish-prompt-lab!) t))
-        (smoke (format nil "prompt-lab page ~a" prefix) (lambda () (page-ok? prefix)))
+        ;; the page is the sheet (prompt-lab-sheet), published over the prefix
+        (when sheet?
+          (smoke "prompt-lab sheet publish" (lambda () (uiop:symbol-call :prompt-lab :publish-lab-sheet!) t))
+          (smoke (format nil "prompt-lab page ~a, the sheet" prefix)
+                 (lambda ()
+                   (page-ok? prefix)
+                   (let ((body (http :get prefix)))
+                     (dolist (address (list (format nil "~a/manifest.webmanifest" prefix)
+                                            (format nil "~a/static/editor.js" prefix))
+                                      t)
+                       (unless (search address body)
+                         (error "the page does not name ~a" address))))))
+          (smoke "prompt-lab's retired classic page sends its links to the sheet"
+                 ;; the redirect itself, not followed: zacl's client stumbles
+                 ;; on a second redirect (the sheet's minted session)
+                 (lambda ()
+                   (multiple-value-bind (body status headers)
+                       (net.aserve.client:do-http-request
+                           (format nil "http://127.0.0.1:~a~a/classic?session=abc" (http-port) prefix)
+                         :redirect nil)
+                     (declare (ignore body))
+                     (let ((location (cdr (assoc :location headers))))
+                       (or (and (eql status 301) (equal location (format nil "~a?session=abc" prefix)))
+                           (error "answered ~a, to ~a" status location)))))))
         ;; The lab wears the sluice's skins where the image's sluice has
         ;; them, and its own copies where it is older; the checks below
         ;; hold either way, and say which they met.
         (format t "~&     the sluice of this image ~:[is older than its skins: the lab's own copies~;wears skins: the lab asks it~]~%"
                 (uiop:symbol-call :prompt-lab :sluice-skins?))
-        (smoke "prompt-lab page names its stylesheets, every place filled in"
-               (lambda ()
-                 (let ((body (http :get prefix)))
-                   (when (search "{{" body) (error "a place in the page was left unfilled"))
-                   (dolist (address (list (uiop:symbol-call :prompt-lab :tokens-url)
-                                          (format nil "~a/static/prompt-lab-page.css" prefix)
-                                          (format nil "~a/static/prompt-lab.js" prefix))
-                                    t)
-                     (unless (search address body)
-                       (error "the page does not name ~a" address))))))
-        (smoke "prompt-lab stylesheets, script and skins"
+        (smoke "prompt-lab stylesheets, editor and skins"
                (lambda ()
                  (let ((skins (mapcar (lambda (skin) (getf skin :href))
                                       (uiop:symbol-call :prompt-lab :skins)))
@@ -301,9 +318,9 @@ the body, the status, the final path."
                    (unless skins (error "no skin was found"))
                    (dolist (address (append (list (uiop:symbol-call :prompt-lab :tokens-url))
                                             (mapcar (lambda (name) (format nil "~a/static/~a" prefix name))
-                                                    '("prompt-lab.css" "prompt-lab-page.css"
+                                                    '("prompt-lab.css"
                                                       "prompt-lab-viewer.css" "prompt-lab-phone.css"
-                                                      "prompt-lab.js" "editor.js"))
+                                                      "editor.js"))
                                             (and split (list split))
                                             skins)
                                     t)
@@ -330,7 +347,8 @@ the body, the status, the final path."
                         (icons (gethash "icons" manifest)))
                    (unless (search prefix (gethash "start_url" manifest))
                      (error "the manifest starts somewhere else: ~a" (gethash "start_url" manifest)))
-                   (unless (equal (gethash "scope" manifest) prefix)
+                   ;; the sheet lives at /sessions/<id>/, outside the prefix
+                   (unless (equal (gethash "scope" manifest) "/")
                      (error "the manifest's scope is ~a" (gethash "scope" manifest)))
                    (when (zerop (length icons)) (error "the manifest names no icon"))
                    ;; HEAD: a picture is no text for the client to decode
@@ -340,19 +358,14 @@ the body, the status, the final path."
                                   (error "~a answered ~a" (gethash "src" icon) status))))
                         icons)
                    t)))
-        (smoke "prompt-lab service worker, filled in, keeping the page and nothing of the doors"
+        (smoke "prompt-lab service worker retires the one the classic page kept"
                (lambda ()
                  (multiple-value-bind (body status) (http :get (format nil "~a/worker" prefix))
                    (unless (eql status 200) (error "the worker answered ~a" status))
-                   (when (search "{{" body) (error "a place in the worker was left unfilled"))
-                   (unless (search (format nil "var PREFIX = ~s;" prefix) body)
-                     (error "the worker does not name the prefix"))
-                   (let* ((start (search "var SHELL = " body))
-                          (shell (subseq body start (position #\Newline body :start start))))
-                     (unless (search (format nil "~a/static/prompt-lab.js" prefix) shell)
-                       (error "the worker's shell lacks the page's script"))
-                     (when (or (search "/api/" shell) (search "/viewer" shell))
-                       (error "the worker's shell names a door or the viewer")))
+                   (unless (search "unregister()" body)
+                     (error "the worker does not unregister itself"))
+                   (unless (search (format nil "'prompt-lab:' + ~s" prefix) body)
+                     (error "the worker does not name the lab's caches"))
                    t)))
         (smoke "prompt-lab config door"
                (lambda () (gethash "engine" (json-of :get (door "config")))))
@@ -555,7 +568,8 @@ the body, the status, the final path."
     (format t "~&~%Smoke run through what loaded, on port ~a~%" (http-port))
     (smoke-pages loaded)
     (when (member :x3dom-page loaded) (smoke-x3dom-page))
-    (when (member :prompt-lab loaded) (smoke-prompt-lab)))
+    (when (member :prompt-lab loaded)
+      (smoke-prompt-lab (and (member :prompt-lab-sheet loaded) t))))
   (setq *smoke-failures* (nreverse *smoke-failures*))
   (format t "~&~%Smoke run: ~a failure~:p.~%" (length *smoke-failures*))
   (dolist (f *smoke-failures*) (format t "~&FAILED: ~a~%" (first f)))

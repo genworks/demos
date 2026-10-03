@@ -11,17 +11,18 @@ This file says only what the lab adds to it.
 
 ## Two documents, one skin
 
-The lab is two documents: the **page**, and the **viewer** in the
-page's frame, which is a sluice.  Both wear the one skin.
+The lab is two documents: the **page**, a sluice carrying the lab's
+own parts as its tiles, and the **viewer**, a sluice showing a
+session's model alone.  Both wear the one skin.
 
 | document | what it loads |
 |---|---|
-| the page | the sluice's `tokens.css`; `static/prompt-lab-page.css`, the page laid out in the tokens; the skin |
+| the page | a sluice told which skin to wear; the lab's tiles drawn in the tokens |
 | the viewer | a sluice told which skin to wear |
 
-On a desk the page is a frame of tiled panes; on a phone it is an app
-with a bar, screens and tabs.  Both are drawn from the same tokens, so
-a skin never needs to know which document it is in, nor which layout.
+On a desk the page is a frame of tiled panes; on a phone it shows one
+tab at a time.  Both are drawn from the same tokens, so a skin never
+needs to know which document it is in, nor which layout.
 
 ## Where skins are found
 
@@ -49,11 +50,10 @@ Where both have a skin of one name, it is the sluice's.
 
 | token | in the lab |
 |---|---|
-| `--pl-label-bg`, `--pl-label-ink` | also the title block, the documentation line at the foot, and the bar across the top of the phone's screen |
-| `--pl-accent`, `--pl-accent-ink` | also the Build button, the current tab, the visitor's own words in the phone's conversation |
+| `--pl-label-bg`, `--pl-label-ink` | also the title bar and the documentation line |
+| `--pl-accent`, `--pl-accent-ink` | also the Build button |
 | `--pl-status-pass`, `-warn`, `-fail` | the edge of a log entry: built, a tool's complaint, stopped |
 | `--pl-status-busy` | the run bars while the agent works |
-| `--pl-size` | the text size on a desk; the phone sets its own |
 
 The human check and the card form are other people's frames, and
 follow `color-scheme` at most.

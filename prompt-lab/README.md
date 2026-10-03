@@ -23,25 +23,29 @@ built wrong, or a page that misbehaves are welcome at
 ## What is here
 
 - `source/` -- the ASDF system `prompt-lab`, a Gendl web application:
-  the page and its doors (`page.lisp`), the sessions and their
+  its doors (`page.lisp`), the sessions and their
   archive, the agent loop over the Messages API (`agent.lisp`), the
   tools the agent is given (write, read, evaluate, check, render, the
   docs), the metering of compiles and runs, and the guards at the
   door.  `parameters.lisp` holds what an instance sets.
+- `prompt-lab-sheet/` -- the ASDF system `prompt-lab-sheet`, the
+  page: the sluice, Gendl's object browser, opened on the session's
+  model, with the lab's own parts (the prompt, the status and credits,
+  the downloads, the log, the model file) as its tiles.  It is one gwl
+  sheet that hears every change to its session and pushes what changed
+  to the browser over a stream; on a phone it shows one tab at a time.
 - `editor/` -- the model file's editor: CodeMirror taught Lisp, with
   colours, folding by s-expression and Emacs's keys for moving by
   one; built into `static/editor.js`
   ([editor/README.md](editor/README.md)).
 - `external/` -- a script that stands in for the agent loop during
   development (below).
-- `static/` -- one HTML document laid out twice (a workstation's tiled
-  frame on a desk, an app on a phone), its stylesheets, the script,
-  the web app manifest and the service worker.  How the lab looks is
-  a **skin**, one CSS file of tokens dressing the page and the viewer
-  alike; the skins are the viewer's, Gendl's object browser (the
+- `static/` -- the editor, the icons and the stylesheets.  How the lab
+  looks is a **skin**, one CSS file of tokens dressing the page and the
+  viewer alike; the skins are the viewer's, Gendl's object browser (the
   sluice), and [SKIN-API.md](SKIN-API.md) says what the lab adds.
-- The viewer is a sluice opened on the session's model, dressed in
-  the page's skin.
+- The viewer, at `<prefix>/viewer`, is a sluice opened on a session's
+  model alone, dressed in the page's skin.
 
 The agent's calls to the language model go through a gate on the
 deploying stack's reverse proxy, which holds the API key: no key

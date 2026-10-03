@@ -13,12 +13,9 @@
 ;; with its default (the house look), and a SKIN is one stylesheet that
 ;; redefines tokens.  The tokens, the skins and their contract
 ;; (SKIN-API.md) are the SLUICE's, Gendl's object browser, which is the
-;; lab's viewer: the lab is two documents, the page and the viewer in
-;; its frame, and both wear the one skin.
-;;
-;;   the page     the sluice's tokens, prompt-lab-page.css (the page laid
-;;                out in them), the skin
-;;   the viewer   a sluice told which skin to wear (its skin input)
+;; lab's viewer: the lab is two documents, the page (prompt-lab-sheet: a
+;; sluice with the lab's tiles) and the viewer, and both wear the one
+;; skin, each a sluice told which skin to wear (its skin input).
 ;;
 ;; The lab finds the sluice's skins by asking it, and adds any of its own
 ;; (static/prompt-lab-<name>.css: a skin for the lab alone, which the
@@ -34,12 +31,13 @@
 ;;
 
 (defparameter *static-directory*
-  ;; from the SOURCE file's place, like *page-file* (page.lisp)
+  ;; the SOURCE file's place, read at compile time: at load time the
+  ;; truename is the fasl's, off in a cache directory
   (let ((here #.(or *compile-file-truename* *load-truename*)))
     (make-pathname :name nil :type nil :version nil
                    :directory (append (butlast (pathname-directory here)) (list "static"))
                    :defaults here))
-  "Pathname. The directory of the page, its stylesheets and its script.")
+  "Pathname. The directory of the lab's stylesheets, editor and icons.")
 
 (defparameter *house-skin* "workstation"
   "String. The name of the look the base stylesheet gives on its own.")
@@ -53,9 +51,9 @@ house look.")
 names, so that a saved choice or a bookmark never falls back unexplained.")
 
 (defparameter *reserved-skin-names* '("page" "viewer" "phone")
-  "List of strings. Names a skin may not take: prompt-lab-page.css,
-prompt-lab-viewer.css and prompt-lab-phone.css are the documents' own
-sheets.")
+  "List of strings. Names a skin may not take: prompt-lab-viewer.css and
+prompt-lab-phone.css are the viewer's own sheets, and prompt-lab-page.css
+was the retired classic page's.")
 
 (defun static-file (name)
   "Pathname or nil. The file NAME in the static directory, when it is there."
@@ -229,13 +227,6 @@ that lays them onto the sluice, the phone's, the skin."
               (and skin (list (getf skin :href))))))
 
 
-;;
-;; The page.  static/page.html is the document, with places in double
-;; braces for this side to fill in: the addresses of its two sheets, its
-;; script, its manifest and icons (app.lisp), and what the script needs
-;; to know before it asks any door.
-;;
-
 (defun ascii-json (json)
   "String. JSON, a string of JSON, fit to stand inside a script element
 and to be written in any encoding: nothing in it closes the element, and a
@@ -251,91 +242,3 @@ character beyond ASCII (a skin's label) goes as its escape."
                                 (+ #xD800 (ash rest -10))
                                 (+ #xDC00 (logand rest #x3FF)))))))))
 
-(defun page-boot ()
-  "String. JSON for the page's script: where the static files are, and the
-skins there are."
-  (ascii-json
-   (encode (h "prefix" *url-prefix*
-              ;; the viewer's phone sheet, for a frame that was opened
-              ;; on a desk and finds itself on a phone
-              "phone_css" (static-url "prompt-lab-phone.css")
-              ;; the service worker, when the lab keeps one (app.lisp)
-              "worker" (and (app?) (format nil "~a/worker" *url-prefix*))
-              "house" *house-skin*
-              "default_skin" (let ((skin (find-skin *default-skin*)))
-                               (if skin (getf skin :name) *house-skin*))
-              "aliases" (let ((table (make-hash-table :test #'equal)))
-                          (loop for (from . to) in *skin-aliases*
-                                do (setf (gethash from table) to))
-                          table)
-              "skins" (map 'vector #'(lambda (skin)
-                                       (h "name" (getf skin :name)
-                                          "label" (getf skin :label)
-                                          "href" (getf skin :href)))
-                           (skins))))))
-
-(defun ascii-only (text)
-  "String. TEXT with every character beyond ASCII as an HTML character
-reference, so that the page reads the same whatever encoding a server
-writes it in.  The page's script is a file of its own for that reason: a
-reference means nothing inside a script."
-  (if (every #'(lambda (char) (< (char-code char) 128)) text)
-      text
-      (with-output-to-string (out)
-        (loop for char across text
-              do (if (< (char-code char) 128)
-                     (write-char char out)
-                     (format out "&#~d;" (char-code char)))))))
-
-(defun static-signature ()
-  "List. The static files with their write dates: the page is filled in
-again when any of them changes, and the worker keeps a new cache."
-  (mapcar #'(lambda (file) (list (pathname-name file) (pathname-type file)
-                                 (ignore-errors (file-write-date file))))
-          (append (directory (merge-pathnames "*.css" *static-directory*))
-                  (directory (merge-pathnames "*.js" *static-directory*))
-                  (directory (merge-pathnames "*.html" *static-directory*))
-                  (directory (merge-pathnames "icons/*.png" *static-directory*)))))
-
-(defvar *page-cache* nil
-  "Cons of the static signature and the page filled in under it, or nil.")
-
-(defun fill-page (text)
-  (ascii-only
-   (reduce #'(lambda (text place)
-               (replace-substring text (car place) (cdr place)))
-           (list (cons "{{tokens-css}}" (tokens-url))
-                 ;; the dividers' script, where the sluice has one; the
-                 ;; panes keep their places without it
-                 (cons "{{split-script}}"
-                       (let ((url (split-url)))
-                         (if url (format nil "<script src=\"~a\" defer></script>" url) "")))
-                 ;; the model file's editor (built from ../editor); the
-                 ;; page's plain textarea serves without it
-                 (cons "{{editor-script}}"
-                       (if (static-file "editor.js")
-                           (format nil "<script src=\"~a\" defer></script>" (static-url "editor.js"))
-                           ""))
-                 (cons "{{page-css}}" (static-url "prompt-lab-page.css"))
-                 (cons "{{script}}" (static-url "prompt-lab.js"))
-                 (cons "{{manifest}}" (format nil "~a/manifest.webmanifest" *url-prefix*))
-                 (cons "{{icon}}" (static-url "icons/icon-192.png"))
-                 (cons "{{touch-icon}}" (static-url "icons/apple-touch-icon.png"))
-                 (cons "{{app-name}}" (app-short-name))
-                 ;; which lab: the free one or the solids one (parameters.lisp)
-                 (cons "{{title}}" (lab-title))
-                 (cons "{{boot}}" (page-boot)))
-           :initial-value text)))
-
-(defun page-text ()
-  "String. The page, filled in; read again when a static file has changed."
-  (let ((signature (list *url-prefix* *default-skin* (app?) (app-short-name) (lab-title) (static-signature)
-                         ;; the sluice's side: its tokens, its skins, its script
-                         (tokens-url) (split-url) (mapcar #'(lambda (skin) (getf skin :href)) (skins))))
-        (cache *page-cache*))
-    (if (and cache (equal (car cache) signature))
-        (cdr cache)
-        (let ((text (fill-page (uiop:read-file-string (merge-pathnames "page.html" *static-directory*)
-                                                      :external-format :utf-8))))
-          (setq *page-cache* (cons signature text))
-          text))))

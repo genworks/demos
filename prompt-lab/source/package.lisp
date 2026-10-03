@@ -37,5 +37,4 @@
              #:*turnstile-verify-url*
              #:*turnstile-secret-file*
              #:*browsing?*
-             #:*default-skin*
-             #:*app?*))
+             #:*default-skin*))

@@ -9,33 +9,14 @@
 (in-package :prompt-lab)
 
 ;;
-;; The page and its doors.  The page (static/page.html) is one
-;; document, the same for every visitor but for the addresses of its
-;; stylesheet and script and the list of skins (skins.lisp).  Its script
-;; (static/prompt-lab.js) opens or resumes a session, posts prompts,
-;; polls the session's state (the log, the token totals, the model
-;; file) and reloads the viewer beside it after every build.  The doors
-;; under <prefix>/api/ are plain aserve publishes with no gwl session
-;; behind them, cheap and nothing to reap.  The viewer is a gwl app: a
-;; sluice opened on the session's MODEL, dressed in the page's skin.
+;; The lab's doors.  Those under <prefix>/api/ open or resume a
+;; session, post prompts and answer the session's state (the log, the
+;; token totals, the model file); they are plain aserve publishes with no
+;; gwl session behind them, cheap and nothing to reap, and serve scripts
+;; and agents (README.md).  The page is the sheet (prompt-lab-sheet),
+;; published over the prefix by publish-lab-sheet!.  The viewer is a gwl
+;; app: a sluice opened on the session's MODEL, dressed in the lab's skin.
 ;;
-
-(defparameter *page-file*
-  ;; the SOURCE file's place, read at compile time: at load time the
-  ;; truename is the fasl's, off in a cache directory
-  (let ((here #.(or *compile-file-truename* *load-truename*)))
-    (make-pathname :name "page" :type "html"
-                   :directory (append (butlast (pathname-directory here)) (list "static"))
-                   :defaults here))
-  "Pathname. The page, beside the source in static/.")
-
-(defun page-door (req ent)
-  "GET <prefix>: the page, filled in (page-text, skins.lisp).  Never kept by
-a cache: it names its stylesheets by their dates."
-  (net.aserve:with-http-response (req ent :content-type "text/html; charset=utf-8")
-    (setf (net.aserve:reply-header-slot-value req :cache-control) "no-cache")
-    (net.aserve:with-http-body (req ent)
-      (write-string (page-text) net.html.generator:*html-stream*))))
 
 
 ;;
@@ -881,15 +862,17 @@ the model with one panel under it, the inputs or the tree."
   (format nil "~a/api/~a" *url-prefix* name))
 
 (defun publish-prompt-lab! (&key host)
-  "Publish the page at *url-prefix*, its stylesheets and script under
-<prefix>/static/, its manifest and service worker beside it, its doors
+  "Publish the lab's stylesheets, editor and icons under <prefix>/static/,
+its manifest and retiring service worker beside the prefix, its doors
 under <prefix>/api/ (config, session, state,
 prompt, model, reload, topup, confirm, privacy; sessions, archive,
 archived, replay; agent), the tools' door for an external agent at
-<prefix>/mcp, and the viewer at <prefix>/viewer, on every server."
+<prefix>/mcp, and the viewer at <prefix>/viewer, on every server.  The
+page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet)."
   (gwl:with-all-servers (server)
-    (net.aserve:publish :path *url-prefix* :server server :host host :function #'page-door
-                        :content-type "text/html; charset=utf-8")
+    ;; THE PAGE IS THE SHEET (prompt-lab-sheet, publish-lab-sheet!): it
+    ;; answers at the prefix.  The classic page was retired on 2026-10-02;
+    ;; its doors stay, the API scripts and agents speak.
     (net.aserve:publish-directory :prefix (format nil "~a/static/" *url-prefix*)
                                   :server server :host host
                                   :destination (namestring *static-directory*))
