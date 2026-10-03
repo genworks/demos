@@ -95,9 +95,11 @@ instance that serves visitors.")
 (defparameter *max-prompt-length* 2000
   "Integer. Characters a prompt may have.")
 
-(defparameter *max-sessions-per-address* 4
+(defparameter *max-sessions-per-address* 5
   "Integer or nil. Sessions one visitor address may open in a UTC day
-(an IPv6 address counts by its /64); nil for no limit.")
+(an IPv6 address counts by its /64); nil for no limit.  One more than
+four: a first prompt sent to the sibling lab (routing.lisp) has opened
+a session in each.")
 
 (defparameter *max-prompts-per-address* 12
   "Integer or nil. Prompts one visitor address may run in a UTC day, across
