@@ -426,6 +426,40 @@ loaded) its page too."
                                           '("dims.csv"))
                              (error "the file does not wait for the next prompt")))
                          t)))))
+          ;; which lab a first prompt belongs in (routing.lisp): with a
+          ;; sibling lab beside this one, a prompt that names the other
+          ;; engine in so many words is answered 409 with where to take
+          ;; it, and is built here all the same when it says to stay (the
+          ;; start is refused further on for want of an agent: any answer
+          ;; but the 409 will do).  The model's own verdict needs the
+          ;; network and is not asked here.
+          (smoke "prompt-lab sends a first prompt that names the other engine to the sibling lab"
+                 (lambda ()
+                   (let* ((sibling (lab '#:*sibling-lab*))
+                          (kept (symbol-value sibling))
+                          (other (if (eq (symbol-value (lab '#:*engine*))
+                                         (uiop:symbol-call :prompt-lab :prompt-engine "use solids"))
+                                     "no solids" "use solids"))
+                          ;; a session of its own, made here: the session
+                          ;; door's cap per address is for the other tests
+                          (fresh (uiop:symbol-call :prompt-lab :make-session :address "127.0.0.1"))
+                          (id (funcall (lab '#:session-id) fresh))
+                          (headers (list (cons "X-Prompt-Lab-Owner" (funcall (lab '#:session-owner) fresh)))))
+                     (setf (symbol-value sibling) (cons "/other-lab" "other lab"))
+                     (unwind-protect
+                          (flet ((prompt (&rest more)
+                                   (http :post (door "prompt") :headers headers
+                                         :json (apply #'table "session" id
+                                                      "prompt" (format nil "a shelf, ~a" other) more))))
+                            (multiple-value-bind (body status) (prompt)
+                              (unless (eql status 409) (error "the prompt door answered ~a" status))
+                              (unless (equal (gethash "url" (gethash "route" (uiop:symbol-call :yason :parse body)))
+                                             "/other-lab?routed=1")
+                                (error "the answer does not say where the prompt belongs: ~a" body)))
+                            (when (eql 409 (nth-value 1 (prompt "stay" t)))
+                              (error "a prompt that says to stay was sent away"))
+                            t)
+                       (setf (symbol-value sibling) kept)))))
           ;; the model as files (export.lisp): every format the config
           ;; door offers answers a file that starts as its kind does --
           ;; STEP, IGES and STL on the solids engine, where the box and

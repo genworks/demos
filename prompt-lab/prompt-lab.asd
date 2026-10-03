@@ -15,4 +15,5 @@
   (:file "source/guards") (:file "source/skins") (:file "source/app")
   (:file "source/page") (:file "source/browse")
   (:file "source/thumbs") (:file "source/export")
-  (:file "source/uploads") (:file "source/external")))
+  (:file "source/uploads") (:file "source/routing")
+  (:file "source/external")))

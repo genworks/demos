@@ -88,6 +88,26 @@ From a script: `POST <prefix>/api/upload` with `{"session": ...,
 owner's key; `GET <prefix>/api/file?session=...&name=...` fetches one.
 Where a human check stands, an upload needs its token (`"turnstile"`).
 
+## Two labs, and which one a request belongs in
+
+A lab on the open-source engine draws a hole but cannot cut one; a lab
+on a solids engine cuts it, and costs more to run.  Where an instance
+runs both side by side (`*sibling-lab*`), the first thing done with a
+session's first prompt is to decide which engine it wants
+(`source/routing.lisp`):
+
+- the prompt may say so itself -- "no solids", "use solids";
+- else one small call asks the model, of the prompt and of any drawing
+  uploaded with it.  A drawing uploaded to the open-source lab is asked
+  as it arrives, so the page can say so before any prompt.
+
+A request that wants the other engine is not built where it was typed:
+the page goes to the sibling lab with the prompt, and the sibling
+offers to bring the session's files over.  From a script the prompt
+door answers 409 with `{"route": {"engine": ..., "url": ...}}`;
+`"stay": true` with the prompt builds it where it is.
+`*route-prompts?*` and `*classify-uploads?*` nil ask nothing.
+
 ## Prompts from a script or an agent
 
 The page is one client of the lab's doors, and a script or an agent

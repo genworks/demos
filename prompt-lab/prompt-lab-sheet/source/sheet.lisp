@@ -413,6 +413,33 @@ window.plUpload=function(el,owner,wallet,token){var f=el.files&&el.files[0],n=do
    .then(function(x){say(x.ok?'':'The upload did not go through ('+x.status+').');el.value=''},function(e){say('The upload did not go through: '+e);el.value=''})};
  fr.onerror=function(){say('The file could not be read.');el.value=''};
  fr.readAsDataURL(f)};
+// a request that wants the other lab's engine: the browser goes there,
+// carrying the prompt and the reason, which the page there takes up
+window.plRoute=function(url,prompt,reason){try{sessionStorage.setItem('prompt-lab-carry',JSON.stringify({prompt:prompt,reason:reason}))}catch(e){}
+ if(window.plToast)plToast(reason,'note');setTimeout(function(){location.href=url},2500)};
+function carried(){var c=null;try{c=JSON.parse(sessionStorage.getItem('prompt-lab-carry')||'null');sessionStorage.removeItem('prompt-lab-carry')}catch(e){}
+ if(!c||!/[?&]routed=1/.test(location.search))return;var p=document.getElementById('pl-prompt');
+ if(p&&c.prompt){p.value=c.prompt;p.dispatchEvent(new Event('input',{bubbles:true}))}
+ if(c.reason)setTimeout(function(){if(window.plToast)plToast(c.reason+'  Your prompt came along: press Build.','note')},1500)}
+// (after Datastar has bound the prompt box, which sets it from its signal)
+window.addEventListener('load',function(){setTimeout(carried,1200)});
+// the files of a session in the sibling lab, brought here: fetched from
+// that lab's doors with this browser's key for the session, and sent,
+// all in one, through the sheet's adopt action
+window.plAdopt=function(from,id,wallet,token){var n=document.getElementById('pl-upload-note'),r=document.getElementById('pl-rights');
+ if(n&&!n.hint)n.hint=n.textContent;
+ function say(t){if(n)n.textContent=t||n.hint||''}
+ if(!r||!r.checked){say('Tick the box first: you declare the right to use and share the files.');return}
+ var key='';try{key=(JSON.parse(localStorage.getItem('prompt-lab-owners')||'{}')||{})[id]||''}catch(e){}
+ var hs=key?{'X-Prompt-Lab-Owner':key}:{};
+ function b64(blob){return new Promise(function(ok,no){var fr=new FileReader();fr.onload=function(){var s=String(fr.result);ok(s.slice(s.indexOf(',')+1))};fr.onerror=no;fr.readAsDataURL(blob)})}
+ say('Fetching the files...');
+ fetch(from+'/api/state?session='+encodeURIComponent(id),{headers:hs}).then(function(x){if(!x.ok)throw new Error('that session is not to be had ('+x.status+')');return x.json()})
+  .then(function(st){var fs=st.files||[];if(!fs.length)throw new Error('that session has no files');
+   return Promise.all(fs.map(function(f){return fetch(f.url,{headers:hs}).then(function(x){if(!x.ok)throw new Error(f.name+' is not to be had');return x.blob()}).then(b64).then(function(d){return {name:f.name,data:d}})}))})
+  .then(function(files){say('Bringing '+files.length+' over...');return plAction('adopt',{files:files,rights:true,wallet:wallet||'',turnstile:token||''})})
+  .then(function(x){say(x.ok?'':'The files did not come over ('+x.status+').')})
+  .catch(function(e){say('The files did not come over: '+(e.message||e))})};
 })();"
   "String. The sheet's toast (plToast), its documentation line and the
 upload control's reader (plUpload).")
@@ -509,7 +536,17 @@ not hold."
    (user-mode?-default nil)
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
-   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :wear-skin :upload))
+   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :wear-skin :upload :adopt))
+
+   ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
+   ;; sibling, on this site) whose files this lab is offered (routing.lisp)
+   (adopt-id (let ((id (cdr (assoc "adopt" (the query-toplevel) :test #'string-equal))))
+               (and (session-id? id) id)))
+   ;; ?routed=1: the sibling lab sent this visitor here, having decided
+   ;; the request wants this engine; it is not asked again
+   (arrived? (equal (cdr (assoc "routed" (the query-toplevel) :test #'string-equal)) "1"))
+   (adopt-from (let ((from (cdr (assoc "from" (the query-toplevel) :test #'string-equal))))
+                 (and (stringp from) (equal from (car *sibling-lab*)) from)))
 
    ;; the files the visitor uploaded (uploads.lisp): the archived session's
    ;; from its archive directory, a live one's from its own
@@ -669,6 +706,19 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              (:label :class "pl-rights"
                                                      (:input :type "checkbox" :id "pl-rights")
                                                      " I have the right to use and share the files I upload.  They are public with this session, here and in the archive, unless it is private (after a top-up).")
+                                             ;; the files of a session in the sibling lab,
+                                             ;; offered here (routing.lisp)
+                                             (when (and (the adopt-id) (the adopt-from))
+                                               (htm (:div :class "pl-row pl-adopt"
+                                                          (:button :type "button" :class "pl-download"
+                                                                   :data-doc "Bring the files you uploaded in the other lab into a session here"
+                                                                   :|data-on:click|
+                                                                   (escape-string-minimal-plus-quotes
+                                                                    (format nil "plAdopt(~a, ~a, $wallet, $turnstile)"
+                                                                            (js-string-literal (the adopt-from))
+                                                                            (js-string-literal (the adopt-id))))
+                                                                   "Bring the files over")
+                                                          (:span :class "pl-line" "from your session in the other lab: tick the box, then press."))))
                                              (:div :class "pl-row"
                                                    (:input :type "file" :id "pl-file"
                                                            :accept (format nil ".pdf,.png,.jpg,.jpeg,.gif,.webp~{,.~a~}" *upload-text-types*)
@@ -805,7 +855,19 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                  (:p :class "pl-line"
                                      (str (if (and session (session-private? session))
                                               "Private, with the session."
-                                              "Public, with the session.")))))))))
+                                              "Public, with the session.")))
+                                 ;; a drawing that wants solids is offered the
+                                 ;; sibling lab, which takes the files over
+                                 ;; (routing.lisp)
+                                 (let ((routing (and session (null (the archive-id)) (routing-state session))))
+                                   (when (and routing (gethash "sibling_url" routing))
+                                     (htm (:p :class "pl-line pl-route"
+                                              (esc (gethash "reason" routing))
+                                              "  This lab draws holes without cutting them. "
+                                              (when (the owner?)
+                                                (htm (:a :href (escape-string-minimal-plus-quotes (gethash "sibling_url" routing))
+                                                         (fmt "Build it in the ~a" (cdr *sibling-lab*)))
+                                                     "."))))))))))))
 
    (log-section
     :type 'base-html-div
@@ -1102,10 +1164,23 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
       (cond ((and (the session) (not (the owner?)))
              (the (tell-error! "This session is someone else's; start your own to build.")))
             ((the (own-session! address (gethash "wallet" signals)))
-             (multiple-value-bind (started reason) (begin-prompt! (the session) prompt address token)
-               (if started
-                   (sheet-send! self (datastar-signals-event "{\"error\": \"\", \"prompt\": \"\"}"))
-                   (the (tell-error! reason)))
+             (multiple-value-bind (started reason response route)
+                 (begin-prompt! (the session) prompt address token
+                                ;; a visitor the sibling lab sent here stays here
+                                :route? (not (the arrived?)))
+               (declare (ignore response))
+               (cond (started
+                      (sheet-send! self (datastar-signals-event "{\"error\": \"\", \"prompt\": \"\"}")))
+                     ;; the request wants the sibling lab's engine
+                     ;; (routing.lisp): the browser goes there, the prompt
+                     ;; and the reason with it
+                     (route
+                      (sheet-send! self (datastar-script-event
+                                         (format nil "plRoute(~a,~a,~a)"
+                                                 (js-string-literal (getf route :url))
+                                                 (js-string-literal (string-trim '(#\space #\tab #\newline #\return) prompt))
+                                                 (js-string-literal reason)))))
+                     (t (the (tell-error! reason))))
                (the spent-token!))))))
 
    (upload
@@ -1133,6 +1208,39 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                                           (the-object file file-name)))
                                                       s))))
                    (the (tell-error! reason)))
+               (the spent-token!))))))
+
+   (adopt
+    (signals)
+    ;; the files of a session in the sibling lab, fetched by the browser
+    ;; and handed over in one (routing.lisp): one human check for all
+    (let ((address (client-address *datastar-request*))
+          (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token)))
+          (files (gethash "files" signals)))
+      (cond ((the archive-id) (the (tell-error! "An archived session takes no uploads.")))
+            ((and (the session) (not (the owner?)))
+             (the (tell-error! "This session is someone else's; start your own to upload.")))
+            ((not (eq (gethash "rights" signals) t))
+             (the (tell-error! "Tick the box first: you declare the right to use and share the files.")))
+            ((not (and (listp files) files (every #'hash-table-p files)))
+             (the (tell-error! "No files were sent.")))
+            ((not (verify-turnstile token address))
+             (the (tell-error! "Complete the human check first.")))
+            ((the (own-session! address (gethash "wallet" signals)))
+             (let ((kept nil) (refused nil))
+               (dolist (entry files)
+                 (multiple-value-bind (file reason)
+                     (accept-upload! (the session) (gethash "name" entry) (gethash "data" entry)
+                                     :rights? t :checked? t)
+                   (if file (push (the-object file file-name) kept) (push reason refused))))
+               (sheet-send! self (datastar-signals-event
+                                  (with-output-to-string (s)
+                                    (yason:encode (h "error" (format nil "~{~a~^  ~}" (reverse refused))
+                                                     "notice" (if kept
+                                                                  (format nil "~{~a~^, ~} came over; ~:[it goes~;they go~] to the agent with your next prompt."
+                                                                          (reverse kept) (rest kept))
+                                                                  ""))
+                                                  s))))
                (the spent-token!))))))
 
    (start-payment!

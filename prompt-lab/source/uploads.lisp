@@ -380,11 +380,13 @@ Values: the file (an uploaded-file), or nil and the reason."
           (values nil refusal)
           (the-object candidate keep!)))))
 
-(defun accept-upload! (session name data &key rights? token address)
+(defun accept-upload! (session name data &key rights? token address checked?)
   "A visitor's upload to SESSION: NAME and DATA, the file in base64.
 RIGHTS? is the visitor's declaration that they may use and share the
-file; TOKEN the human check's, where one stands.  Values: the file (an
-uploaded-file), or nil and the reason.  The owner's check is the caller's."
+file; TOKEN the human check's, where one stands (CHECKED? true when the
+caller has had it verified already: several files, one check).  Values:
+the file (an uploaded-file), or nil and the reason.  The owner's check
+is the caller's."
   (cond ((not (uploads-offered?)) (values nil "This lab takes no uploads."))
         ((not rights?)
          (values nil "Declare first that you have the right to use and share this file: it is public with the session."))
@@ -395,7 +397,7 @@ uploaded-file), or nil and the reason.  The owner's check is the caller's."
          (values nil (format nil "That file is too large; a file may have ~a here."
                              (size-label (getf (upload-caps session) :bytes)))))
         (t
-         (multiple-value-bind (ok? reason) (verify-turnstile token address)
+         (multiple-value-bind (ok? reason) (if checked? t (verify-turnstile token address))
            (if (not ok?)
                (values nil reason)
                (let ((octets (ignore-errors
@@ -408,7 +410,9 @@ uploaded-file), or nil and the reason.  The owner's check is the caller's."
                          (log-event session :note "Uploaded ~a (~a, ~a).  The visitor declared the right to use and share it; it is ~:[public with the session~;private with the session~].  It goes to the agent with the next prompt."
                                     (the-object file file-name) (the-object file kind-label)
                                     (the-object file size-label) (session-private? session))
-                         (save-session! session))
+                         (save-session! session)
+                         ;; a drawing is asked which lab it belongs in (routing.lisp)
+                         (maybe-classify! session file))
                        (values file reason)))))))))
 
 

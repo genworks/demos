@@ -394,6 +394,8 @@ file's place and the terminal opened on it."
        ;; the visitor's uploaded files, as public as the session (uploads.lisp)
        "files" (files-state (session-files session) (session-id session))
        "uploads" (and owner? (uploads-state session))
+       ;; whether the uploaded drawing wants the solids lab (routing.lisp)
+       "routing" (routing-state session)
        "viewer_url" (viewer-url session)
        ;; nil encodes as null; an empty vector would be the empty array
        "console_url" (and owner? (console-url session)))))
@@ -446,11 +448,14 @@ has credit or has put more into the pot than it has drawn."
         (save-session! session)
         session)))
 
-(defun begin-prompt! (session prompt address token)
+(defun begin-prompt! (session prompt address token &key (route? t))
   "Start the agent on PROMPT in SESSION for a visitor at ADDRESS, after
 every check the prompt door makes (the owner's excepted: the caller's).
 TOKEN is the human check's, nil for a script's prompt.  Values: :started
-and the lane, or nil, the reason and the response to refuse with."
+and the lane, or nil, the reason and the response to refuse with.  With
+ROUTE?, a session's first prompt that wants the sibling lab's engine is
+not started here (routing.lisp): nil, the reason, a 409 and, a fourth
+value, where it belongs -- a plist of :engine, :reason and :url."
   (cond ((not (and (stringp prompt)
                    (plusp (length (string-trim '(#\space #\tab #\newline #\return) prompt)))))
          (values nil "Say what to build." net.aserve:*response-bad-request*))
@@ -483,6 +488,12 @@ and the lane, or nil, the reason and the response to refuse with."
                   (values nil reason (if (and (automated-lane?) (null token))
                                          *response-too-many-requests*
                                          net.aserve:*response-forbidden*)))
+                 ;; first of all, which engine the request wants: one that
+                 ;; wants the sibling lab's is sent there (routing.lisp)
+                 ((let ((route (and route? (route-prompt session prompt))))
+                    (when route
+                      (return-from begin-prompt!
+                        (values nil (getf route :reason) *response-conflict* route)))))
                  ((not (start-prompt! session (string-trim '(#\space #\tab #\newline #\return) prompt)))
                   (values nil "Still working on the previous request." net.aserve:*response-bad-request*))
                  (t (count-address! address :prompts)
@@ -697,12 +708,20 @@ prompt in a thread of its own; the page follows along through the state door."
          (address (client-address req)))
     (cond ((null session) (no-such-session req ent))
           ((not (owner? session (request-owner-key req json) address)) (not-yours req ent))
-          (t (multiple-value-bind (started reason response)
-                 (begin-prompt! session (gethash "prompt" json) address (gethash "turnstile" json))
-               (if started
-                   (respond-json req ent (h "started" t "automated" (if (eq reason :automated) t 'yason:false))
-                                 net.aserve:*response-accepted*)
-                   (refuse req ent response "~a" reason)))))))
+          (t (multiple-value-bind (started reason response route)
+                 (begin-prompt! session (gethash "prompt" json) address (gethash "turnstile" json)
+                                ;; "stay": true builds here whatever engine the prompt wants
+                                :route? (not (eq (gethash "stay" json) t)))
+               (cond (started
+                      (respond-json req ent (h "started" t "automated" (if (eq reason :automated) t 'yason:false))
+                                    net.aserve:*response-accepted*))
+                     ;; the prompt belongs in the sibling lab (routing.lisp)
+                     (route
+                      (respond-json req ent (h "error" reason
+                                               "route" (h "engine" (string-downcase (getf route :engine))
+                                                          "url" (getf route :url)))
+                                    response))
+                     (t (refuse req ent response "~a" reason))))))))
 
 (defun model-door (req ent)
   "POST <prefix>/api/model {session, source}: the visitor's own edit of the
