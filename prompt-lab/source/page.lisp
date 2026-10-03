@@ -484,17 +484,17 @@ value, where it belongs -- a plist of :engine, :reason and :url."
                  net.aserve:*response-bad-request*))
         ;; a community pot with nothing in it builds for nobody
         ((pot-empty?)
-         (values nil "The community pot of modeling credits is empty.  Top it up and the lab builds again, for everyone."
+         (values nil (unit-text "The community pot of {units} is empty.  Top it up and the lab builds again, for everyone.")
                  *response-too-many-requests*))
         ((and (free-caps? session) (>= (prompts-used session) *max-prompts-per-session*))
          (values nil (format nil "This session has used its ~a ~:[free ~;~]prompts.  ~a to keep going here, take a copy of the model file, or start a new session."
                              *max-prompts-per-session* (pot)
-                             (if (pot) "Add modeling credits to the pot" "Buy modeling credits"))
+                             (unit-text (if (pot) "Add {units} to the pot" "Buy {units}")))
                  net.aserve:*response-bad-request*))
         ((and (free-caps? session) (address-over-limit? address :prompts))
          (values nil (format nil "This address has run its ~a ~:[free ~;~]prompts for today.  ~a to keep going, come back tomorrow, or bring your own agent."
                              *max-prompts-per-address* (pot)
-                             (if (pot) "Add modeling credits to the pot" "Buy modeling credits"))
+                             (unit-text (if (pot) "Add {units} to the pot" "Buy {units}")))
                  *response-too-many-requests*))
         ((session-busy? session)
          (values nil "Still working on the previous request." net.aserve:*response-bad-request*))
@@ -584,8 +584,8 @@ nil and the reason."
       (cond ((and (eql status 200) (or (stringp checkout-url) (stringp client-secret)))
              (when (wallet-id? wallet) (setf (session-wallet session) wallet))
              (log-event session :note (if (pot)
-                                          "Adding ~:d modeling credits to the community pot.  They arrive when the payment completes."
-                                          "Buying ~:d modeling credits.  They arrive when the payment completes.")
+                                          (unit-text "Adding ~:d {units} to the community pot.  They arrive when the payment completes.")
+                                          (unit-text "Buying ~:d {units}.  They arrive when the payment completes."))
                         (credits-for-amount amount))
              answer)
             (t (values nil (or (ignore-errors (gethash "message" (gethash "error" answer)))
@@ -650,9 +650,9 @@ once.  Values: the outcome (\"credited\", \"already\", ...) and the gate's text.
     (let ((outcome (and answer (gethash "outcome" answer))))
       (when (equal outcome "credited")
         (if *pot*
-            (log-event session :note "Thank you: the community pot holds ~:d modeling credits now, for everyone's builds."
+            (log-event session :note (unit-text "Thank you: the community pot holds ~:d {units} now, for everyone's builds.")
                        (max 0 (floor (or (getf *pot* :credits) 0))))
-            (log-event session :note "Credits added: ~:d on your balance.  Builds beyond the free credits draw on it."
+            (log-event session :note (unit-text "{Units} added: ~:d on your balance.  Builds beyond the free {units} draw on it.")
                        (round (or (session-credits session) 0)))))
       (save-session! session)
       (values (or outcome "failed")
@@ -693,7 +693,7 @@ again.  Closing takes a session that has bought credits.  A session opened
 before owner keys gets one, since the address no longer suffices once
 nobody else may look.  Values: true, or nil and the reason."
   (cond ((and private? (not (paid? session)))
-         (values nil "A session becomes private once it has bought modeling credits."))
+         (values nil (unit-text "A session becomes private once it has bought {units}.")))
         (t (unless (session-owner session) (setf (session-owner session) (new-owner-key)))
            (unless (eq private? (session-private? session))
              (setf (session-private? session) private?)

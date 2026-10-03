@@ -102,7 +102,7 @@ refused -- the credits are spent -- so the caller can refuse the act."
                            (or (and (hash-table-p json)
                                     (let ((e (gethash "error" json)))
                                       (and (hash-table-p e) (gethash "message" e))))
-                               "Modeling credits are spent -- top up to continue.")))
+                               (unit-text "The {units} are spent -- top up to continue."))))
                   ;; no such door (an older gate), a gate that is down:
                   ;; unmetered, not refused
                   (t t)))

@@ -336,12 +336,12 @@ it, if any."
             ((null name) "That file has no usable name.")
             ((zerop (the bytes)) "That file is empty.")
             ((> (the bytes) (getf caps :bytes))
-             (format nil "~a has ~a; a file may have ~a here~:[~;, more for a session that has added modeling credits~]."
+             (format nil (unit-text "~a has ~a; a file may have ~a here~:[~;, more for a session that has added {units}~].")
                      name (size-label (the bytes)) (size-label (getf caps :bytes)) (not (the paid?))))
             ((the shelf (file-named name))
              (format nil "This session already has a file named ~a." name))
             ((>= (length (the shelf files)) (getf caps :files))
-             (format nil "This session has its ~a files~:[~;; a session that has added modeling credits may have more~]."
+             (format nil (unit-text "This session has its ~a files~:[~;; a session that has added {units} may have more~].")
                      (getf caps :files) (not (the paid?))))
             ((> (+ (the bytes) (the shelf total-bytes)) (getf caps :total))
              (format nil "With ~a this session's files would pass ~a in all." name (size-label (getf caps :total))))
@@ -389,7 +389,7 @@ the file (an uploaded-file), or nil and the reason.  The owner's check
 is the caller's."
   (cond ((not (uploads-offered?)) (values nil "This lab takes no uploads."))
         ((not rights?)
-         (values nil "Declare first that you have the right to use and share this file: it is public with the session."))
+         (values nil "Acknowledge first that this file will be shared: it is public with the session."))
         ((not (and (stringp data) (plusp (length data))))
          (values nil "No file was sent."))
         ;; before the bytes are decoded: four characters carry three bytes
@@ -541,7 +541,11 @@ files."
           ((not (owner? session (request-owner-key req json) address)) (not-yours req ent))
           (t (multiple-value-bind (file reason)
                  (accept-upload! session (gethash "name" json) (gethash "data" json)
-                                 :rights? (eq (gethash "rights" json) t)
+                                 ;; the acknowledgement that the file is shared is
+                                 ;; not asked of a session that is not public:
+                                 ;; closed-source, or one that has topped up
+                                 :rights? (or (eq (gethash "rights" json) t)
+                                              (session-closed? session) (paid? session))
                                  :token (gethash "turnstile" json) :address address)
                (if file
                    (respond-json req ent (h "name" (the-object file file-name)

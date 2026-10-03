@@ -146,6 +146,32 @@ every answer, and that value replaces this one).  77 c reads as a round
 :session-budget-credits and derives the cents from whatever the markup
 is, and the balance door reports both before the first build.")
 
+(defparameter *unit* '("rivet" . "rivets")
+  "Cons of strings, singular and plural. What the page calls the unit
+builds are paid in -- bought, given free, or drawn from a community pot;
+a hundredth of a dollar when bought plain.  One name, said in one place:
+the doors' field names (credits, credits_used ...) and the gate's are
+program names and stay as they are.")
+
+(defun units (&optional (count 2))
+  "The unit's name for COUNT of them: rivets, or one rivet."
+  (if (eql count 1) (car *unit*) (cdr *unit*)))
+
+(defun units-title ()
+  "The unit's name as a heading: Rivets."
+  (string-capitalize (units)))
+
+(defun unit-text (text)
+  "TEXT with {units} read as the unit's name and {Units} as the same,
+capitalised: how a message or a format control names the unit."
+  (flet ((swap (text mark word)
+           (loop for at = (search mark text)
+                 while at
+                 do (setq text (concatenate 'string (subseq text 0 at) word
+                                            (subseq text (+ at (length mark)))))
+                 finally (return text))))
+    (swap (swap text "{units}" (units)) "{Units}" (units-title))))
+
 (defparameter *pot-refresh-seconds* 10
   "Integer. How old what the lab knows of the gate's community pot may get
 before the gate is asked again.  Other labs behind the same gate draw on

@@ -191,47 +191,42 @@ from a gate that names no credits."
 (defun credits-html (sheet pot spend)
   "String of HTML: the credits pane's body for SHEET, from the gate's POT
 (a plist, or nil) and the owner's SPEND (spend-state, or nil)."
-  (flet ((buttons (offers room label)
+  (flet ((buttons (offers label)
            (with-output-to-string (out)
              (when (and offers (the-object sheet editable?))
                (format out "<div class=\"pl-topup\"><span>~a</span>" label)
                (dolist (offer offers)
                  (destructuring-bind (cents credits) offer
-                   (let ((fits? (or (null room) (<= credits room))))
-                     (format out "<button type=\"button\" class=\"pl-buy\"~:[ disabled~;~] data-indicator:paying=\"\" data-attr:disabled=\"~a\" data-on:click=\"~a\" title=\"~a\">~:d credits for ~a</button>"
-                             fits?
-                             (if fits?
-                                 (format nil "$paying~@[ || !$turnstile~]" *turnstile-site-key*)
-                                 "true")
-                             (escape-string-minimal-plus-quotes
-                              (format nil "$amount = ~d; ~a" cents
-                                      (the-object sheet (datastar-action :topup :options "{filterSignals: {include: /^(amount|turnstile|owner|wallet)$/}}"))))
-                             (if fits? "Pay by card on Stripe's page" "The pot has no room for that many")
-                             credits (dollars cents)))))
+                   ;; every offer is always on offer: a pot too full for
+                   ;; one says so when it is asked for (the topup action)
+                   (format out "<button type=\"button\" class=\"pl-buy\" data-indicator:paying=\"\" data-attr:disabled=\"~a\" data-on:click=\"~a\" title=\"Pay by card\">~:d ~a for ~a</button>"
+                           (format nil "$paying~@[ || !$turnstile~]" *turnstile-site-key*)
+                           (escape-string-minimal-plus-quotes
+                            (format nil "$amount = ~d; ~a" cents
+                                    (the-object sheet (datastar-action :topup :options "{filterSignals: {include: /^(amount|turnstile|owner|wallet)$/}}"))))
+                           credits (units credits) (dollars cents))))
                (format out "</div>")))))
     (cond
       (pot
        (let* ((held (max 0 (floor (or (getf pot :credits) 0))))
               (most (or (getf pot :max) 0))
-              (room (max 0 (floor (or (getf pot :room) 0))))
-              (offers (and (getf pot :topup?) (offers (getf pot :amounts) (getf pot :credits-sold))))
-              (fit (remove-if-not #'(lambda (o) (<= (second o) room)) offers)))
+              (offers (and (getf pot :topup?) (offers (getf pot :amounts) (getf pot :credits-sold)))))
          (with-output-to-string (out)
-           (format out "<div class=\"pl-figure~:[~; pl-out~]\"><b>~:d</b> modeling credits left in the community pot</div>"
-                   (zerop held) held)
+           (format out "<div class=\"pl-figure~:[~; pl-out~]\"><b>~:d</b> ~a left in the community pot</div>"
+                   (zerop held) held (units held))
            (when (plusp most)
              (format out "<div class=\"pl-meter\"><span style=\"width:~,1f%\"></span></div>"
                      (* 100 (/ (min held most) most))))
-           (format out "<p class=\"pl-line\">it holds at most ~:d~@[ &middot; this session has drawn ~:d~]~@[ &middot; you have added ~:d~]</p>"
-                   most
-                   (let ((n (and spend (gethash "credits_used" spend)))) (and n (plusp n) n))
-                   (let ((n (and spend (gethash "contributed" spend)))) (and n (plusp n) n)))
+           ;; what the pot can hold is not said here: a top-up that
+           ;; would overfill it is told so when it is tried
+           (let ((drawn (let ((n (and spend (gethash "credits_used" spend)))) (and n (plusp n) n)))
+                 (added (let ((n (and spend (gethash "contributed" spend)))) (and n (plusp n) n))))
+             (when (or drawn added)
+               (format out "<p class=\"pl-line\">~@[this session has drawn ~:d~]~:[~; &middot; ~]~@[you have added ~:d~]</p>"
+                       drawn (and drawn added) added)))
            (when (zerop held)
              (format out "<p class=\"pl-begging\">The pot is empty: nothing builds until someone tops it up.</p>"))
-           (write-string (buttons offers room "Add to the pot:") out)
-           (when (and offers (null fit))
-             (format out "<p class=\"pl-line\">The pot is as full as it gets.~@[ To build without sharing one, <a href=\"~a\">~a</a>.~]</p>"
-                     (car *own-lab*) (or (cdr *own-lab*) "run a lab of your own"))))))
+           (write-string (buttons offers "Add to the pot:") out))))
       (spend
        (let* ((used (or (gethash "credits_used" spend) 0))
               (free (or (gethash "credits_free" spend) 0))
@@ -239,12 +234,12 @@ from a gate that names no credits."
               (offers (and (eq (gethash "topup" spend) t)
                            (offers (gethash "topup_amounts" spend) (gethash "topup_credits" spend)))))
          (with-output-to-string (out)
-           (format out "<div class=\"pl-figure\"><b>~:d</b> modeling credits left</div>"
-                   (+ (max 0 (- free used)) (or balance 0)))
-           (format out "<p class=\"pl-line\">this session: ~:d of ~:d free credits~@[ &middot; balance ~:d~]</p>"
-                   used free balance)
-           (write-string (buttons offers nil "Buy:") out))))
-      (t "<p class=\"pl-line\">Credits show here once you build.</p>"))))
+           (format out "<div class=\"pl-figure\"><b>~:d</b> ~a left</div>"
+                   (+ (max 0 (- free used)) (or balance 0)) (units))
+           (format out "<p class=\"pl-line\">this session: ~:d of ~:d free ~a~@[ &middot; balance ~:d~]</p>"
+                   used free (units) balance)
+           (write-string (buttons offers "Buy:") out))))
+      (t (format nil "<p class=\"pl-line\">~a show here once you build.</p>" (units-title))))))
 
 (defun publishable-key (session)
   "The Stripe publishable key the gate reports -- with the pot, else with
@@ -343,7 +338,10 @@ SESSION's balance -- or nil."
 .pl-private input{accent-color:var(--pl-accent,#366fc5)}
 .pl-upload{margin-top:.6rem;padding-top:.5rem;border-top:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd);font-size:.9em}
 .pl-rights{display:block;color:var(--pl-ink-dim,#555)}.pl-rights input{accent-color:var(--pl-accent,#366fc5)}
-#pl-file{font:inherit;max-width:100%}
+#pl-file{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+.pl-file-link{display:inline-flex;gap:.4rem;align-items:center;cursor:pointer;color:var(--pl-link,#1550a8);text-decoration:underline;text-underline-offset:2px}
+.pl-file-link:hover{text-decoration-thickness:2px}#pl-file:focus-visible+.pl-file-link,.pl-file-link:focus-within{outline:2px solid var(--pl-focus,#36c);outline-offset:2px}
+.pl-fee b{color:var(--pl-ink,#111)}
 .pl-kinds{margin:0 0 .45rem;gap:.7rem;flex-wrap:wrap;font-size:.9em}.pl-kinds .pl-line{margin:0}
 .pl-pick{display:inline-flex;gap:.3rem;align-items:center;cursor:pointer}.pl-pick input{accent-color:var(--pl-accent,#366fc5);margin:0}
 .pl-open-app{font-weight:600;color:var(--pl-link,#1550a8)}
@@ -417,10 +415,10 @@ window.plUpload=function(el,owner,wallet,token){var f=el.files&&el.files[0],n=do
  if(n&&!n.hint)n.hint=n.textContent;
  function say(t){if(n)n.textContent=t||n.hint||''}
  if(!f)return;
- if(!r||!r.checked){say('Tick the box first: you declare the right to use and share the file.');el.value='';return}
+ if(r&&r.offsetParent!==null&&!r.checked){say('Tick the box first: the file will be shared with this session.');el.value='';return}
  say('Uploading '+f.name+'...');var fr=new FileReader();
  fr.onload=function(){var s=String(fr.result),d=s.slice(s.indexOf(',')+1);
-  plAction('upload',{name:f.name,data:d,rights:true,owner:owner||'',wallet:wallet||'',turnstile:token||'',closedPick:!!(document.getElementById('pl-closed')||{}).checked})
+  plAction('upload',{name:f.name,data:d,rights:!!(r&&r.checked),owner:owner||'',wallet:wallet||'',turnstile:token||'',closedPick:!!(document.getElementById('pl-closed')||{}).checked})
    .then(function(x){say(x.ok?'':'The upload did not go through ('+x.status+').');el.value=''},function(e){say('The upload did not go through: '+e);el.value=''})};
  fr.onerror=function(){say('The file could not be read.');el.value=''};
  fr.readAsDataURL(f)};
@@ -674,7 +672,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpriced: false, dprice: 5, dpayee: '', kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpriced: false, dprice: 5, dpayee: '', kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+            ;; a session that has topped up is not public unless it says
+            ;; so: its uploads want no acknowledgement
+            (json-boolean (and (the session) (ignore-errors (paid? (the session)))))
             ;; Monetize (deploy.lisp): whether there is something to deploy,
             ;; and where this session is deployed already
             (json-boolean (let ((session (the session)))
@@ -732,11 +733,21 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               (when (and *closed-source?* *deployments?*)
                                 (htm (:label :class "pl-pick pl-closed" :style "display:none" :|data-show| "!$opened"
                                              :data-doc "Closed source: nobody else sees the session, and what you deploy from it does not serve its source.  If you do not deploy it, its source becomes public when the session ends."
-                                             (:input :type "checkbox" :id "pl-closed" :|data-bind:closedPick| "")
-                                             (fmt " Closed source (~d% fee when deployed, instead of ~d%; public if never deployed)"
-                                                  (house-fee-percent t) (house-fee-percent nil)))
+                                             ;; closed-pick: an attribute's name reaches Datastar
+                                             ;; in lower case, and it reads the hyphen as closedPick
+                                             (:input :type "checkbox" :id "pl-closed" :|data-bind:closed-pick| "")
+                                             " Closed source")
+                                     ;; the hosting fee follows the box as it is ticked
+                                     (:p :class "pl-line pl-fee" :style "display:none" :|data-show| "!$opened"
+                                         "Hosting fee if you deploy it: "
+                                         (:b :|data-text| (format nil "$closedPick ? '~d%' : '~d%'"
+                                                                  (house-fee-percent t) (house-fee-percent nil)))
+                                         (:span :|data-show| "$closedPick"
+                                                " -- nobody else sees the session; its source becomes public if you never deploy it.")
+                                         (:span :|data-show| "!$closedPick" " -- open source, public as you build."))
                                      (:p :class "pl-line" :style "display:none" :|data-show| "$opened && $closed"
-                                         "Closed source: deploy it with Monetize, or its source becomes public when the session ends.")))
+                                         (fmt "Closed source, ~d% hosting fee: deploy it with Monetize, or its source becomes public when the session ends."
+                                              (house-fee-percent t)))))
                               (:textarea :id "pl-prompt" :rows "4" :|data-bind:prompt| ""
                                          :|data-attr:placeholder| "$kind == 'app' ? 'Describe the web app, e.g. a page that sizes a shelf bracket from its load and shows it' : 'Describe what to build, e.g. a picnic table with two benches'"
                                          :placeholder "Describe what to build, e.g. a picnic table with two benches")
@@ -757,9 +768,13 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               (when (uploads-offered?)
                                 (let ((caps (getf *upload-caps* :free)))
                                   (htm (:div :class "pl-upload"
-                                             (:label :class "pl-rights"
+                                             ;; a file is public with its session: said and
+                                             ;; acknowledged, except where the session is not
+                                             ;; public -- closed source, or one that has topped up
+                                             (:label :class "pl-rights" :|data-show| "!($closed || $closedPick || $paidUp)"
+                                                     :title "A file you upload is public with this session, here and in the archive, and you have the right to share it"
                                                      (:input :type "checkbox" :id "pl-rights")
-                                                     " I have the right to use and share the files I upload.  They are public with this session, here and in the archive, unless it is private (after a top-up).")
+                                                     " I acknowledge this file will be shared")
                                              ;; the files of a session in the sibling lab,
                                              ;; offered here (routing.lisp)
                                              (when (and (the adopt-id) (the adopt-from))
@@ -773,10 +788,18 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                                             (js-string-literal (the adopt-id))))
                                                                    "Bring the files over")
                                                           (:span :class "pl-line" "from your session in the other lab: tick the box, then press."))))
+                                             ;; the browser's own file button is hidden: its
+                                             ;; label is the control, a link with an upload mark
                                              (:div :class "pl-row"
+                                                   (:label :class "pl-file-link" :for "pl-file"
+                                                           :data-doc "A drawing or other file for the agent to build from: a PDF, an image, or a text file such as DXF"
+                                                           (:svg :viewBox "0 0 16 16" :width "16" :height "16" :aria-hidden "true"
+                                                                 (:path :d "M8 11V2M4.5 5.5 8 2l3.5 3.5M2.5 10.5v3h11v-3"
+                                                                        :fill "none" :stroke "currentColor" :stroke-width "1.6"
+                                                                        :stroke-linecap "round" :stroke-linejoin "round"))
+                                                           "Upload a drawing or file")
                                                    (:input :type "file" :id "pl-file"
                                                            :accept (format nil ".pdf,.png,.jpg,.jpeg,.gif,.webp~{,.~a~}" *upload-text-types*)
-                                                           :data-doc "A drawing or other file for the agent to build from: a PDF, an image, or a text file such as DXF"
                                                            :|data-on:change| "plUpload(el, $owner, $wallet, $turnstile)"))
                                              (:p :id "pl-upload-note" :class "pl-line"
                                                  (fmt "Build from a drawing: a PDF of up to ~d pages, an image or a text file (DXF, SVG, CSV, STEP), ~a at most."
@@ -964,7 +987,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                        (:span (fmt "~a of ~a prompts" (prompts-used session) *max-prompts-per-session*))
                                        (:span (fmt "tokens ~:d in, ~:d out" (getf usage :input) (getf usage :output)))
                                        (when pot
-                                         (htm (:span (fmt "pot ~:d credits" (max 0 (floor (or (getf pot :credits) 0)))))))
+                                         (htm (:span (fmt "pot ~:d ~a" (max 0 (floor (or (getf pot :credits) 0))) (units)))))
                                        ;; closing the session to watchers, once it has bought credits
                                        (when (and (the owner?) (or (paid? session) (session-private? session)))
                                          (htm (:label :class "pl-private"
@@ -1059,7 +1082,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                          (spend (and session (the owner?) (spend-state session))))
                     (with-lhtml-string ()
                       (:div :class "pl-card pl-credits"
-                            (:h2 "Modeling credits")
+                            (:h2 (esc (units-title)))
                             (str (credits-html self (pot) spend))
                             ;; the payment in the page (start-payment!): Stripe's
                             ;; card control and form live in frames the script
@@ -1395,8 +1418,14 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
       (cond ((the archive-id) (the (tell-error! "An archived session takes no uploads.")))
             ((and (the session) (not (the owner?)))
              (the (tell-error! "This session is someone else's; start your own to upload.")))
-            ((not (eq (gethash "rights" signals) t))
-             (the (tell-error! "Tick the box first: you declare the right to use and share the file.")))
+            ;; a file is public with its session, and that is acknowledged
+            ;; first -- unless the session is closed-source or has topped up
+            ((not (or (eq (gethash "rights" signals) t)
+                      (let ((session (the session)))
+                        (if session
+                            (or (session-closed? session) (paid? session))
+                            (and *closed-source?* *deployments?* (eq (gethash "closedPick" signals) t))))))
+             (the (tell-error! "Tick the box first: the file will be shared with this session.")))
             ((and *turnstile-site-key* (null token))
              (the (tell-error! "Complete the human check first.")))
             ((the (own-session! address (gethash "wallet" signals) (eq (gethash "closedPick" signals) t)))
@@ -1471,7 +1500,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                            "publishable_key" key
                                                            "wallet" (or (session-wallet session) "")
                                                            "amount" amount
-                                                           "label" (format nil "~:d modeling credits for ~a~:[~;, into the community pot~]"
+                                                           "label" (format nil (unit-text "~:d {units} for ~a~:[~;, into the community pot~]")
                                                                            (credits-for-amount amount) (dollars amount) (pot)))
                                                         s))))))
             ((stringp url)
@@ -1487,7 +1516,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     ;; line was opened for; the human check that opened it covers this
     (let ((session (the session))
           (amount (gethash "amount" signals)))
-      (cond ((not (the owner?)) (the (tell-error! "Only the session's owner may add credits here.")))
+      (cond ((not (the owner?)) (the (tell-error! (unit-text "Only the session's owner may add {units} here."))))
             ((not (integerp amount)) (the (tell-error! "Say how much.")))
             (t (multiple-value-bind (ok? reason)
                    (topup-check! session nil (client-address *datastar-request*))
@@ -1509,8 +1538,8 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                     (with-output-to-string (s)
                                       (yason:encode (h "notice" (cond ((equal outcome "credited")
                                                                        (if (pot)
-                                                                           "Thank you: your credits are in the pot, for everyone's builds."
-                                                                           "Thank you: your credits are in."))
+                                                                           (unit-text "Thank you: your {units} are in the pot, for everyone's builds.")
+                                                                           (unit-text "Thank you: your {units} are in.")))
                                                                       ((equal outcome "already") "That payment was already credited.")
                                                                       ((equal outcome "unpaid") "The payment has not completed yet; it is credited when it does.")
                                                                       (t (format nil "The payment could not be confirmed: ~a" text))))
@@ -1525,8 +1554,18 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
           (amount (gethash "amount" signals))
           (token (gethash "turnstile" signals)))
       (cond ((and (the session) (not (the owner?)))
-             (the (tell-error! "This session is someone else's; start your own to add credits.")))
+             (the (tell-error! (unit-text "This session is someone else's; start your own to add {units}."))))
             ((not (integerp amount)) (the (tell-error! "Say how much.")))
+            ;; what the pot can hold is said only here, to someone whose
+            ;; top-up would overfill it
+            ((let* ((pot (pot))
+                    (room (and pot (getf pot :room)))
+                    (bought (and room (ignore-errors (credits-for-amount amount)))))
+               (when (and (realp room) (realp bought) (> bought room))
+                 (the (tell-error! (format nil "The community pot has room for ~:d more ~a just now, and that would add ~:d.  Try a smaller amount, or come back when some have been spent~@[; to build without sharing a pot, ~a~]."
+                                           (max 0 (floor room)) (units) (round bought)
+                                           (and *own-lab* (cdr *own-lab*)))))
+                 t)))
             ((the (own-session! address (gethash "wallet" signals) (eq (gethash "closedPick" signals) t)))
              (let ((session (the session)))
                (multiple-value-bind (ok? reason) (topup-check! session token address)

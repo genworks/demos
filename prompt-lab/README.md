@@ -11,7 +11,7 @@ or edit the file by hand and reload it.
 Genworks hosts the lab at
 **<https://hack.genworks.com/prompt-lab>**.  It is an experiment,
 offered as is: each session allows a handful of prompts and starts
-with free modeling credits, prompts and generated code are logged,
+with free rivets to spend, prompts and generated code are logged,
 and generated code is the visitor's under the GNU Affero General
 Public License, like Gendl itself and like this code.
 
@@ -53,12 +53,14 @@ deploying stack's reverse proxy, which holds the API key: no key
 lives with this code, and none is read from it.  Payments, when an
 instance offers them, are settled by the same gate.
 
-Builds spend **modeling credits**, and the gate keeps the count.  It
+Builds are paid in **rivets**, the lab's unit (`*unit*` in
+`parameters.lisp`: an instance may call it what it likes; the doors'
+field names still say `credits`), and the gate keeps the count.  It
 may give every session a free allowance and every payer a balance of
 their own, or keep one **community pot**: a single balance that every
-build, by anyone, draws on, that anyone may add to up to a limit, and
-that stops the lab at zero until someone does.  The page shows
-whichever the gate says it keeps; the reference instance keeps a pot.
+build, by anyone, draws on, that anyone may add to, and that stops the
+lab at zero until someone does.  The page shows whichever the gate
+says it keeps; the reference instance keeps a pot.
 
 ## Two kinds of build: a geometry model, or a web app
 
@@ -182,13 +184,13 @@ solids engine a STEP or IGES file can be imported outright.
 
 **An uploaded file is public with its session**, live and in the
 archive, for anyone to download, unless the session is private (a
-session that has added modeling credits may be).  The visitor declares
-the right to use and share each file before it is taken.  Files are
-only ever served as downloads.
+closed-source session is, and one that has added rivets may be).  A
+visitor whose session is public acknowledges that the file will be
+shared before it is taken.  Files are only ever served as downloads.
 
 The caps are `*upload-caps*` in `source/uploads.lisp` (by default 2 MB
 a file, three files and a PDF of ten pages for a session; more for one
-that has added credits), and `*uploads?*` nil takes none.  Attached
+that has added rivets), and `*uploads?*` nil takes none.  Attached
 files travel with every call the session makes, so the gate must take
 a request that large.
 
@@ -232,7 +234,7 @@ prompt that carries no check token is taken on a small daily
 allowance -- so many from one address, so many from all together
 (`*max-automated-prompts-per-day*`, `*max-automated-prompts-per-address*`
 in `parameters.lisp`; none at all when the first is nil) -- and spends
-the same modeling credits as anyone's.  An interesting model built
+the same rivets as anyone's.  An interesting model built
 that way is as welcome as any other; the allowance is there so that
 a day of abuse stays small.
 

@@ -86,7 +86,7 @@
     "collet" "coupling" "crank" "dowel" "ferrule" "fillet" "fixture" "flange" "flywheel" "gasket"
     "gear" "gimbal" "girder" "grommet" "gusset" "hinge" "hopper" "jig" "journal" "keyway"
     "knurl" "lathe" "lever" "linkage" "mallet" "mandrel" "manifold" "nozzle" "pawl" "pinion"
-    "piston" "pivot" "plinth" "plunger" "pulley" "ratchet" "rivet" "rotor" "shackle" "shim"
+    "piston" "pivot" "plinth" "plunger" "pulley" "ratchet" "roller" "rotor" "shackle" "shim"
     "spindle" "spline" "spigot" "sprocket" "strut" "swivel" "tappet" "tenon" "thimble" "toggle"
     "trestle" "trunnion" "turret" "valve" "vise" "washer" "wedge" "winch" "yoke" "widget")
   "List of strings. The second word of a session's id.")
