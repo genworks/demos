@@ -139,15 +139,131 @@ sections, and objects when it shows geometry."
   :input-slots
   (("List of GDL objects the viewport (viewport-area) draws; nil for a
 page without geometry."
-    objects nil))
+    objects nil)
+   ("List of plists, the app's tollbooths: what a visitor pays for.  Each
+is (:key <keyword> :label <string> :cents <integer>) with :uses <n> (the
+payment covers n uses, spent with use-toll!) or :seconds <n> (it covers
+that long), or neither (it covers this visit).  The cents may be computed
+from the model."
+    tolls nil)
+   ("Plist, download format keyword (:pdf :svg :png :step :iges :stl) to
+the key of the toll its file-link asks for; a format not named is free."
+    file-tolls nil)
+   ("String or nil. The deployment this instance serves (deploy.lisp), set
+by its door; nil for the session's own preview, where a toll is paid
+without money and nothing is booked."
+    deployment-name nil))
 
   :computed-slots
-  (;; the demos' stylesheet from under the lab's own prefix (published
+  (;; what this visitor has paid: toll key -> (:at <time> [:uses n] [:until time])
+   (payments nil :settable)
+
+   ;; the demos' stylesheet from under the lab's own prefix (published
    ;; there by publish-prompt-lab!): the address the mixin would name is
    ;; published for the demos' own virtual hosts
    (additional-header-content
     (let ((demos-common:*url-prefix* (format nil "~a/app-static" *url-prefix*)))
-      (call-next-method)))))
+      (call-next-method))))
+
+  :functions
+  (;; Tollbooths.  The app says what is paid for (tolls) and where the
+   ;; booths stand (toll-button, toll-paid?, use-toll!, file-tolls); the
+   ;; lab takes the payment (pay-toll!, below) and keeps the books.
+   (toll (key) (find key (the tolls) :key #'(lambda (toll) (getf toll :key))))
+
+   ("Boolean. Whether this visitor holds a payment for toll KEY that still
+stands: uses left, time left, or made on this visit."
+    toll-paid?
+    (key)
+    (let ((payment (getf (the payments) key)))
+      (and payment
+           (let ((uses (getf payment :uses)) (until (getf payment :until)))
+             (and (or (null uses) (plusp uses))
+                  (or (null until) (< (get-universal-time) until)))))))
+
+   ("Void. Spend one use of the payment for toll KEY, where it counts uses."
+    use-toll!
+    (key)
+    (let ((payment (getf (the payments) key)))
+      (when (and payment (getf payment :uses))
+        (let ((payments (copy-list (the payments))))
+          (setf (getf payments key)
+                (list* :uses (1- (getf payment :uses)) (alexandria:remove-from-plist payment :uses)))
+          (the (set-slot! :payments payments))))))
+
+   ;; called by the toll's button through gdlAjax: the price is the
+   ;; toll's own, never the browser's
+   (pay-toll!
+    (key)
+    (let ((toll (the (toll key))))
+      (when (and toll (not (the (toll-paid? key))))
+        (when (charge-toll! self toll)
+          (let ((payments (copy-list (the payments))))
+            (setf (getf payments key)
+                  (append (list :at (get-universal-time))
+                          (when (getf toll :uses) (list :uses (getf toll :uses)))
+                          (when (getf toll :seconds)
+                            (list :until (+ (get-universal-time) (getf toll :seconds))))))
+            (the (set-slot! :payments payments)))))))
+
+   ("String of html. The booth for toll KEY: a button that pays it, or a
+line saying it is paid.  Put it in a section, so it redraws when paid."
+    toll-button
+    (key)
+    (let ((toll (the (toll key))))
+      (with-lhtml-string ()
+        (cond ((null toll) (htm (:span "(no such toll)")))
+              ((the (toll-paid? key))
+               (htm (:span :class "text-sm font-medium text-gray-700"
+                           (fmt "Paid: ~a" (getf toll :label))
+                           (let ((uses (getf (getf (the payments) key) :uses)))
+                             (when uses (fmt " (~d left)" uses))))))
+              (t (htm (:button :type "button"
+                               :class "inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+                               :onclick (the (gdl-ajax-call :function-key :pay-toll! :arguments (list key)))
+                               (fmt "$~,2f -- ~a~a" (/ (getf toll :cents) 100) (getf toll :label)
+                                    (toll-mode-note self)))))))))
+
+   ("String of html. A link that downloads the first of objects as FORMAT
+(:pdf :svg :png, and :step :iges :stl on a solids engine) as it stands
+now, inputs and all.  A format named in file-tolls wants its toll paid."
+    file-link
+    (format &key label)
+    (with-lhtml-string ()
+      (:a :class "text-sm font-medium text-indigo-600 hover:text-indigo-500"
+          :href (format nil "~a/app-file?iid=~a&format=~(~a~)" *url-prefix* (the instance-id) format)
+          (str (or label (format nil "~:@(~a~) file" format))))))))
+
+;;
+;; Taking a toll.  *toll-provider* says how: :test grants the payment on
+;; the spot and books it marked as a test (deploy.lisp), for a lab with no
+;; payment gateway behind it; nil takes none.  A session's own preview of
+;; its app (no deployment-name) is always granted and never booked.
+;;
+
+(defparameter *toll-provider* :test
+  "Keyword or nil. How a deployed app's tolls are taken: :test (granted at
+once, booked as a test payment: no money moves), or nil (no toll can be
+paid).  A real provider is the gate's to add.")
+
+(defun toll-mode-note (app)
+  (cond ((null (the-object app deployment-name)) " (preview: no charge)")
+        ((eq *toll-provider* :test) " (test payment: no charge)")
+        (t "")))
+
+(defun charge-toll! (app toll)
+  "Take TOLL from the visitor of APP.  True when it is paid."
+  (let ((name (the-object app deployment-name))
+        (cents (getf toll :cents)))
+    (cond ((null name) t)
+          ((not (and (integerp cents) (plusp cents))) t)
+          ((eq *toll-provider* :test)
+           (ignore-errors
+            (book-revenue! name cents :test? t
+                                      :toll (format nil "~(~a~)" (getf toll :key))
+                                      :reference (format nil "test:~a" (the-object app instance-id))))
+           t)
+          (t nil))))
 
 (defun app-url (session &key owner-key)
   "Where SESSION's web app opens.  A private session's needs its owner's
@@ -256,7 +372,20 @@ the page says, cut at LIMIT characters."
                  (viewport? (and mixed? (search (the-object app viewport-area dom-id) body) t))
                  (leaves (loop for object in objects append (the-object object leaves)))
                  (broken (remove-if #'leaf-box leaves))
+                 ;; the tollbooths: each a key, a label and a price, and
+                 ;; every toll a file is put behind one of them
+                 (tolls (when mixed? (the-object app tolls)))
+                 (bad-tolls (remove-if #'(lambda (toll)
+                                           (and (listp toll) (keywordp (getf toll :key))
+                                                (stringp (getf toll :label)) (integerp (getf toll :cents))
+                                                (not (minusp (getf toll :cents)))))
+                                       tolls))
+                 (lost-tolls (when mixed?
+                               (loop for (nil key) on (the-object app file-tolls) by #'cddr
+                                     unless (find key tolls :key #'(lambda (toll) (and (listp toll) (getf toll :key))))
+                                       collect key)))
                  (problem? (or (not mixed?) unplaced-controls unplaced-sections quiet-controls broken
+                               bad-tolls lost-tolls
                                (and objects (not viewport?)) (and viewport? (null objects)))))
             (declare (ignore head))
             (values
@@ -287,6 +416,18 @@ the page says, cut at LIMIT characters."
                                                     (objects "ERROR: objects is given but the body does not embed (the viewport-area div).")
                                                     (viewport? "ERROR: the body embeds the viewport but objects is empty.")
                                                     (t "No viewport (a page without geometry)."))
+                                              (when (and tolls (not bad-tolls))
+                                                (format nil "Tollbooths: ~{~a~^; ~}."
+                                                        (mapcar #'(lambda (toll)
+                                                                    (format nil "~(~a~) \"~a\" $~,2f~@[, ~a uses~]~@[, ~a s~]"
+                                                                            (getf toll :key) (getf toll :label)
+                                                                            (/ (getf toll :cents) 100)
+                                                                            (getf toll :uses) (getf toll :seconds)))
+                                                                tolls)))
+                                              (when bad-tolls
+                                                "ERROR: every toll is (:key <keyword> :label <string> :cents <integer>), with :uses or :seconds if wanted.")
+                                              (when lost-tolls
+                                                (format nil "ERROR: file-tolls names tolls that tolls does not declare: ~{~(~a~)~^, ~}." lost-tolls))
                                               (when broken
                                                 (format nil "ERROR: ~a of ~a leaves cannot compute their geometry (first: ~a)."
                                                         (length broken) (length leaves) (the-object (first broken) root-path)))
@@ -378,6 +519,7 @@ Rules for the page:
 - Html is cl-who: (str <string>) puts a string in, (fmt ..) a formatted one, (esc <string>) one that came from the visitor, and htm goes back to html inside a Lisp form.  A table of results is :table with :thead and :tbody.
 - Style with the classes the recipe uses (they are in the page's stylesheet; other utility classes may not be) and a :style attribute for anything else.
 - The page loads nothing from another site and carries no script of yours unless the request cannot be met without one.
+- Charging, when the visitor asks for it, is done with tollbooths, placed wherever they say.  Declare them in APP's input-slots: (tolls (list (list :key :cad :label \"STEP download\" :cents 300 :uses 1))) -- with :uses n the payment covers n uses, with :seconds n it covers that long, with neither it covers this visit; the cents may be computed, from the model's size say.  (the (toll-button :cad)) is the booth, a pay button that turns into a paid line: put it in a section.  (the (toll-paid? :cad)) says whether to show what the toll guards, and (the (use-toll! :cad)) spends one use.  (the (file-link :step :label \"STEP file\")) is a link that downloads the first of objects as it stands, inputs and all (:pdf :svg :png anywhere; :step :iges :stl on a solids engine); name the format in (file-tolls (list :step :cad)) and the link wants that toll paid and spends a use of it.  Write no payment code of your own, and say in your reply where the booths are and what they charge.
 - Name your own objects and functions with names of your own: a definition named like something Lisp, Gendl or GWL already has (start, publish, header, title ...) is refused.
 - Never include an in-package form."
           (and (member :model *kinds*) t)

@@ -263,7 +263,7 @@ with no solids), 429 when the owner's credits are spent."
          (session (cond ((stringp id) (find-session id))
                         ((stringp replay) (find-replay replay))
                         ((stringp deployed)
-                         (deployed-for-viewer deployed (or key (query-value req "owner"))))))
+                         (deployed-for-download deployed (or key (query-value req "owner"))))))
          (kind (string-downcase (or (query-value req "format") "")))
          (entry (assoc kind (download-formats) :test #'string=)))
     (cond ((or (null session) (not (visible-to? session key))) (no-such-session req ent))

@@ -259,19 +259,29 @@ already deployed stays on disk and is not served.")
 name: <root>/<engine>/<name>/ holds deployment.json and model.lisp; the
 books are <root>/revenue.jsonl.")
 
-(defparameter *house-fee-percent* 25
-  "Number. The house's share of what a priced deployment's users pay, its
-hosting and licence fee, in percent.  Written into each deployment's
-record when it is deployed: a later change here does not reach back.")
+(defparameter *house-fee-percents* '(:open 10 :closed 15)
+  "Plist. The house's share of what a deployment's users pay, its hosting
+and licence fee, in percent, by the deployment's source terms: open (the
+GNU Affero General Public License) or closed.  Written into each
+deployment's record when it is deployed: a later change here does not
+reach back.")
+
+(defun house-fee-percent (closed?)
+  (getf *house-fee-percents* (if closed? :closed :open)))
+
+(defparameter *closed-source?* t
+  "Boolean. Whether a visitor may open a session whose source is closed
+(deploy.lisp): chosen as the session opens, before its first prompt.")
 
 (defparameter *deployment-price-range* '(100 . 10000)
-  "Cons of integers. The least and the most a priced deployment may ask
-for a use, in cents.")
+  "Cons of integers. The least and the most a deployed model may ask for
+a download, in cents.")
 
 (defparameter *max-deployments* 200
   "Integer. Deployments this lab keeps for its engine, all owners together.")
 
 (defparameter *deployment-payments?* nil
-  "Boolean. Whether the gate behind this lab takes payment for a priced
-deployment (its deployment doors).  Nil: a priced deployment is kept with
-its terms and opens only to its owner until payments are on.")
+  "Boolean. Whether the gate behind this lab takes payment for a deployed
+model's priced downloads.  Nil: the model opens to everyone and its
+downloads only to its owner until payments are on.  (A deployed web app
+keeps tollbooths of its own: kinds.lisp, *toll-provider*.)")

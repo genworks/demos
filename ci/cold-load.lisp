@@ -575,40 +575,99 @@ loaded) its page too."
                             (eq (gethash "app_defined" state) t)
                             (page-ok? (gethash "app_url" state)))))))
           ;; Monetize (deploy.lisp): the session's model deployed at an
-          ;; address of its own, open and free, then closed and priced,
-          ;; then taken down
-          (smoke "prompt-lab deploys a model: its page, its source, its files; closed and priced; taken down"
+          ;; address of its own, open source and free, then priced by the
+          ;; download, then taken down
+          (smoke "prompt-lab deploys a model: its page, its source, its files; a priced download; taken down"
                  (lambda ()
                    (let* ((name "ci-smoke-plate")
-                          (address (format nil "~a/d/~a" prefix name)))
+                          (address (format nil "~a/d/~a" prefix name))
+                          (drawing (format nil "~a?deployed=~a&format=svg" (door "download") name)))
                      (flet ((deploy (&rest terms)
                               (json-of :post (door "deploy") :headers (owner-headers)
                                        :json (apply #'table "session" session "name" name terms)))
                             (status (path) (nth-value 1 (http :get path))))
                        (unwind-protect
                             (progn
-                              (unless (equal (gethash "url" (deploy "title" "A plate")) address)
-                                (error "the deploy door did not answer the deployment's address"))
+                              (let ((deployment (deploy "title" "A plate")))
+                                (unless (equal (gethash "url" deployment) address)
+                                  (error "the deploy door did not answer the deployment's address"))
+                                (unless (eql (gethash "fee_percent" deployment)
+                                             (uiop:symbol-call :prompt-lab :house-fee-percent nil))
+                                  (error "an open deployment does not carry the open fee")))
                               ;; the address sends to the viewer, asked here itself: this
                               ;; client does not follow a second redirect
                               (unless (page-ok? (format nil "~a/viewer?deployed=~a" prefix name))
                                 (error "the deployed model's page did not open"))
                               (unless (search "define-object model" (http :get (format nil "~a/source" address)))
                                 (error "an open deployment did not serve its source"))
-                              (unless (eql 200 (status (format nil "~a?deployed=~a&format=svg" (door "download") name)))
+                              (unless (eql 200 (status drawing))
                                 (error "a deployed model's drawing was not to be had"))
                               (unless (eql 403 (nth-value 1 (http :post (door "deploy")
                                                                   :json (table "session" session "name" name))))
                                 (error "a stranger deployed someone's session"))
-                              (deploy "closed" t "price_cents" 500 "payee" "owner@example.com")
-                              (unless (eql 404 (status (format nil "~a/source" address)))
-                                (error "a closed deployment served its source"))
-                              (unless (eql 402 (status address))
-                                (error "a priced deployment opened to a stranger"))
-                              (page-ok? (format nil "~a/viewer?deployed=~a&owner=~a" prefix name owner)))
+                              (deploy "price_cents" 500 "payee" "owner@example.com")
+                              (unless (page-ok? (format nil "~a/viewer?deployed=~a" prefix name))
+                                (error "a priced model's page did not open"))
+                              (unless (eql 404 (status drawing))
+                                (error "a priced download opened to a stranger"))
+                              (eql 200 (status (format nil "~a&owner=~a" drawing owner))))
                          (http :post (door "undeploy") :headers (owner-headers) :json (table "name" name))
                          (unless (eql 404 (status address))
                            (error "the deployment is still there after it was taken down")))))))
+          ;; closed source is chosen as a session opens: out of sight, its
+          ;; deployment serving no source, at the closed fee
+          (smoke "prompt-lab opens a session closed-source: unseen by others, deployed without its source"
+                 (lambda ()
+                   (let* ((opened (json-of :post (door "session") :json (table "closed" t)))
+                          (closed (gethash "session" opened))
+                          (headers (list (cons "X-Prompt-Lab-Owner" (gethash "owner" opened))))
+                          (name "ci-smoke-closed"))
+                     (json-of :post (door "model") :headers headers
+                              :json (table "session" closed "source" *smoke-model*))
+                     (unless (eql 403 (nth-value 1 (http :get (format nil "~a?session=~a" (door "state") closed))))
+                       (error "a closed-source session showed itself to a stranger"))
+                     (unwind-protect
+                          (let ((deployment (json-of :post (door "deploy") :headers headers
+                                                     :json (table "session" closed "name" name))))
+                            (and (eq (gethash "closed" deployment) t)
+                                 (eql (gethash "fee_percent" deployment)
+                                      (uiop:symbol-call :prompt-lab :house-fee-percent t))
+                                 (eql 404 (nth-value 1 (http :get (format nil "~a/d/~a/source" prefix name))))))
+                       (http :post (door "undeploy") :headers headers :json (table "name" name))))))
+          ;; a web app's tollbooth (kinds.lisp): declared by the app, paid
+          ;; by its visitor -- here as a test payment -- and booked
+          (smoke "prompt-lab web app takes a toll: unpaid, paid, and a test line in the books"
+                 (lambda ()
+                   (let* ((recipe (symbol-value (lab '#:*app-recipe*)))
+                          (mark "(objects (list (the model))))")
+                          (at (or (search mark recipe) (error "the recipe has lost the line the test puts a toll after")))
+                          (tolled (concatenate 'string (subseq recipe 0 at)
+                                               "(objects (list (the model))) (tolls (list (list :key :pass :label \"A pass\" :cents 200))))"
+                                               (subseq recipe (+ at (length mark)))))
+                          (brief (json-of :post (door "agent")
+                                          :json (table "event" "prompt" "text" "A tolled plate sizer." "kind" "app"
+                                                       "model" tolled)))
+                          (headers (list (cons "X-Prompt-Lab-Owner" (gethash "owner" brief))))
+                          (app (gethash "session" brief))
+                          (name "ci-smoke-toll"))
+                     (json-of :post (door "agent") :headers headers
+                              :json (table "event" "stopped" "session" app "text" "Only a test."))
+                     (unwind-protect
+                          (progn
+                            (json-of :post (door "deploy") :headers headers :json (table "session" app "name" name))
+                            (let* ((deployed (uiop:symbol-call :prompt-lab :ensure-deployed name))
+                                   (page (gdl:make-object (uiop:symbol-call :prompt-lab :app-symbol deployed)
+                                                          :deployment-name name))
+                                   (before (length (uiop:symbol-call :prompt-lab :revenue-lines))))
+                              (when (gdl:the-object page (toll-paid? :pass)) (error "the toll was paid before it was paid"))
+                              (gdl:the-object page (pay-toll! :pass))
+                              (unless (gdl:the-object page (toll-paid? :pass)) (error "the toll was not paid after it was"))
+                              (let ((line (car (last (uiop:symbol-call :prompt-lab :revenue-lines)))))
+                                (and (= (length (uiop:symbol-call :prompt-lab :revenue-lines)) (1+ before))
+                                     (eql (gethash "gross_cents" line) 200)
+                                     (eq (gethash "test" line) t)
+                                     (null (uiop:symbol-call :prompt-lab :revenue-report))))))
+                       (http :post (door "undeploy") :headers headers :json (table "name" name))))))
           (setf (symbol-value (lab '#:*external-agent?*)) nil)
           ;; the community pot (page.lisp): what the lab has heard from a
           ;; gate that keeps one is everyone's to see, and an empty pot

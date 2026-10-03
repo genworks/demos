@@ -85,9 +85,7 @@ with the prompt, and the state door answers `kind`, `app_defined` and
 `'(:model)` offers no switch.
 
 A web app is a page written by a visitor's prompts, or by the visitor,
-and served by the lab's own host: **an instance that serves strangers
-should give the apps an origin of their own**, apart from anything
-that keeps a visitor's keys, before it offers this kind.
+and it is served from the lab's own origin.
 
 ## Monetize: deploying what a session built
 
@@ -103,29 +101,54 @@ page's **Monetize** button):
 A deployment is a copy -- the model file as it was, and a record of its
 terms -- kept apart from the session, which may go on changing or go
 away; deploying again under the same name replaces it, and its owner
-may take it down.  The terms are the owner's:
+may take it down.
 
-- **source**: open, served at `<prefix>/d/<name>/source` under the GNU
-  Affero General Public License, or closed, in which case the
-  deployment does not serve it;
-- **price**: free, or a price for a use.  Of what users pay, the house
-  keeps `*house-fee-percent*` (25) as its hosting and licence fee and
-  the owner is owed the rest.
+**Open or closed source** is chosen as the session opens, before its
+first prompt (a box beside the prompt; `"closed": true` to the session
+door).  An open session's deployment serves its source at
+`<prefix>/d/<name>/source` under the GNU Affero General Public
+License.  A closed-source session is seen by nobody else and its
+deployment serves no source -- for as long as it completes the
+Monetize flow: a closed session that ends without a deployment
+**reverts**, and goes into the public archive under the AGPL like any
+other.  `*closed-source?*` nil offers no such choice.
+
+**Where the money is taken is the author's to decide.**
+
+- A web app has **tollbooths**, which the author asks the agent to put
+  wherever they like -- a price for each CAD download, a pass that
+  unlocks a results table for a day, a price computed from the model.
+  The app declares them (`tolls`: a key, a label, the cents, and
+  `:uses` or `:seconds` when the payment covers so many uses or so
+  long) and places them (`toll-button`, `toll-paid?`, `use-toll!`);
+  `file-link` gives a download of the model as it stands in the
+  visitor's page, and `file-tolls` puts a format behind a toll.  The
+  price is always the app's own on the server, never the browser's.
+- A deployed model may ask a price for each download of its files.
+
+Of what users pay, the house keeps its hosting and licence fee and the
+author is owed the rest: `*house-fee-percents*`, 10% of an open-source
+deployment's takings and 15% of a closed-source one's, written into
+each deployment's record on the day.
 
 The lab keeps the terms and the books: `book-revenue!` appends a line
-for each settled payment, with the fee and the owner's share at the
-deployment's own terms and the engine and Lisp it ran on, and
-`revenue-report` sums them by runtime for a year or a quarter.
-**Taking the payment is the gate's, and that side is not written
-yet**: until an instance sets `*deployment-payments?*`, a priced
-deployment is kept with its terms and opens only to its owner.
+for each payment, with the fee and the author's share at the
+deployment's own terms, the tollbooth, and the engine and Lisp it ran
+on; `revenue-report` sums them by runtime for a year or a quarter and
+`payables` by author.  **No money moves yet.**  `*toll-provider*` is
+`:test`: a toll is granted on the spot and booked as a test payment,
+which the reports leave out, so that the whole flow can be built and
+tried; a real payment gateway is still to come, and until
+`*deployment-payments?*` a priced model's downloads open only to its
+owner.  Nothing a deployment does is metered or limited.
 
-From a script: `POST <prefix>/api/deploy` with `{"session": ...,
-"name": ..., "title": ..., "blurb": ..., "closed": ..., "price_cents":
-..., "payee": ...}` and the owner's key (and the human check's token
-where one stands); `POST <prefix>/api/undeploy` with `{"name": ...}`;
-`GET <prefix>/api/deployments` lists them.  `*deployments?*` nil shuts
-all of it.
+From a script: `POST <prefix>/api/session` with `{"closed": true}` for
+a closed-source session; `POST <prefix>/api/deploy` with `{"session":
+..., "name": ..., "title": ..., "blurb": ..., "price_cents": ...,
+"payee": ...}` and the owner's key (and the human check's token where
+one stands); `POST <prefix>/api/undeploy` with `{"name": ...}`; `GET
+<prefix>/api/deployments` lists them.  `*deployments?*` nil shuts all
+of it.
 
 ## Building from a drawing: uploaded files
 

@@ -25,7 +25,10 @@
              #:*kinds*
              #:*deployments?*
              #:*deployment-payments?*
-             #:*house-fee-percent*
+             #:*house-fee-percents*
+             #:*closed-source?*
+             #:*toll-provider*
+             #:payables
              #:book-revenue!
              #:revenue-report
              #:publish-prompt-lab!

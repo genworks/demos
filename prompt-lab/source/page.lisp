@@ -386,6 +386,8 @@ file's place and the terminal opened on it."
        ;; what the session builds, and its web app's address once there
        ;; is one (kinds.lisp); a private session's opens with the key
        "kind" (kind-name (session-kind session))
+       ;; opened closed-source (deploy.lisp)
+       "closed" (if (session-closed? session) t 'yason:false)
        "app_defined" (if (app-defined? session) t 'yason:false)
        "app_url" (and (app-defined? session)
                       (app-url session :owner-key (and owner? (session-private? session)
@@ -436,8 +438,9 @@ behind this room and the sibling lab on the other engine, if any."
                            ;; the community pot, where the gate keeps one
                            "pot" (pot-state))))
 
-(defun open-session! (address &optional wallet)
-  "Open a session for a visitor at ADDRESS, naming WALLET if any.  Values:
+(defun open-session! (address &optional wallet &key closed?)
+  "Open a session for a visitor at ADDRESS, naming WALLET if any; CLOSED?
+opens it closed-source (deploy.lisp), where the lab allows.  Values:
 the session, or nil, the reason and the response to refuse with.  One
 address opens at most *max-sessions-per-address* a day, unless its wallet
 has credit or has put more into the pot than it has drawn."
@@ -456,6 +459,9 @@ has credit or has put more into the pot than it has drawn."
       (let ((session (make-session :address address :wallet (and (wallet-id? wallet) wallet))))
         (count-address! address :sessions)
         (log-event session :note "Session ~a opened.  Describe what to build." (session-id session))
+        (when (and closed? *closed-source?* *deployments?*)
+          (close-session-source! session)
+          (log-event session :note "This session is closed-source: nobody else sees it, and what you deploy from it (Monetize) does not serve its source.  If it ends without a deployment its source becomes public, under the GNU Affero General Public License, like any other session's."))
         (refresh-balance! session)
         (save-session! session)
         session)))
@@ -523,7 +529,8 @@ One address opens at most *max-sessions-per-address* a day."
   (let* ((address (client-address req))
          (json (request-json req))
          (wallet (and json (gethash "wallet" json))))
-    (multiple-value-bind (session reason response) (open-session! address wallet)
+    (multiple-value-bind (session reason response)
+        (open-session! address wallet :closed? (and json (eq (gethash "closed" json) t)))
       (if (null session)
           (refuse req ent response "~a" reason)
           ;; the owner key goes to this browser once, here, and nowhere else
@@ -856,7 +863,7 @@ the model with one panel under it, the inputs or the tree."
    (session (let* ((id (the session-id)) (replay (the replay-id)) (deployed (the deployed-name))
                    (session (cond ((stringp id) (find-session id))
                                   ((stringp replay) (find-replay replay))
-                                  ((stringp deployed) (deployed-for-viewer deployed (the owner-key))))))
+                                  ((stringp deployed) (deployed-for-viewer deployed)))))
               (and session (or (stringp deployed) (visible-to? session (the owner-key))) session)))
 
    ;; only the owner's draws are metered -- a watcher's cost the owner nothing
@@ -1025,6 +1032,8 @@ page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet)."
     (net.aserve:publish :path (door-path "deployments") :server server :host host :function #'deployments-door)
     (net.aserve:publish-prefix :prefix (format nil "~a/d/" *url-prefix*)
                                :server server :host host :function #'deployed-door)
+    (net.aserve:publish :path (format nil "~a/app-file" *url-prefix*)
+                        :server server :host host :function #'app-file-door)
     ;; a session's web app and the stylesheet it wears (kinds.lisp)
     (net.aserve:publish :path (format nil "~a/app" *url-prefix*)
                         :server server :host host :function #'app-door)

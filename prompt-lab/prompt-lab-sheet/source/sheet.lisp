@@ -420,7 +420,7 @@ window.plUpload=function(el,owner,wallet,token){var f=el.files&&el.files[0],n=do
  if(!r||!r.checked){say('Tick the box first: you declare the right to use and share the file.');el.value='';return}
  say('Uploading '+f.name+'...');var fr=new FileReader();
  fr.onload=function(){var s=String(fr.result),d=s.slice(s.indexOf(',')+1);
-  plAction('upload',{name:f.name,data:d,rights:true,owner:owner||'',wallet:wallet||'',turnstile:token||''})
+  plAction('upload',{name:f.name,data:d,rights:true,owner:owner||'',wallet:wallet||'',turnstile:token||'',closedPick:!!(document.getElementById('pl-closed')||{}).checked})
    .then(function(x){say(x.ok?'':'The upload did not go through ('+x.status+').');el.value=''},function(e){say('The upload did not go through: '+e);el.value=''})};
  fr.onerror=function(){say('The file could not be read.');el.value=''};
  fr.readAsDataURL(f)};
@@ -674,7 +674,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{built: ~a, deployed: ~a, monetize: false, dname: '', dtitle: '', dblurb: '', dclosed: false, dpriced: false, dprice: 5, dpayee: '', kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpriced: false, dprice: 5, dpayee: '', kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             ;; Monetize (deploy.lisp): whether there is something to deploy,
             ;; and where this session is deployed already
             (json-boolean (let ((session (the session)))
@@ -683,6 +683,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
             (js-string-literal (let ((record (and (the session) *deployments?*
                                                   (ignore-errors (session-deployment (the session))))))
                                  (if record (deployment-url (gethash "name" record)) "")))
+            ;; whether there is a session yet, and whether it was opened
+            ;; closed-source: that choice is made before the first build
+            (json-boolean (the shown-id))
+            (json-boolean (and (the session) (session-closed? (the session))))
             ;; what the next prompt builds (kinds.lisp): the session's kind,
             ;; where this lab still offers it, else the lab's default
             (js-string-literal (kind-name (or (and (the session) (parse-kind (session-kind (the session))))
@@ -723,6 +727,16 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                           (:input :type "radio" :name "pl-kind" :value (kind-name kind)
                                                                   :|data-bind:kind| "")
                                                           " " (esc (string-downcase (kind-label kind)))))))))
+                              ;; closed source is chosen here, before the session
+                              ;; opens with the first build or upload (deploy.lisp)
+                              (when (and *closed-source?* *deployments?*)
+                                (htm (:label :class "pl-pick pl-closed" :style "display:none" :|data-show| "!$opened"
+                                             :data-doc "Closed source: nobody else sees the session, and what you deploy from it does not serve its source.  If you do not deploy it, its source becomes public when the session ends."
+                                             (:input :type "checkbox" :id "pl-closed" :|data-bind:closedPick| "")
+                                             (fmt " Closed source (~d% fee when deployed, instead of ~d%; public if never deployed)"
+                                                  (house-fee-percent t) (house-fee-percent nil)))
+                                     (:p :class "pl-line" :style "display:none" :|data-show| "$opened && $closed"
+                                         "Closed source: deploy it with Monetize, or its source becomes public when the session ends.")))
                               (:textarea :id "pl-prompt" :rows "4" :|data-bind:prompt| ""
                                          :|data-attr:placeholder| "$kind == 'app' ? 'Describe the web app, e.g. a page that sizes a shelf bracket from its load and shows it' : 'Describe what to build, e.g. a picnic table with two benches'"
                                          :placeholder "Describe what to build, e.g. a picnic table with two benches")
@@ -731,7 +745,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               (:input :type "hidden" :id "pl-turnstile" :|data-bind:turnstile| "")
                               (:div :class "pl-row"
                                     (:button :class "pl-build"
-                                             :|data-on:click| (the (datastar-action :build :options "{filterSignals: {include: /^(prompt|turnstile|owner|wallet|kind)$/}}"))
+                                             :|data-on:click| (the (datastar-action :build :options "{filterSignals: {include: /^(prompt|turnstile|owner|wallet|kind|closedPick)$/}}"))
                                              :|data-indicator:sending| ""
                                              ;; with a human check, a build waits for its token
                                              :|data-attr:disabled| (format nil "$busy || $sending || !$prompt.trim()~@[ || !$turnstile~]"
@@ -826,20 +840,27 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              (:input :type "text" :maxlength "80" :|data-bind:dtitle| ""))
                                      (:label "What it is, in a line or two"
                                              (:textarea :rows "2" :maxlength "400" :|data-bind:dblurb| ""))
-                                     (:label :class "pl-pick"
-                                             (:input :type "checkbox" :|data-bind:dclosed| "")
-                                             " Closed source: the deployment does not serve its source")
-                                     (:label :class "pl-pick"
-                                             (:input :type "checkbox" :|data-bind:dpriced| "")
-                                             " Charge for its use")
-                                     (:div :|data-show| "$dpriced"
-                                           (:label "Price of a use, in dollars"
-                                                   (:input :type "number" :min "1" :max "100" :step "1" :|data-bind:dprice| ""))
-                                           (:label "Where to reach you about your share (email)"
-                                                   (:input :type "email" :maxlength "200" :|data-bind:dpayee| ""))
-                                           (:p :class "pl-line"
-                                               (fmt "Of what its users pay you receive ~d%; ~d% is the hosting and licence fee.  Taking payment is not switched on here yet: until it is, a priced deployment opens only to you."
-                                                    (- 100 *house-fee-percent*) *house-fee-percent*)))
+                                     ;; the source terms were the session's choice as it opened
+                                     (:p :class "pl-line" :|data-show| "!$closed"
+                                         (fmt "Open source, under the GNU Affero General Public License: the deployment serves its source.  Of what its users pay you receive ~d%; ~d% is the hosting and licence fee."
+                                              (- 100 (house-fee-percent nil)) (house-fee-percent nil)))
+                                     (:p :class "pl-line" :|data-show| "$closed"
+                                         (fmt "Closed source, as you chose when the session opened: the deployment does not serve its source.  Of what its users pay you receive ~d%; ~d% is the hosting and licence fee."
+                                              (- 100 (house-fee-percent t)) (house-fee-percent t)))
+                                     ;; a model's price is for a download; a web app keeps tollbooths of its own
+                                     (:div :|data-show| "$kind != 'app'"
+                                           (:label :class "pl-pick"
+                                                   (:input :type "checkbox" :|data-bind:dpriced| "")
+                                                   " Charge for each download of its files")
+                                           (:div :|data-show| "$dpriced"
+                                                 (:label "Price of a download, in dollars"
+                                                         (:input :type "number" :min "1" :max "100" :step "1" :|data-bind:dprice| ""))
+                                                 (:p :class "pl-line"
+                                                     "Taking payment is not switched on here yet: until it is, the model opens to everyone and its downloads only to you.")))
+                                     (:p :class "pl-line" :|data-show| "$kind == 'app'"
+                                         "A web app charges at tollbooths of its own, wherever you want them: ask the agent, e.g. 'charge $3 for each STEP download' or 'a $5 day pass unlocks the results table'.  Here they take test payments, booked and marked as tests: no money moves yet.")
+                                     (:label "Where to reach you about your share (email)"
+                                             (:input :type "email" :maxlength "200" :|data-bind:dpayee| ""))
                                      (:div :class "pl-row"
                                            (:button :type "button" :class "pl-download"
                                                     :|data-attr:disabled| "!$dname.trim()"
@@ -1250,16 +1271,21 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                   (t (the (tell-error! reason))))))))
 
    (own-session!
-    (address wallet)
-    ;; the session of a visitor who has none yet, opened for this sheet;
-    ;; nil with the refusal shown when the address is over its cap
+    (address wallet &optional closed?)
+    ;; the session of a visitor who has none yet, opened for this sheet
+    ;; (closed-source when they chose that: deploy.lisp); nil with the
+    ;; refusal shown when the address is over its cap
     (or (the session)
-        (multiple-value-bind (session reason) (open-session! address (and (wallet-id? wallet) wallet))
+        (multiple-value-bind (session reason)
+            (open-session! address (and (wallet-id? wallet) wallet) :closed? closed?)
           (cond (session
                  (the (set-slot! :session session))
                  (the (set-slot! :owner-key (session-owner session)))
                  (watch-session! self session)
-                 (sheet-send! self (datastar-script-event (owners-script session)))
+                 (sheet-send! self (datastar-script-event (owners-script session))
+                              (datastar-signals-event
+                               (format nil "{\"opened\": true, \"closed\": ~a}"
+                                       (json-boolean (session-closed? session)))))
                  session)
                 (t (the (tell-error! reason)) nil)))))
 
@@ -1278,7 +1304,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
           (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
       (cond ((and (the session) (not (the owner?)))
              (the (tell-error! "This session is someone else's; start your own to build.")))
-            ((the (own-session! address (gethash "wallet" signals)))
+            ((the (own-session! address (gethash "wallet" signals) (eq (gethash "closedPick" signals) t)))
              (multiple-value-bind (started reason response route)
                  (begin-prompt! (the session) prompt address token
                                 ;; a visitor the sibling lab sent here stays here
@@ -1318,7 +1344,6 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                     (deploy-session! session
                                      :name (gethash "dname" signals) :title (gethash "dtitle" signals)
                                      :blurb (gethash "dblurb" signals)
-                                     :closed? (eq (gethash "dclosed" signals) t)
                                      :price-cents (and (eq (gethash "dpriced" signals) t)
                                                        (let ((price (gethash "dprice" signals)))
                                                          (when (stringp price)
@@ -1361,7 +1386,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
              (the (tell-error! "Tick the box first: you declare the right to use and share the file.")))
             ((and *turnstile-site-key* (null token))
              (the (tell-error! "Complete the human check first.")))
-            ((the (own-session! address (gethash "wallet" signals)))
+            ((the (own-session! address (gethash "wallet" signals) (eq (gethash "closedPick" signals) t)))
              (multiple-value-bind (file reason)
                  (accept-upload! (the session) (gethash "name" signals) (gethash "data" signals)
                                  :rights? t :token token :address address)
@@ -1391,7 +1416,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
              (the (tell-error! "No files were sent.")))
             ((not (verify-turnstile token address))
              (the (tell-error! "Complete the human check first.")))
-            ((the (own-session! address (gethash "wallet" signals)))
+            ((the (own-session! address (gethash "wallet" signals) (eq (gethash "closedPick" signals) t)))
              (let ((kept nil) (refused nil))
                (dolist (entry files)
                  (multiple-value-bind (file reason)
@@ -1489,7 +1514,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
       (cond ((and (the session) (not (the owner?)))
              (the (tell-error! "This session is someone else's; start your own to add credits.")))
             ((not (integerp amount)) (the (tell-error! "Say how much.")))
-            ((the (own-session! address (gethash "wallet" signals)))
+            ((the (own-session! address (gethash "wallet" signals) (eq (gethash "closedPick" signals) t)))
              (let ((session (the session)))
                (multiple-value-bind (ok? reason) (topup-check! session token address)
                  (the spent-token!)

@@ -184,6 +184,8 @@ privacy switch can all save at once, and shared session.tmp."
            "engine" (engine-name)
            ;; what the session builds: a model or a web app (kinds.lisp)
            "kind" (kind-name (session-kind session))
+           ;; opened closed-source, and not yet reverted (deploy.lisp)
+           "closed" (if (session-closed? session) t 'yason:false)
            "cents" (session-cents session)
            "allowance" (session-allowance session)
            "credits" (session-credits session)
@@ -241,6 +243,8 @@ is on disk for it."
           (flet ((number-or (key default) (let ((v (gethash key json))) (if (realp v) v default)))
                  (number-or-nil (key) (let ((v (gethash key json))) (and (realp v) v))))
             (setf (session-private? session) (eq (gethash "private" json) 'yason:true))
+            (when (and (eq (gethash "closed" json) 'yason:true) (session-private? session))
+              (close-session-source! session))
             (setf (session-created session) (number-or "created" (get-universal-time))
                   (session-cents session) (number-or "cents" 0)
                   (session-allowance session) (number-or-nil "allowance")
@@ -275,7 +279,9 @@ is on disk for it."
 
 (defun delete-session (session)
   "Forget SESSION, delete its package and its directory -- after a last
-copy of what it holds goes to the archive."
+copy of what it holds goes to the archive.  A session opened
+closed-source that never deployed goes there public (deploy.lisp)."
+  (ignore-errors (revert-closed-session! session))
   (archive-session! session)
   (bt:with-lock-held (*sessions-lock*)
     (remhash (session-id session) *sessions*)
@@ -333,6 +339,8 @@ and directories reaped."
              (age (- now (or (ignore-errors (file-write-date (if (probe-file record) record directory))) now))))
         (when (> age lifetime)
           (archive-stale-directory! directory)
+          ;; opened closed-source and never deployed: public in the archive
+          (revert-closed-record! directory)
           (ignore-errors (uiop:delete-directory-tree (pathname directory) :validate t))
           (push (namestring directory) reaped))))
     (nreverse reaped)))

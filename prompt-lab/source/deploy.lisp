@@ -18,13 +18,16 @@
 ;; or goes away; the deployment stays until its owner deploys again or
 ;; takes it down.
 ;;
-;; The terms are the owner's: the source open (served beside the
-;; deployment) or closed, and use free or priced.  Of what users pay the
-;; house keeps *house-fee-percent* as its hosting and licence fee and
-;; the owner is owed the rest.  The lab keeps the terms and the books
-;; (book-revenue!, revenue-report); taking the money is the gate's, as
-;; every payment here is, and until an instance says its gate does
-;; (*deployment-payments?*) a priced deployment opens to its owner alone.
+;; The source is open (served beside the deployment) or closed, as the
+;; session chose when it opened.  Where money is taken is the author's
+;; to decide: a web app's tollbooths (kinds.lisp), a deployed model's
+;; price for a download.  Of what users pay the house keeps its hosting
+;; and licence fee (*house-fee-percents*, by the source terms) and the
+;; author is owed the rest.  The lab keeps the terms and the books
+;; (book-revenue!, revenue-report, payables).  No money moves yet: a
+;; toll is a test payment (*toll-provider*), and a priced download opens
+;; to its owner alone until a gateway stands behind it
+;; (*deployment-payments?*).
 ;;
 ;; Every deployment and every line of the books names the engine and the
 ;; Lisp it ran on, so that what hosted applications earn can be reported
@@ -104,15 +107,83 @@ owner what is owed."
 
 (defvar *deploy-lock* (bt:make-lock "prompt-lab deployments"))
 
-(defun deploy-session! (session &key name title blurb closed? price-cents payee)
+;;
+;; Closed source is a session's choice, made as it opens and before its
+;; first prompt: the session is then closed to watchers and kept out of
+;; the listings, as a private one is, and what it deploys does not serve
+;; its source.  The choice stands while the session completes the
+;; Monetize flow -- a deployment.  A closed session that ends without one
+;; REVERTS: it is opened again and goes into the public archive under the
+;; GNU Affero General Public License, like any other.
+;;
+
+(defvar *closed-sessions* (make-hash-table :test #'equal)
+  "Session id -> true, for the sessions opened closed-source.")
+
+(defun session-closed? (session)
+  (and (bt:with-lock-held (*kinds-lock*) (gethash (session-id session) *closed-sessions*))
+       (session-private? session)))
+
+(defun close-session-source! (session)
+  "Mark SESSION, just opened, as closed-source: out of sight until it is
+deployed or reverts."
+  (bt:with-lock-held (*kinds-lock*) (setf (gethash (session-id session) *closed-sessions*) t))
+  (setf (session-private? session) t)
+  session)
+
+(defun closed-deployment? (id)
+  "Whether session ID has completed the Monetize flow: a closed deployment
+made from it stands."
+  (find-if #'(lambda (record) (and (equal (gethash "session" record) id)
+                                   (truthy? (gethash "closed" record))))
+           (deployment-records)))
+
+(defun revert-closed-session! (session)
+  "SESSION is ending.  If it was opened closed-source and never deployed,
+it is opened again, so the record that goes to the archive is public."
+  (when (session-closed? session)
+    (unless (ignore-errors (closed-deployment? (session-id session)))
+      (setf (session-private? session) nil)
+      (ignore-errors
+       (log-event session :note "This session was opened closed-source and ended without a deployment: its source is public again, under the GNU Affero General Public License."))
+      ;; the record on disk is what the archive copies
+      (save-session! session)))
+  (bt:with-lock-held (*kinds-lock*) (remhash (session-id session) *closed-sessions*)))
+
+(defun revert-closed-record! (directory)
+  "The same for a session directory no live session owns (a restarted
+Lisp left it): its archived record is opened when it was closed and
+never deployed.  Never signals."
+  (ignore-errors
+   (let* ((json (read-record (merge-pathnames "session.json" directory)))
+          (id (and json (gethash "id" json)))
+          (created (and json (gethash "created" json))))
+     (when (and (stringp id) (integerp created) (truthy? (gethash "closed" json))
+                (not (closed-deployment? id)))
+       (let* ((target (archive-directory-for id created))
+              (file (and target (merge-pathnames "session.json" target)))
+              (record (and file (read-record file))))
+         (when record
+           (setf (gethash "private" record) 'yason:false
+                 (gethash "closed" record) 'yason:false)
+           (write-text-file (with-output-to-string (out) (yason:encode record out)) file)))))))
+
+(defun deploy-session! (session &key name title blurb price-cents payee)
   "Deploy what SESSION built as NAME on the given terms.  Values: the
-record, or nil and the reason.  Deploying again from the same session
-under the same name replaces the copy and the terms."
+record, or nil and the reason.  Its source is closed when the session
+was opened closed-source, else open.  Deploying again from the same
+session under the same name replaces the copy and the terms."
   (bt:with-lock-held (*deploy-lock*)
-    (let* ((name (and (stringp name) (string-downcase (string-trim " " name))))
+    (let* ((closed? (session-closed? session))
+           (name (and (stringp name) (string-downcase (string-trim " " name))))
            (existing (and (deployment-name? name) (deployment-record name)))
            (mine (session-deployment session))
-           (price (if (and (integerp price-cents) (plusp price-cents)) price-cents 0))
+           ;; a price is a deployed MODEL's, for a download; a web app
+           ;; keeps tollbooths of its own (kinds.lisp)
+           (price (if (and (integerp price-cents) (plusp price-cents)
+                           (not (eq (session-kind session) :app)))
+                      price-cents
+                      0))
            (payee (clip-line payee 200))
            (symbol (ignore-errors (built-symbol session))))
       (cond
@@ -130,9 +201,13 @@ under the same name replaces the copy and the terms."
         ((and (null existing) (>= (length (deployment-records)) *max-deployments*))
          (values nil "This lab holds all the deployments it takes."))
         ((and (plusp price) (not (<= (car *deployment-price-range*) price (cdr *deployment-price-range*))))
-         (values nil (format nil "A price is between $~,2f and $~,2f a use."
+         (values nil (format nil "A price is between $~,2f and $~,2f a download."
                              (/ (car *deployment-price-range*) 100) (/ (cdr *deployment-price-range*) 100))))
-        ((and (plusp price) (not (and (find #\@ payee) (> (length payee) 5))))
+        ((and (or (plusp price) (eq (session-kind session) :app) (plusp (length payee)))
+              (plusp (length payee))
+              (not (and (find #\@ payee) (> (length payee) 5))))
+         (values nil "That does not read as an email address."))
+        ((and (plusp price) (zerop (length payee)))
          (values nil "Say where your share is to be paid: an email address we can reach you at."))
         (t
          (let* ((directory (deployment-directory name))
@@ -148,7 +223,7 @@ under the same name replaces the copy and the terms."
                            "lisp" (lisp-name)
                            "closed" (if closed? t 'yason:false)
                            "price_cents" price
-                           "fee_percent" *house-fee-percent*
+                           "fee_percent" (house-fee-percent closed?)
                            "payee" payee
                            "created" (or (and existing (gethash "created" existing)) (get-universal-time))
                            "deployed" (get-universal-time))))
@@ -157,9 +232,9 @@ under the same name replaces the copy and the terms."
            (write-text-file (with-output-to-string (out) (yason:encode record out))
                             (merge-pathnames "deployment.json" directory))
            (drop-deployed! name)
-           (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source, ~:[free to use~;~:*$~,2f a use, of which ~a% is the hosting and licence fee~]."
-                      name (deployment-url name) closed?
-                      (and (plusp price) (/ price 100)) *house-fee-percent*)
+           (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the hosting and licence fee~@[; $~,2f a download~]."
+                      name (deployment-url name) closed? (house-fee-percent closed?)
+                      (and (plusp price) (/ price 100)))
            (deployment-record name)))))))
 
 (defun undeploy! (name owner-key)
@@ -226,17 +301,23 @@ none or its file no longer compiles."
                         (setf (gethash name *deployed*) deployed)))))))))))
 
 (defun deployment-admits? (record owner-key)
-  "Whether deployment RECORD opens to a visitor holding OWNER-KEY (or none):
-a free one to everyone, a priced one to its owner -- and to a visitor who
-has paid, once the gate takes payment (*deployment-payments?*; the gate's
-side of that is not written yet, so no one else is let in)."
+  "Whether a deployed model's downloads open to a visitor holding OWNER-KEY
+(or none): a free one's to everyone, a priced one's to its owner -- and to
+a visitor who has paid, once the gate takes payment
+(*deployment-payments?*; the gate's side of that is not written yet, so
+no one else is let in)."
   (or (not (deployment-priced? record))
       (and (stringp owner-key) (equal (gethash "owner" record) owner-key))))
 
-(defun deployed-for-viewer (name owner-key)
-  "The running deployment NAME for the viewer, when it is a model's and
-the visitor may use it."
-  (let ((record (deployment-record name)))
+(defun deployed-for-viewer (name)
+  "The running deployment NAME for the viewer: a deployed model opens to
+everyone."
+  (and *deployments?* (deployment-record name) (ensure-deployed name)))
+
+(defun deployed-for-download (name owner-key)
+  "The running deployment NAME for the download door, when the visitor may
+have its files."
+  (let ((record (and *deployments?* (deployment-record name))))
     (and record (deployment-admits? record owner-key) (ensure-deployed name))))
 
 
@@ -249,17 +330,22 @@ the visitor may use it."
 
 (defun revenue-file () (merge-pathnames "revenue.jsonl" *deployed-root*))
 
-(defun book-revenue! (name gross-cents &key reference)
-  "Book a payment of GROSS-CENTS for a use of deployment NAME.  REFERENCE
-is the payment's id at whoever settled it.  Returns the line booked."
+(defun book-revenue! (name gross-cents &key reference toll test?)
+  "Book a payment of GROSS-CENTS to deployment NAME.  REFERENCE is the
+payment's id at whoever settled it, TOLL the name of the tollbooth it was
+paid at, TEST? true for a payment no money moved for (the reports leave
+those out).  Returns the line booked."
   (let* ((record (or (deployment-record name) (error "There is no deployment ~a." name)))
-         (percent (or (gethash "fee_percent" record) *house-fee-percent*))
+         (closed? (truthy? (gethash "closed" record)))
+         (percent (or (gethash "fee_percent" record) (house-fee-percent closed?)))
          (fee (round (* gross-cents percent) 100))
          (line (h "time" (get-universal-time)
                   "name" name
                   "engine" (gethash "engine" record)
                   "lisp" (gethash "lisp" record)
-                  "closed" (if (truthy? (gethash "closed" record)) t 'yason:false)
+                  "closed" (if closed? t 'yason:false)
+                  "test" (if test? t 'yason:false)
+                  "toll" toll
                   "gross_cents" gross-cents
                   "fee_percent" percent
                   "fee_cents" fee
@@ -282,17 +368,33 @@ is the payment's id at whoever settled it.  Returns the line booked."
               for line = (ignore-errors (yason:parse text))
               when (hash-table-p line) collect line)))))
 
-(defun revenue-report (&key year quarter)
+(defun payables (&key tests?)
+  "What the books say each author is owed, all time: a list of plists
+(:payee :name :payments :payee-cents), one per deployment.  What has been
+paid out is not kept here: whoever disburses keeps that."
+  (let ((sums nil))
+    (dolist (line (revenue-lines) (sort sums #'string< :key #'(lambda (sum) (getf sum :name))))
+      (when (or tests? (not (gethash "test" line)))
+        (let* ((name (gethash "name" line))
+               (sum (or (find name sums :key #'(lambda (sum) (getf sum :name)) :test #'equal)
+                        (first (push (list :payee (gethash "payee" line) :name name
+                                           :payments 0 :payee-cents 0)
+                                     sums)))))
+          (incf (getf sum :payments))
+          (incf (getf sum :payee-cents) (gethash "payee_cents" line)))))))
+
+(defun revenue-report (&key year quarter tests?)
   "The books summed by runtime -- the Lisp and the engine (\"gendl\", or
 \"solid\" for one with the solids kernel) -- for YEAR and QUARTER (1-4,
 UTC) when given: a list of plists (:lisp :engine :payments :gross-cents
 :fee-cents :payee-cents), one per runtime.  :fee-cents is the house's
-revenue from that runtime."
+revenue from that runtime.  Test payments are left out unless TESTS?."
   (let ((sums nil))
     (dolist (line (revenue-lines) (sort sums #'string< :key #'(lambda (sum) (getf sum :lisp))))
       (multiple-value-bind (s m hour d month line-year) (decode-universal-time (gethash "time" line) 0)
         (declare (ignore s m hour d))
-        (when (and (or (null year) (eql year line-year))
+        (when (and (or tests? (not (gethash "test" line)))
+                   (or (null year) (eql year line-year))
                    (or (null quarter) (eql quarter (1+ (floor (1- month) 3)))))
           (let* ((lisp (or (gethash "lisp" line) "unknown"))
                  (engine (or (gethash "engine" line) "unknown"))
@@ -316,10 +418,10 @@ revenue from that runtime."
   (refuse req ent net.aserve:*response-not-found* "This lab deploys nothing."))
 
 (defun deploy-door (req ent)
-  "POST <prefix>/api/deploy {session, name, title?, blurb?, closed?,
-price_cents?, payee?, turnstile?}: the session's owner deploys what it
-built; answers the deployment.  Where a human check stands it wants its
-token."
+  "POST <prefix>/api/deploy {session, name, title?, blurb?, price_cents?,
+payee?, turnstile?}: the session's owner deploys what it built; answers
+the deployment.  Its source is closed when the session was opened
+closed-source.  Where a human check stands it wants its token."
   (let* ((json (request-json req))
          (session (requested-session req json)))
     (cond ((not *deployments?*) (deployments-off req ent))
@@ -333,7 +435,6 @@ token."
                        (deploy-session! session
                                         :name (gethash "name" json) :title (gethash "title" json)
                                         :blurb (gethash "blurb" json)
-                                        :closed? (truthy? (gethash "closed" json))
                                         :price-cents (gethash "price_cents" json)
                                         :payee (gethash "payee" json))
                      (if record
@@ -358,6 +459,56 @@ newest first."
   (if (not *deployments?*)
       (deployments-off req ent)
       (respond-json req ent (h "deployments" (map 'vector #'deployment-state (deployment-records))))))
+
+(defun app-file-door (req ent)
+  "GET <prefix>/app-file?iid=<instance>&format=<name>: a web app's model as
+a file, as it stands in that visitor's instance of the app -- the first
+of its objects, inputs and all (web-app's file-link, kinds.lisp).  A
+format the app put a toll on (file-tolls) answers 402 until this visitor
+has paid it, and spends a use of the payment."
+  (let* ((iid (query-value req "iid"))
+         (app (and (stringp iid)
+                   (first (gethash (make-keyword-sensitive iid) gwl::*instance-hash-table*))))
+         (kind (string-downcase (or (query-value req "format") "")))
+         (entry (assoc kind (download-formats) :test #'string=))
+         (key (and app entry (typep app 'web-app)
+                   (loop for (format toll) on (the-object app file-tolls) by #'cddr
+                         when (string-equal format kind) return toll)))
+         (model (and app (typep app 'web-app) (first (the-object app objects)))))
+    (cond ((or (null app) (not (typep app 'web-app)))
+           (refuse req ent net.aserve:*response-not-found* "This page has expired; open the app again."))
+          ((null entry) (refuse req ent "No such download here: ~a." kind))
+          ((null model) (refuse req ent "This app shows no model to download."))
+          ((and key (not (the-object app (toll-paid? key))))
+           (refuse req ent (net.aserve::make-resp 402 "Payment Required")
+                   "This file is paid for on the app's page first."))
+          (t
+           (let ((file (merge-pathnames (format nil "download-~a.~a" (random 1000000000) (third entry))
+                                        (uiop:temporary-directory))))
+             (unwind-protect
+                  (multiple-value-bind (ok? note)
+                      (handler-case
+                          (with-time-limit (*render-seconds* "download")
+                            (let ((*package* (symbol-package (the-object app type))))
+                              (write-download kind model file)))
+                        (error (condition) (values nil (format nil "The model did not write: ~a" condition))))
+                    (cond ((not ok?)
+                           (refuse req ent (net.aserve::make-resp 422 "Unprocessable Entity") "~a" note))
+                          (t
+                           (when key (the-object app (use-toll! key)))
+                           (net.aserve:with-http-response (req ent :content-type (second entry) :format :binary)
+                             (setf (net.aserve:reply-header-slot-value req :content-disposition)
+                                   (format nil "attachment; filename=\"~a.~a\""
+                                           (or (the-object app deployment-name) "prompt-lab-app") (third entry)))
+                             (setf (net.aserve:reply-header-slot-value req :cache-control) "no-store")
+                             (net.aserve:with-http-body (req ent)
+                               (with-open-file (in file :element-type '(unsigned-byte 8))
+                                 (let ((buffer (make-array 4096 :element-type '(unsigned-byte 8)))
+                                       (out (net.aserve:request-reply-stream req)))
+                                   (loop for count = (read-sequence buffer in)
+                                         while (plusp count)
+                                         do (write-sequence buffer out :end count)))))))))
+               (when (probe-file file) (ignore-errors (delete-file file)))))))))
 
 (defun respond-deployment (req ent text &key (response net.aserve:*response-ok*) (type "text/plain; charset=utf-8")
                                     attachment)
@@ -407,12 +558,6 @@ open deployment's model file."
                              :attachment (format nil "~a.lisp" name))))
           ((and what (plusp (length what)))
            (respond-deployment req ent "Not found." :response net.aserve:*response-not-found*))
-          ((not (deployment-admits? record owner-key))
-           (respond-deployment req ent
-                         (deployment-page (gethash "title" record)
-                                          (format nil "This is a priced application: $~,2f a use." (/ (gethash "price_cents" record) 100))
-                                          "Payment for deployed applications is not switched on at this lab yet, so for now it opens only to its owner.")
-                         :response (net.aserve::make-resp 402 "Payment Required") :type "text/html; charset=utf-8"))
           (t
            (let ((deployed (ensure-deployed name)))
              (cond ((null deployed)
@@ -420,7 +565,10 @@ open deployment's model file."
                                   :response net.aserve:*response-internal-server-error* :type "text/html; charset=utf-8"))
                    ((and (eq (session-kind deployed) :app) (app-defined? deployed))
                     (touch deployed)
-                    (gwl-make-object req ent (format nil "~s" (app-symbol deployed))))
+                    ;; the instance knows which deployment it serves: its
+                    ;; tollbooths book to it (kinds.lisp)
+                    (gwl-make-object req ent (format nil "~s" (app-symbol deployed))
+                                     :make-object-args (list :deployment-name name)))
                    (t
                     (touch deployed)
                     (net.aserve:with-http-response (req ent :response net.aserve:*response-found*)
