@@ -233,6 +233,13 @@ from a gate that names no credits."
            (write-string (buttons offers nil "Buy:") out))))
       (t "<p class=\"pl-line\">Credits show here once you build.</p>"))))
 
+(defun publishable-key (session)
+  "The Stripe publishable key the gate reports -- with the pot, else with
+SESSION's balance -- or nil."
+  (let ((key (or (getf (pot) :key)
+                 (and session (ignore-errors (gethash "publishable_key" (spend-state session)))))))
+    (and (stringp key) (plusp (length key)) key)))
+
 (defun listing-entry (summary archive?)
   "String of HTML: one session of a listing (a summary from browse.lisp)."
   (let* ((id (gethash "id" summary))
@@ -310,6 +317,7 @@ from a gate that names no credits."
 .pl-meter{height:.45rem;background:var(--pl-panel-alt,#eee);border:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd);border-radius:var(--pl-radius-pill,9px);overflow:hidden;margin:.3rem 0}
 .pl-meter span{display:block;height:100%;background:var(--pl-accent,#366fc5)}
 .pl-line{color:var(--pl-ink-dim,#555);font-size:.9em;margin:.3rem 0}.pl-begging{color:var(--pl-status-fail,#b00);font-weight:600;margin:.3rem 0}
+.pl-pay{margin-top:.6rem}.pl-card-line{padding:.6rem;border:var(--pl-rule,1px) solid var(--pl-line,#ccc);border-radius:var(--pl-radius,4px);background:var(--pl-panel,#fff);margin:.3rem 0}
 .pl-topup{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem;font-size:.9em}
 .pl-private{display:inline-flex;gap:.3rem;align-items:center;cursor:pointer}
 .pl-private input{accent-color:var(--pl-accent,#366fc5)}
@@ -361,6 +369,39 @@ calls; an edit in progress keeps its text and says the file changed.")
 
 
 
+(defparameter *sheet-pay-script*
+  "(function(){
+var stripe=null,card=null,embedded=null,last=null;
+function $(id){return document.getElementById(id)}
+function show(id,on){var e=$(id);if(e)e.style.display=on?'':'none'}
+function loadStripe(){if(window.Stripe)return Promise.resolve();return new Promise(function(ok,no){var s=document.createElement('script');s.src='https://js.stripe.com/v3/';s.async=true;s.onload=ok;s.onerror=function(){no(new Error('Stripe.js did not load'))};document.head.appendChild(s)})}
+function tokenHex(name,fallback){try{var v=getComputedStyle(document.documentElement).getPropertyValue(name).trim();var c=document.createElement('canvas');c.width=c.height=1;var g=c.getContext('2d');g.fillStyle='#010203';g.fillStyle=v;if(!v||g.fillStyle==='#010203')return fallback;g.fillRect(0,0,1,1);var p=g.getImageData(0,0,1,1).data;return '#'+[p[0],p[1],p[2]].map(function(n){return('0'+n.toString(16)).slice(-2)}).join('')}catch(e){return fallback}}
+window.plAction=function(fn,signals){return fetch('/gdlAction?iid='+encodeURIComponent(window.plIid)+'&fn='+fn,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(signals||{})})};
+window.plClosePayment=function(){if(embedded){try{embedded.destroy()}catch(e){}embedded=null}if(card){try{card.destroy()}catch(e){}card=null}show('pl-pay',false);show('pl-card-pay',false);$('pl-card-error').textContent='';$('pl-checkout').innerHTML='';$('pl-card-line').innerHTML=''};
+window.plMoreOptions=function(){if(last)plAction('topup-full',{amount:last.amount})};
+window.plOpenPayment=function(r){last=r;plClosePayment();
+ try{localStorage.setItem('prompt-lab-wallet',r.wallet)}catch(e){}
+ loadStripe().then(function(){stripe=window.Stripe(r.publishable_key);
+  show('pl-pay',true);$('pl-card-amount').textContent=r.label||'';
+  if(r.flow==='card'){
+   card=stripe.elements().create('card',{style:{base:{color:tokenHex('--pl-ink','#101010'),fontFamily:getComputedStyle(document.body).fontFamily||'system-ui, sans-serif',fontSize:'16px','::placeholder':{color:tokenHex('--pl-ink-dimmer','#6f6e68')}},invalid:{color:tokenHex('--pl-status-fail','#b00018')}}});
+   show('pl-card-line',true);card.mount('#pl-card-line');
+   card.on('change',function(e){$('pl-card-error').textContent=e.error?e.error.message:''});
+   var pay=$('pl-card-pay'),label='Pay $'+(r.amount/100).toFixed(r.amount%100?2:0);show('pl-card-pay',true);pay.disabled=false;pay.textContent=label;
+   pay.onclick=function(){pay.disabled=true;pay.textContent='Paying...';$('pl-card-error').textContent='';
+    stripe.confirmCardPayment(r.client_secret,{payment_method:{card:card}}).then(function(res){
+     if(res.error){$('pl-card-error').textContent=res.error.message||'The card was not accepted. Nothing was charged.';pay.disabled=false;pay.textContent=label}
+     else if(res.paymentIntent&&res.paymentIntent.status==='succeeded'){var co=r.checkout;plClosePayment();plAction('confirm',{checkout:co,wallet:r.wallet})}
+     else{$('pl-card-error').textContent='The payment did not go through. Nothing was charged.';pay.disabled=false;pay.textContent=label}})}}
+  else{show('pl-card-line',false);return stripe.initEmbeddedCheckout({clientSecret:r.client_secret}).then(function(co){embedded=co;co.mount('#pl-checkout')})}
+ }).catch(function(e){$('pl-card-error').textContent='The payment form could not open: '+e;show('pl-pay',true)})};
+})();"
+  "String. The payment in the sheet: Stripe's one-line card control and a
+Pay button for a gate that made a PaymentIntent, or Stripe's full form in
+the page, opened by plOpenPayment from start-payment!.  A card paid here
+is confirmed through the confirm action (plAction posts to /gdlAction as
+Datastar does).")
+
 (define-object lab-sheet (sluice:assembly)
 
   :documentation
@@ -408,7 +449,7 @@ the sheet shows only once its owner's key is proven (claim)."
    (user-mode?-default nil)
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
-   (datastar-actions (list :build :claim :save :topup :privacy :wear-skin))
+   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :wear-skin))
 
    (owner? (let ((session (the session)))
              (and session (the owner-key) (owner? session (the owner-key)) t)))
@@ -429,6 +470,7 @@ the sheet shows only once its owner's key is proven (claim)."
              (:script "window.plTurnstile=function(t){var e=document.getElementById('pl-turnstile');if(e){e.value=t;e.dispatchEvent(new Event('input',{bubbles:true}))}};")))
       (:script :defer "defer" :src (static-url "editor.js"))
       (:script (str *sheet-editor-script*))
+      (:script (str *sheet-pay-script*))
       (:style (str *sheet-css*))))
 
    ;; Written with the page, never redrawn: the lab's header, the page's
@@ -445,6 +487,7 @@ the sheet shows only once its owner's key is proven (claim)."
             ;; the skin this browser chose, shared with the classic page
             ;; (localStorage prompt-lab-skin): worn when it is not the one
             ;; showing, and kept when View > Skin picks another
+            (:script (str (format nil "window.plIid=~a;" (js-string-literal (the instance-id)))))
             (:script "window.sluiceSkinChosen=function(n){try{localStorage.setItem('prompt-lab-skin',n)}catch(e){}};")
             (:span :|data-init|
                    ;; cl-who writes attribute values raw, between quotes
@@ -614,7 +657,19 @@ the sheet shows only once its owner's key is proven (claim)."
                     (with-lhtml-string ()
                       (:div :class "pl-card pl-credits"
                             (:h2 "Modeling credits")
-                            (str (credits-html self (pot) spend)))))))
+                            (str (credits-html self (pot) spend))
+                            ;; the payment in the page (start-payment!): Stripe's
+                            ;; card control and form live in frames the script
+                            ;; makes, which a patch must not strip
+                            (:div :id "pl-pay" :class "pl-pay" :|data-ignore-morph| "" :style "display:none"
+                                  (:div :id "pl-card-amount" :class "pl-line")
+                                  (:div :id "pl-card-line" :class "pl-card-line")
+                                  (:div :id "pl-card-error" :class "pl-error" :role "alert")
+                                  (:div :id "pl-checkout")
+                                  (:div :class "pl-row"
+                                        (:button :type "button" :id "pl-card-pay" :class "pl-build" :style "display:none" "Pay")
+                                        (:button :type "button" :class "pl-download" :onclick "plClosePayment()" "Close")
+                                        (:a :href "#" :id "pl-pay-more" :onclick "plMoreOptions(); return false" "more payment options"))))))))
 
    ;; The model's files, from the download door (export.lisp): fetched, so
    ;; a refusal is a line on the page and not a saved file, and with the
@@ -811,11 +866,81 @@ the sheet shows only once its owner's key is proven (claim)."
                    (the (tell-error! reason)))
                (the spent-token!))))))
 
+   (start-payment!
+    (session amount &key card?)
+    ;; Ask the gate for a payment and open it here: Stripe's one-line card
+    ;; control (CARD? and a gate that makes a PaymentIntent, flow "card"),
+    ;; else Stripe's full form in the page (a client secret), else Stripe's
+    ;; hosted page (a url), which comes back with the checkout on the
+    ;; address for claim to confirm.  Without a publishable key there is
+    ;; no form in the page, only the hosted page.
+    (let ((key (publishable-key session)))
+      (multiple-value-bind (answer reason)
+          (begin-topup! session amount (page-url *datastar-request* session :path "/sheet")
+                        :embedded? (and key t) :flow (and key card? "card"))
+        (let ((secret (and answer (gethash "client_secret" answer)))
+              (url (and answer (gethash "url" answer))))
+          (cond
+            ((and key (stringp secret))
+             (sheet-send! self (datastar-script-event
+                                (format nil "plOpenPayment(~a)"
+                                        (with-output-to-string (s)
+                                          (yason:encode (h "flow" (or (gethash "flow" answer) "checkout")
+                                                           "client_secret" secret
+                                                           "checkout" (or (gethash "checkout" answer) "")
+                                                           "publishable_key" key
+                                                           "wallet" (or (session-wallet session) "")
+                                                           "amount" amount
+                                                           "label" (format nil "~:d modeling credits for ~a~:[~;, into the community pot~]"
+                                                                           (credits-for-amount amount) (dollars amount) (pot)))
+                                                        s))))))
+            ((stringp url)
+             (sheet-send! self (datastar-script-event
+                                (format nil "try{localStorage.setItem('prompt-lab-wallet',~a)}catch(e){};location.href=~a"
+                                        (js-string-literal (or (session-wallet session) ""))
+                                        (js-string-literal url)))))
+            (t (the (tell-error! (or reason "The top-up could not be started.")))))))))
+
+   (topup-full
+    (signals)
+    ;; "more payment options": Stripe's full form for the amount the card
+    ;; line was opened for; the human check that opened it covers this
+    (let ((session (the session))
+          (amount (gethash "amount" signals)))
+      (cond ((not (the owner?)) (the (tell-error! "Only the session's owner may add credits here.")))
+            ((not (integerp amount)) (the (tell-error! "Say how much.")))
+            (t (multiple-value-bind (ok? reason)
+                   (topup-check! session nil (client-address *datastar-request*))
+                 (if ok?
+                     (the (start-payment! session amount))
+                     (the (tell-error! reason))))))))
+
+   (confirm
+    (signals)
+    ;; a card paid in the page: the gate credits the checkout once
+    (let ((session (the session))
+          (checkout (gethash "checkout" signals))
+          (wallet (gethash "wallet" signals)))
+      (cond ((not (the owner?)) (the (tell-error! "Only the session's owner may confirm a payment.")))
+            ((not (and (stringp checkout) (plusp (length checkout)) (wallet-id? wallet)))
+             (the (tell-error! "The payment could not be confirmed: no checkout named.")))
+            (t (multiple-value-bind (outcome text) (confirm-topup! session wallet checkout)
+                 (sheet-send! self (datastar-signals-event
+                                    (with-output-to-string (s)
+                                      (yason:encode (h "notice" (cond ((equal outcome "credited")
+                                                                       (if (pot)
+                                                                           "Thank you: your credits are in the pot, for everyone's builds."
+                                                                           "Thank you: your credits are in."))
+                                                                      ((equal outcome "already") "That payment was already credited.")
+                                                                      ((equal outcome "unpaid") "The payment has not completed yet; it is credited when it does.")
+                                                                      (t (format nil "The payment could not be confirmed: ~a" text))))
+                                                    s))))
+                 (the (set-slot! :revision (1+ (the revision)))))))))
+
    (topup
     (signals)
-    ;; modeling credits by card: the human check, then Stripe's hosted
-    ;; Checkout, which comes back to this sheet with the checkout and the
-    ;; wallet on the address (claim confirms it)
+    ;; modeling credits by card: the human check, then the payment in the
+    ;; page (start-payment!)
     (let ((address (client-address *datastar-request*))
           (amount (gethash "amount" signals))
           (token (gethash "turnstile" signals)))
@@ -828,14 +953,8 @@ the sheet shows only once its owner's key is proven (claim)."
                  (the spent-token!)
                  (if (not ok?)
                      (the (tell-error! reason))
-                     (multiple-value-bind (answer reason)
-                         (begin-topup! session amount (page-url *datastar-request* session :path "/sheet"))
-                       (if (and answer (stringp (gethash "url" answer)))
-                           (sheet-send! self (datastar-script-event
-                                              (format nil "try{localStorage.setItem('prompt-lab-wallet',~a)}catch(e){};location.href=~a"
-                                                      (js-string-literal (or (session-wallet session) ""))
-                                                      (js-string-literal (gethash "url" answer)))))
-                           (the (tell-error! (or reason "The top-up could not be started."))))))))))))))
+                     ;; the card line where the gate offers it
+                     (the (start-payment! session amount :card? t)))))))))))
 
 
 (defun browse-links ()
