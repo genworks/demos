@@ -314,11 +314,11 @@ SESSION's balance -- or nil."
 .pl-source .cm-gutters{background:var(--pl-panel-alt,#f3f3f3);color:var(--pl-ink-dimmer,#888);border-right:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd)}
 .pl-source .cm-cursor{border-left-color:var(--pl-ink,#111)}
 .code-editor .tok-comment{color:var(--pl-code-comment,var(--pl-ink-dimmer));font-style:italic}
-.code-editor .tok-keyword{color:var(--pl-code-keyword,#6a1b9a);font-weight:700}
-.code-editor .tok-heading{color:var(--pl-code-section,#00695c);font-weight:700}
-.code-editor .tok-atom,.code-editor .tok-meta{color:var(--pl-code-atom,#1550a8)}
-.code-editor .tok-number{color:var(--pl-code-number,#9a4a00)}
-.code-editor .tok-string,.code-editor .tok-string2{color:var(--pl-code-string,#2a6e2f)}
+.code-editor .tok-keyword{color:#6a1b9a;color:var(--pl-code-keyword,color-mix(in srgb,#8e24aa 45%,var(--pl-ink)));font-weight:700}
+.code-editor .tok-heading{color:#00695c;color:var(--pl-code-section,color-mix(in srgb,#00897b 50%,var(--pl-ink)));font-weight:700}
+.code-editor .tok-atom,.code-editor .tok-meta{color:#1550a8;color:var(--pl-code-atom,color-mix(in srgb,#1e6fd9 50%,var(--pl-ink)))}
+.code-editor .tok-number{color:#9a4a00;color:var(--pl-code-number,color-mix(in srgb,#d2691e 50%,var(--pl-ink)))}
+.code-editor .tok-string,.code-editor .tok-string2{color:#2a6e2f;color:var(--pl-code-string,color-mix(in srgb,#2e9d38 50%,var(--pl-ink)))}
 .code-editor .tok-punctuation{color:var(--pl-code-paren,var(--pl-ink-dimmer))}.code-editor .tok-invalid{color:var(--pl-status-fail)}
 .pl-buy,.pl-download,.pl-source-head button{font:inherit;font-size:.85em;padding:.2rem .6rem;border:var(--pl-rule,1px) solid var(--pl-line,#ccc);border-radius:var(--pl-radius,4px);background:var(--pl-panel,#fff);color:var(--pl-link,#1550a8);cursor:pointer}
 .pl-buy:disabled{opacity:.4;cursor:default}
