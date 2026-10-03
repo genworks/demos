@@ -21,6 +21,8 @@
              #:run-prompt
              #:start-prompt!
              #:viewer
+             #:web-app
+             #:*kinds*
              #:publish-prompt-lab!
              #:*workspace-root*
              #:*url-prefix*

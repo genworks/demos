@@ -60,6 +60,35 @@ build, by anyone, draws on, that anyone may add to up to a limit, and
 that stops the lab at zero until someone does.  The page shows
 whichever the gate says it keeps; the reference instance keeps a pot.
 
+## Two kinds of build: a geometry model, or a web app
+
+A switch beside the prompt says what the agent builds
+(`source/kinds.lisp`):
+
+- a **geometry model**, the default: the object named `MODEL`, shown in
+  the viewer with a control for each of its inputs;
+- a **web app**: the object named `APP`, a page written in GWL, Gendl's
+  web layer, with form controls of its own, sections that redraw as the
+  inputs change, and, when it shows geometry, a `MODEL` in the same
+  file drawn in a viewport on the page.  The lab serves the app at
+  `<prefix>/app?session=<id>` and its page links it as **Open the app**.
+
+The kind goes with each prompt and the session keeps the last one.  A
+web app mixes in `prompt-lab:web-app` (the demos' shared page chrome,
+and an instance that expires when its visitor leaves); the agent is
+given a whole worked app as its recipe (`*app-recipe*`, which the CI
+compiles, checks and serves on every engine) and a `check_app` tool
+that builds the page and reports its controls, its sections and what
+it says.  From a script, `"kind": "app"` or `"kind": "model"` rides
+with the prompt, and the state door answers `kind`, `app_defined` and
+`app_url`.  `*kinds*` is what an instance offers, the default first:
+`'(:model)` offers no switch.
+
+A web app is a page written by a visitor's prompts, or by the visitor,
+and served by the lab's own host: **an instance that serves strangers
+should give the apps an origin of their own**, apart from anything
+that keeps a visitor's keys, before it offers this kind.
+
 ## Building from a drawing: uploaded files
 
 A visitor may hand the agent files to build from: a 2D drawing as a
@@ -113,8 +142,8 @@ door answers 409 with `{"route": {"engine": ..., "url": ...}}`;
 The page is one client of the lab's doors, and a script or an agent
 may be another.  `POST <prefix>/api/session` with `{}` opens a session
 and answers its id and its owner key; `POST <prefix>/api/prompt` with
-`{"session": ..., "prompt": ...}` and the key in an
-`X-Prompt-Lab-Owner` header starts a build; `GET
+`{"session": ..., "prompt": ...}` (and `"kind": "app"` for a web app)
+and the key in an `X-Prompt-Lab-Owner` header starts a build; `GET
 <prefix>/api/state?session=...` follows it: the log, the model's
 source, the viewer's address.
 

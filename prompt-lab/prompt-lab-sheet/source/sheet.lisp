@@ -58,8 +58,9 @@
       sheets)))
 
 (defun model-stamp (session)
-  "When SESSION's model was last compiled, or nil when it has none."
-  (and (model-defined? session)
+  "When SESSION's model (or web app) was last compiled, or nil when it has
+none."
+  (and (or (model-defined? session) (app-defined? session))
        (ignore-errors (file-write-date (make-pathname :type "fasl"
                                                       :defaults (session-model-file session))))))
 
@@ -340,6 +341,9 @@ SESSION's balance -- or nil."
 .pl-upload{margin-top:.6rem;padding-top:.5rem;border-top:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd);font-size:.9em}
 .pl-rights{display:block;color:var(--pl-ink-dim,#555)}.pl-rights input{accent-color:var(--pl-accent,#366fc5)}
 #pl-file{font:inherit;max-width:100%}
+.pl-kinds{margin:0 0 .45rem;gap:.7rem;flex-wrap:wrap;font-size:.9em}.pl-kinds .pl-line{margin:0}
+.pl-pick{display:inline-flex;gap:.3rem;align-items:center;cursor:pointer}.pl-pick input{accent-color:var(--pl-accent,#366fc5);margin:0}
+.pl-open-app{font-weight:600;color:var(--pl-link,#1550a8)}
 .pl-list{max-width:60rem;margin:0 auto;padding:1rem}
 .pl-list h2{font-family:var(--pl-font-label);font-weight:var(--pl-label-weight);text-transform:var(--pl-label-case);letter-spacing:var(--pl-label-tracking)}
 .pl-entry-card{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:.8rem;align-items:center;padding:.6rem .7rem;margin-bottom:.5rem;background:var(--pl-panel);border:var(--pl-rule) solid var(--pl-line);border-radius:var(--pl-radius);color:var(--pl-ink);text-decoration:none}
@@ -415,11 +419,13 @@ window.plUpload=function(el,owner,wallet,token){var f=el.files&&el.files[0],n=do
  fr.readAsDataURL(f)};
 // a request that wants the other lab's engine: the browser goes there,
 // carrying the prompt and the reason, which the page there takes up
-window.plRoute=function(url,prompt,reason){try{sessionStorage.setItem('prompt-lab-carry',JSON.stringify({prompt:prompt,reason:reason}))}catch(e){}
+window.plRoute=function(url,prompt,reason,kind){try{sessionStorage.setItem('prompt-lab-carry',JSON.stringify({prompt:prompt,reason:reason,kind:kind||''}))}catch(e){}
  if(window.plToast)plToast(reason,'note');setTimeout(function(){location.href=url},2500)};
 function carried(){var c=null;try{c=JSON.parse(sessionStorage.getItem('prompt-lab-carry')||'null');sessionStorage.removeItem('prompt-lab-carry')}catch(e){}
  if(!c||!/[?&]routed=1/.test(location.search))return;var p=document.getElementById('pl-prompt');
  if(p&&c.prompt){p.value=c.prompt;p.dispatchEvent(new Event('input',{bubbles:true}))}
+ var k=c.kind&&document.querySelector('input[name=\"pl-kind\"][value=\"'+c.kind+'\"]');
+ if(k){k.checked=true;k.dispatchEvent(new Event('change',{bubbles:true}))}
  if(c.reason)setTimeout(function(){if(window.plToast)plToast(c.reason+'  Your prompt came along: press Build.','note')},1500)}
 // (after Datastar has bound the prompt box, which sets it from its signal)
 window.addEventListener('load',function(){setTimeout(carried,1200)});
@@ -523,6 +529,7 @@ not hold."
    (title (lab-title))
    (audience :public)
    (tiles (list (list :object (the prompt-tile) :place :left :tab "Prompt")
+                (list :object (the app-section) :place :left :tab "Prompt")
                 (list :object (the files-section) :place :left :tab "Prompt")
                 (list :object (the status-section) :place :left :tab "Prompt")
                 (list :object (the credits-section) :place :left :tab "Prompt")
@@ -658,7 +665,11 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+            ;; what the next prompt builds (kinds.lisp): the session's kind,
+            ;; where this lab still offers it, else the lab's default
+            (js-string-literal (kind-name (or (and (the session) (parse-kind (session-kind (the session))))
+                                              (default-kind))))
             (json-boolean (or (the archive-id) (the archive-pending)))
             (if (the cancelled?) "'The payment was cancelled; nothing was charged.'" "''")
             (json-boolean (and (the session) (session-busy? (the session))))
@@ -684,14 +695,26 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     :inner-html (with-lhtml-string ()
                   (:div :class "pl-card"
                         (:div :|data-show| "$editable"
+                              ;; the switch: what the prompt builds (kinds.lisp),
+                              ;; shown where the lab offers more than one kind
+                              (when (rest *kinds*)
+                                (htm (:div :class "pl-row pl-kinds" :role "radiogroup"
+                                           :data-doc "What the agent builds from your prompt: a geometry model shown here, or a web app with a page of its own"
+                                           (:span :class "pl-line" "Build a")
+                                           (dolist (kind *kinds*)
+                                             (htm (:label :class "pl-pick"
+                                                          (:input :type "radio" :name "pl-kind" :value (kind-name kind)
+                                                                  :|data-bind:kind| "")
+                                                          " " (esc (string-downcase (kind-label kind)))))))))
                               (:textarea :id "pl-prompt" :rows "4" :|data-bind:prompt| ""
+                                         :|data-attr:placeholder| "$kind == 'app' ? 'Describe the web app, e.g. a page that sizes a shelf bracket from its load and shows it' : 'Describe what to build, e.g. a picnic table with two benches'"
                                          :placeholder "Describe what to build, e.g. a picnic table with two benches")
                               (when *turnstile-site-key*
                                 (htm (:div :class "cf-turnstile" :data-sitekey *turnstile-site-key* :data-callback "plTurnstile")))
                               (:input :type "hidden" :id "pl-turnstile" :|data-bind:turnstile| "")
                               (:div :class "pl-row"
                                     (:button :class "pl-build"
-                                             :|data-on:click| (the (datastar-action :build :options "{filterSignals: {include: /^(prompt|turnstile|owner|wallet)$/}}"))
+                                             :|data-on:click| (the (datastar-action :build :options "{filterSignals: {include: /^(prompt|turnstile|owner|wallet|kind)$/}}"))
                                              :|data-indicator:sending| ""
                                              ;; with a human check, a build waits for its token
                                              :|data-attr:disabled| (format nil "$busy || $sending || !$prompt.trim()~@[ || !$turnstile~]"
@@ -737,6 +760,29 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               (:a :href *url-prefix* "Start your own") ".")
                         (:p :class "pl-notice" :|data-show| "$notice" :|data-text| "$notice")
                         (:p :class "pl-error" :|data-show| "$error" :|data-text| "$error"))))
+
+   ;; The session's web app (kinds.lisp), once there is one: a page of
+   ;; its own, opened beside the lab by whoever may see the session.
+   ;; Nothing shows until then.
+   (app-section
+    :type 'base-html-div
+    :inner-html (progn
+                  (the revision)
+                  (let ((session (the session)))
+                    (with-lhtml-string ()
+                      (when (and session (app-defined? session))
+                        (htm (:div :class "pl-card pl-app"
+                                   (:h2 "Web app")
+                                   (:p :class "pl-line"
+                                       (:a :class "pl-open-app" :target "_blank" :rel "noopener"
+                                           :href (app-url session
+                                                          :owner-key (and (session-private? session) (the owner?)
+                                                                          (the owner-key)))
+                                           :data-doc "Open the web app this session built, a page of its own, in a new tab"
+                                           "Open the app")
+                                       (str (if (the owner?)
+                                                "  -- the page your prompts built.  It opens afresh from the model file each time."
+                                                "  -- a page built by this session's visitor, not by Genworks."))))))))))
 
    ;; The model file's editor, under the panes.  Its card is never
    ;; morphed (data-ignore-morph): CodeMirror builds its own DOM beside
@@ -1022,10 +1068,13 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     ;; the sluice opens on the session's MODEL, a symbol, once there is
     ;; one; a rebuild after that redefines the model's class, and the
     ;; sluice hears that itself (refresh-redefined!) and redraws
-    (let ((session (the session)))
-      (when (and session (model-defined? session)
-                 (not (eq (the root-object-type) (model-symbol session))))
-        (the (set-slot! :root-object-type (model-symbol session)))
+    ;; A web app without a MODEL (kinds.lisp) opens the sluice on APP
+    ;; itself: the page's own tree, its controls and sections.
+    (let* ((session (the session))
+           (symbol (and session (cond ((model-defined? session) (model-symbol session))
+                                      ((app-defined? session) (app-symbol session))))))
+      (when (and symbol (not (eq (the root-object-type) symbol)))
+        (the (set-slot! :root-object-type symbol))
         ;; hidden lines removed up to *hidden-lines-max-leaves* leaves
         ;; (quadratic in the edges; a pane's View > Hidden lines turns it on for
         ;; a larger model), and the model's leaves drawn
@@ -1167,7 +1216,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
              (multiple-value-bind (started reason response route)
                  (begin-prompt! (the session) prompt address token
                                 ;; a visitor the sibling lab sent here stays here
-                                :route? (not (the arrived?)))
+                                :route? (not (the arrived?))
+                                ;; the switch: a model or a web app (kinds.lisp)
+                                :kind (gethash "kind" signals))
                (declare (ignore response))
                (cond (started
                       (sheet-send! self (datastar-signals-event "{\"error\": \"\", \"prompt\": \"\"}")))
@@ -1176,10 +1227,12 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                      ;; and the reason with it
                      (route
                       (sheet-send! self (datastar-script-event
-                                         (format nil "plRoute(~a,~a,~a)"
+                                         (format nil "plRoute(~a,~a,~a,~a)"
                                                  (js-string-literal (getf route :url))
                                                  (js-string-literal (string-trim '(#\space #\tab #\newline #\return) prompt))
-                                                 (js-string-literal reason)))))
+                                                 (js-string-literal reason)
+                                                 (js-string-literal (let ((kind (parse-kind (gethash "kind" signals))))
+                                                                      (if kind (kind-name kind) "")))))))
                      (t (the (tell-error! reason))))
                (the spent-token!))))))
 

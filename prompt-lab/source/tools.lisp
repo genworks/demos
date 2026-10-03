@@ -69,15 +69,25 @@ that opens a line counts: the words in a comment or a string do not."
     (return-from write-model
       (values (list (text-result "Refused: do not put an in-package form in the source. ~
 The file's header already sets the session package.")) t)))
+  ;; a web app's package sees the names of GWL and the web server: a
+  ;; definition that lands on one is stopped here (kinds.lisp)
+  (when (eq (session-kind session) :app)
+    (let ((foreign (foreign-definitions session source)))
+      (when foreign
+        (return-from write-model
+          (values (list (text-result "Refused: the source defines ~{~a~^, ~}, which ~:[is a name~;are names~] Lisp, Gendl or GWL already ~:*~:[has~;have~].  Give your own objects and functions names of their own."
+                                     foreign (rest foreign)))
+                  t)))))
   (let ((file (session-model-file session))
         (package-name (session-package-name session)))
     (with-open-file (out file :direction :output :if-exists :supersede
                               :external-format :utf-8)
       (format out ";; Prompt lab session ~a -- the model file.~%~
 ;; Written by the modeling agent; edit it freely.  The object named MODEL~%~
-;; is what (make-object 'model) builds and the viewer shows.~%~%~
+;; is what (make-object 'model) builds and the viewer shows~:[.~;;~%~
+;; the object named APP is the web app, a GWL page the lab serves.~]~%~%~
 (in-package ~s)~%~%~a~%"
-              (session-id session) package-name source))
+              (session-id session) (eq (session-kind session) :app) package-name source))
     (load-model-file session)))
 
 (defun load-model-file (session)
@@ -105,10 +115,11 @@ version that fails to compile is kept too."
             (unless fasl (error "The compiler produced no output file."))
             (let ((*package* (session-package session)))
               (load fasl))
-            (let ((defined? (let ((symbol (model-symbol session)))
+            ;; MODEL, or for a session that builds a web app, APP (kinds.lisp)
+            (let ((defined? (let ((symbol (built-symbol session)))
                               (and symbol (find-class symbol nil) t))))
-              (values (list (text-result "Compiled and loaded.~:[  No object named MODEL is defined!~;~]~@[~%Warnings:~%~{- ~a~%~}~]"
-                                        defined? (reverse warnings)))
+              (values (list (text-result "Compiled and loaded.~:[  No object named ~a is defined!~;~*~]~@[~%Warnings:~%~{- ~a~%~}~]"
+                                        defined? (built-name session) (reverse warnings)))
                       (not defined?)))))
       (error (condition)
         (values (list (text-result "Error compiling or loading the model file: ~a~@[~%Warnings first:~%~{- ~a~%~}~]"
@@ -316,6 +327,8 @@ SESSION.  Values: content blocks, and true on failure."
         ((string= name "check_model")
          (let ((size (input "expected_size" input)))
            (check-model session :expected-size (when size (coerce size 'list)))))
+        ;; the web app's page (kinds.lisp)
+        ((string= name "check_app") (check-app session))
         ((and (string= name "render") (not (render-offered?)))
          (values (list (text-result "There is no render on this host; judge the model by check_model's numbers.")) t))
         ((string= name "render")
@@ -341,13 +354,16 @@ SESSION.  Values: content blocks, and true on failure."
   "Whether the agent gets the render tool: allowed, and the PNG writer here."
   (and *render-tool?* (raster-available?)))
 
-(defun tool-definitions ()
+(defun tool-definitions (&optional session)
   "The tools, as the Messages API's tools array (a vector of alists);
-render, search_docs and the two file tools only where they are offered."
+render, search_docs and the two file tools only where they are offered,
+and check_app only for a SESSION that builds a web app (kinds.lisp)."
   (let ((tools (%tool-definitions)))
     (flet ((without (name tools)
              (remove name tools :key #'(lambda (tool) (cdr (assoc "name" tool :test #'string=)))
                                 :test #'string=)))
+      (unless (and session (eq (session-kind session) :app))
+        (setq tools (without "check_app" tools)))
       (unless (render-offered?) (setq tools (without "render" tools)))
       (unless (search-offered?) (setq tools (without "search_docs" tools)))
       (unless (uploads-offered?)
@@ -375,6 +391,10 @@ render, search_docs and the two file tools only where they are offered."
                                                       ("items" . (("type" . "number")))
                                                       ("description" . "Expected overall size [x, y, z] in mm (optional)."))))
                                 nil)))
+   ;; a session that builds a web app (kinds.lisp)
+   `(("name" . "check_app")
+     ("description" . "Build (make-object 'app) and render its page, and report what the harness sees: the title, each form control with its value, the sections, whether the body embeds them all, the viewport's objects and leaves, and the page's text. Run it after every write_model of a web app.")
+     ("input_schema" . ,(schema nil)))
    ;; the enums as ,(vector ...), not #(...) literals: inside a nested
    ;; backquote Allegro's reader turns a vector literal into an
    ;; (excl::bq-vector ...) form, which reached the encoder as a list

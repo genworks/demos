@@ -177,6 +177,8 @@ it could not be.  Values: true when drawn."
                                   :id id :package-name (package-name (find-package keyword)) :replay? t
                                   :created (get-universal-time) :directory scratch))
                    (ensure-directories-exist scratch)
+                   ;; a web app's file compiles in a package opened to GWL (kinds.lisp)
+                   (set-session-kind! session (if (equal (gethash "kind" json) "app") :app :model))
                    (multiple-value-bind (blocks error?) (write-model session source)
                      (when error?
                        (error "the model does not compile: ~a"

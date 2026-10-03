@@ -25,6 +25,9 @@
 //                    source (what follows its in-package form, when it
 //                    has one) is compiled and loaded there before the
 //                    agent starts, which then works from it
+//   --kind KIND      what to build: model (a geometry model, the lab's
+//                    default) or app (a GWL web app, served by the lab
+//                    at an address this script prints)
 //   --continue       go on in the session this script last worked in
 //   --session ID     go on in that session (one this script opened)
 //   --model NAME     instead of the model the lab itself uses
@@ -79,6 +82,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--page') opt.page = value();
   else if (a === '--out') opt.out = value();
   else if (a === '--seed') opt.seed = value();
+  else if (a === '--kind') opt.kind = value();
   else if (a === '--session') opt.session = value();
   else if (a === '--continue') opt.continue = true;
   else if (a === '--model') opt.model = value();
@@ -142,7 +146,8 @@ if (opt.seed) {
 
 let brief;
 try {
-  brief = await tell({ event: 'prompt', text: prompt, session: sessionId || undefined, model: seed });
+  brief = await tell({ event: 'prompt', text: prompt, session: sessionId || undefined, model: seed,
+                       kind: opt.kind || undefined });
 } catch (e) {
   console.error(`The lab at ${lab} cannot be reached: ${e.cause ? e.cause.message : e.message}`);
   process.exit(1);
@@ -324,6 +329,10 @@ try {
 } catch { /* the lab went away: nothing to add */ }
 const source = kept && typeof kept.model_source === 'string' ? kept.model_source.trim() : '';
 if (source && kept.model_file) console.log(`model    ${kept.model_file}`);
+// a web app's own address, on the page's side of the lab
+if (kept && kept.app_url) {
+  console.log(`app      ${new URL(opt.page || process.env.PROMPT_LAB_PAGE_URL || lab).origin}${kept.app_url}`);
+}
 if (opt.out) {
   if (ok && source) {
     writeFileSync(opt.out, `;; Built by the prompt lab's modeling agent: session ${sessionId} at ${lab}.\n`

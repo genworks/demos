@@ -544,6 +544,36 @@ loaded) its page too."
                                            :headers headers)))
                        (and (eq (gethash "model_defined" state) t)
                             (search "define-object model" (gethash "model_source" state)))))))
+          ;; the other kind of session (kinds.lisp): one that builds a web
+          ;; app, opened here on the recipe the agent's brief carries --
+          ;; so the recipe itself is compiled, checked and served on
+          ;; every engine at every push
+          (smoke "prompt-lab builds a web app: the brief, check_app, and the app's own page"
+                 (lambda ()
+                   (let* ((brief (json-of :post (door "agent")
+                                          :json (table "event" "prompt" "text" "A plate sizer." "kind" "app"
+                                                       "model" (symbol-value (lab '#:*app-recipe*)))))
+                          (headers (list (cons "X-Prompt-Lab-Owner" (gethash "owner" brief))))
+                          (app (gethash "session" brief)))
+                     (unless (and (equal (gethash "kind" brief) "app")
+                                  (find "check_app" (gethash "tools" brief) :test #'equal))
+                       (error "the brief is not a web app's"))
+                     (let ((checked (gethash "result"
+                                             (json-of :post (format nil "~a/mcp?session=~a" prefix app)
+                                                      :headers headers
+                                                      :json (table "jsonrpc" "2.0" "id" 1 "method" "tools/call"
+                                                                   "params" (table "name" "check_app"
+                                                                                   "arguments" (table)))))))
+                       (when (or (null checked) (eq (gethash "isError" checked) t))
+                         (error "check_app faults the lab's own recipe: ~a"
+                                (and checked (gethash "text" (first (gethash "content" checked)))))))
+                     (json-of :post (door "agent") :headers headers
+                              :json (table "event" "stopped" "session" app "text" "Only a test."))
+                     (let ((state (json-of :get (format nil "~a?session=~a" (door "state") app)
+                                           :headers headers)))
+                       (and (equal (gethash "kind" state) "app")
+                            (eq (gethash "app_defined" state) t)
+                            (page-ok? (gethash "app_url" state)))))))
           (setf (symbol-value (lab '#:*external-agent?*)) nil)
           ;; the community pot (page.lisp): what the lab has heard from a
           ;; gate that keeps one is everyone's to see, and an empty pot

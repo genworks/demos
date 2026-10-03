@@ -383,6 +383,13 @@ file's place and the terminal opened on it."
                   "run" (or (getf (session-meter session) :run) 0)
                   "credits" (round (or (getf (session-meter session) :credits) 0)))
        "engine" (engine-name)
+       ;; what the session builds, and its web app's address once there
+       ;; is one (kinds.lisp); a private session's opens with the key
+       "kind" (kind-name (session-kind session))
+       "app_defined" (if (app-defined? session) t 'yason:false)
+       "app_url" (and (app-defined? session)
+                      (app-url session :owner-key (and owner? (session-private? session)
+                                                       (session-owner session))))
        "created" (epoch-seconds (session-created session))
        "spend" (and owner? (spend-state session))
        ;; the community pot, where the gate keeps one: everyone's to see
@@ -414,6 +421,8 @@ behind this room and the sibling lab on the other engine, if any."
                            "prompt_max_length" *max-prompt-length*
                            "engine" (engine-name)
                            "engine_label" (engine-label)
+                           ;; what a prompt may ask to have built, the default first (kinds.lisp)
+                           "kinds" (kinds-state)
                            "sibling_url" (car *sibling-lab*)
                            "sibling_label" (cdr *sibling-lab*)
                            "browsing" (if *browsing?* t 'yason:false)
@@ -448,10 +457,12 @@ has credit or has put more into the pot than it has drawn."
         (save-session! session)
         session)))
 
-(defun begin-prompt! (session prompt address token &key (route? t))
+(defun begin-prompt! (session prompt address token &key (route? t) kind)
   "Start the agent on PROMPT in SESSION for a visitor at ADDRESS, after
 every check the prompt door makes (the owner's excepted: the caller's).
-TOKEN is the human check's, nil for a script's prompt.  Values: :started
+TOKEN is the human check's, nil for a script's prompt.  KIND, when it
+names one this lab offers, is what the session builds from this prompt
+on (kinds.lisp); without it the session keeps its kind.  Values: :started
 and the lane, or nil, the reason and the response to refuse with.  With
 ROUTE?, a session's first prompt that wants the sibling lab's engine is
 not started here (routing.lisp): nil, the reason, a 409 and, a fourth
@@ -494,7 +505,8 @@ value, where it belongs -- a plist of :engine, :reason and :url."
                     (when route
                       (return-from begin-prompt!
                         (values nil (getf route :reason) *response-conflict* route)))))
-                 ((not (start-prompt! session (string-trim '(#\space #\tab #\newline #\return) prompt)))
+                 ((not (start-prompt! session (string-trim '(#\space #\tab #\newline #\return) prompt)
+                                      :kind (parse-kind kind)))
                   (values nil "Still working on the previous request." net.aserve:*response-bad-request*))
                  (t (count-address! address :prompts)
                     (when (eq lane :automated)
@@ -711,7 +723,9 @@ prompt in a thread of its own; the page follows along through the state door."
           (t (multiple-value-bind (started reason response route)
                  (begin-prompt! session (gethash "prompt" json) address (gethash "turnstile" json)
                                 ;; "stay": true builds here whatever engine the prompt wants
-                                :route? (not (eq (gethash "stay" json) t)))
+                                :route? (not (eq (gethash "stay" json) t))
+                                ;; "kind": "app" builds a web app, "model" a model
+                                :kind (gethash "kind" json))
                (cond (started
                       (respond-json req ent (h "started" t "automated" (if (eq reason :automated) t 'yason:false))
                                     net.aserve:*response-accepted*))
@@ -879,6 +893,34 @@ the model with one panel under it, the inputs or the tree."
 
 
 ;;
+;; The web app (kinds.lisp): the session's APP, a page of its own.
+;;
+
+(defun app-door (req ent)
+  "GET <prefix>/app?session=<id> (or replay=<id>, an archived session's):
+an instance of the session's APP, made for this visitor and answered as
+gwl answers any of its pages, with a redirect to the instance.  Whoever
+may see the session may open its app; a private session's wants owner=."
+  (let* ((id (query-value req "session"))
+         (replay (query-value req "replay"))
+         (session (cond ((stringp id) (find-session id))
+                        ((stringp replay) (find-replay replay)))))
+    (cond ((or (null session) (not (visible-to? session (query-value req "owner"))))
+           (no-such-session req ent))
+          ((not (app-defined? session))
+           (refuse req ent "No web app has been built in this session yet."))
+          (t (gwl-make-object req ent (format nil "~s" (app-symbol session)))))))
+
+(defparameter *demos-css-directory*
+  ;; beside the lab in the demos tree: <demos>/css/, the demos' shared stylesheet
+  (make-pathname :name nil :type nil :version nil
+                 :directory (append (butlast (pathname-directory *static-directory*) 2) (list "css"))
+                 :defaults *static-directory*)
+  "Pathname. The directory of the demos' compiled stylesheet, which a web
+app's page wears (web-app, kinds.lisp).")
+
+
+;;
 ;; Publishing.
 ;;
 
@@ -891,7 +933,8 @@ its manifest and retiring service worker beside the prefix, its doors
 under <prefix>/api/ (config, session, state,
 prompt, model, reload, topup, confirm, privacy; sessions, archive,
 archived, replay; upload, file; agent), the tools' door for an external agent at
-<prefix>/mcp, and the viewer at <prefix>/viewer, on every server.  The
+<prefix>/mcp, a session's web app at <prefix>/app, and the viewer at
+<prefix>/viewer, on every server.  The
 page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet)."
   (gwl:with-all-servers (server)
     ;; THE PAGE IS THE SHEET (prompt-lab-sheet, publish-lab-sheet!): it
@@ -935,6 +978,12 @@ page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet)."
     (net.aserve:publish :path (door-path "agent") :server server :host host :function #'agent-door)
     (net.aserve:publish :path (format nil "~a/mcp" *url-prefix*)
                         :server server :host host :function #'mcp-door)
+    ;; a session's web app and the stylesheet it wears (kinds.lisp)
+    (net.aserve:publish :path (format nil "~a/app" *url-prefix*)
+                        :server server :host host :function #'app-door)
+    (net.aserve:publish-directory :prefix (format nil "~a/app-static/demo/css/" *url-prefix*)
+                                  :server server :host host
+                                  :destination (namestring *demos-css-directory*))
     (publish-gwl-app (format nil "~a/viewer" *url-prefix*) 'viewer :server server :host host))
   (start-reaper!)
   (start-thumbnailer!)

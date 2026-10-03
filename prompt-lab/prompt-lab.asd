@@ -7,13 +7,13 @@
  :author "Genworks International" :license
  "Affero Gnu Public License (http://www.gnu.org/licenses/)" :serial t
  :version "20261003" :depends-on
- (:gwl-graphics :yason :alexandria :babel) :components
+ (:gwl-graphics :yason :alexandria :babel :demos-common) :components
  ((:file "source/package") (:file "source/parameters")
   (:file "source/session") (:file "source/archive")
   (:file "source/raster") (:file "source/tools")
-  (:file "source/agent") (:file "source/docs") (:file "source/meter")
-  (:file "source/guards") (:file "source/skins") (:file "source/app")
-  (:file "source/page") (:file "source/browse")
-  (:file "source/thumbs") (:file "source/export")
-  (:file "source/uploads") (:file "source/routing")
-  (:file "source/external")))
+  (:file "source/kinds") (:file "source/agent") (:file "source/docs")
+  (:file "source/meter") (:file "source/guards")
+  (:file "source/skins") (:file "source/app") (:file "source/page")
+  (:file "source/browse") (:file "source/thumbs")
+  (:file "source/export") (:file "source/uploads")
+  (:file "source/routing") (:file "source/external")))

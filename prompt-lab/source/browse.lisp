@@ -301,6 +301,9 @@ archive holds no model for ID) and the compiler's text."
                                 :created (let ((c (gethash "created" json))) (if (integerp c) c (get-universal-time)))
                                 :directory (merge-pathnames (format nil "~a/" id) *replay-root*))))
                   (ensure-directories-exist (session-directory replay))
+                  ;; a web app's file compiles in a package opened to GWL (kinds.lisp)
+                  (ignore-errors
+                   (set-session-kind! replay (if (equal (gethash "kind" json) "app") :app :model)))
                   (multiple-value-bind (blocks error?) (write-model replay source)
                     (declare (ignore error?))
                     (bt:with-lock-held (*replays-lock*)

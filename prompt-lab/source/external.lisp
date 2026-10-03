@@ -96,12 +96,14 @@ done or stopped before the reaper releases it.")
 (defun agent-brief (session)
   "What an external agent needs to work on SESSION as the lab's own would."
   (h "session" (session-id session)
-     "system" (system-text)
+     ;; by what the session builds, a model or a web app (kinds.lisp)
+     "system" (system-text session)
+     "kind" (kind-name (session-kind session))
      "model" *model*
      "effort" *effort*
      "max_rounds" *max-rounds*
      "mcp" (format nil "~a/mcp?session=~a" *url-prefix* (session-id session))
-     "tools" (map 'list #'tool-name (tool-definitions))))
+     "tools" (map 'list #'tool-name (tool-definitions session))))
 
 (defun agent-door (req ent)
   "POST <prefix>/api/agent {event, session?, text, usage?}: an external
@@ -110,7 +112,9 @@ agent's side of one prompt.  The events:
            and its owner key answered, once; MODEL, when given with it,
            is the source of a model file for the new session to start
            from, written, compiled and loaded as a visitor's own edit
-           is.  The session is claimed as the prompt door claims it; the
+           is.  KIND, \"model\" or \"app\", says what the session is to
+           build from now on (kinds.lisp); without it the session keeps
+           its kind.  The session is claimed as the prompt door claims it; the
            answer is the brief: the system prompt, the model and effort
            the lab itself would use, the tools' names and the address of
            the MCP door.
@@ -141,7 +145,9 @@ agent's side of one prompt.  The events:
                              (session (or session (make-session :address (client-address req)))))
                         (cond ((not (claim! session))
                                (refuse req ent "Still working on the previous request."))
-                              (t (when opened?
+                              (t (let ((kind (parse-kind (gethash "kind" json))))
+                                   (when kind (set-session-kind! session kind)))
+                                 (when opened?
                                    (log-event session :note "Session ~a opened for an external agent."
                                               (session-id session))
                                    ;; a model to start from, before the prompt is heard
@@ -256,10 +262,10 @@ loop logs it.  Returns the MCP result."
                                "instructions" "The tools of one prompt-lab session: its model file, its package, its checks.")))
             ((equal method "ping") (rpc-result id (h)))
             ((equal method "tools/list")
-             (rpc-result id (h "tools" (map 'list #'mcp-tool (tool-definitions)))))
+             (rpc-result id (h "tools" (map 'list #'mcp-tool (tool-definitions session)))))
             ((equal method "tools/call")
              (let ((name (param "name")))
-               (if (find name (tool-definitions) :key #'tool-name :test #'equal)
+               (if (find name (tool-definitions session) :key #'tool-name :test #'equal)
                    (rpc-result id (mcp-call session name (param "arguments")))
                    (rpc-error id -32602 "Unknown tool: ~a" name))))
             (t (rpc-error id -32601 "Method not found: ~a" method))))))
