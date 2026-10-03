@@ -969,6 +969,45 @@ app's page wears (web-app, kinds.lisp).")
 
 
 ;;
+;; A page instance that is gone.  The lab's page, its viewer and a web
+;; app are gwl page instances at /sessions/<instance>/..., one per visit,
+;; cleared when idle and lost at a restart; what they show -- a session,
+;; an archived one, a deployment -- outlives them and is named in the
+;; address's query.  gwl asks, for a /sessions/ address whose instance is
+;; gone, where the visitor should go instead: here, to the address that
+;; opens a fresh instance on the same thing.
+;;
+
+(defun lab-session-recovery (req)
+  "Where a dead /sessions/ address belongs when its query names something
+of this lab's: a deployment, a session (live, or by now in the archive) or
+an archived session.  Nil when it names nothing the lab knows -- another
+application's address."
+  (let ((query (net.aserve:request-query req)))
+    (flet ((named (name)
+             (let ((value (cdr (assoc name query :test #'string-equal))))
+               (and (stringp value) (plusp (length value)) value))))
+      (let ((session (named "session"))
+            (archive (or (named "archive") (named "replay")))
+            (deployed (or (named "d") (named "deployed"))))
+        (cond ((and deployed *deployments?* (deployment-record deployed))
+               (deployment-url deployed))
+              ((and session (session-id? session) (find-session session))
+               (format nil "~a?session=~a" *url-prefix* session))
+              ;; a session that has ended since: its archive entry
+              ((and (or session archive) (session-id? (or session archive)) *browsing?*
+                    (archived-directory (or session archive)))
+               (format nil "~a?archive=~a" *url-prefix* (or session archive))))))))
+
+(defun register-session-recovery! ()
+  "Have gwl ask the lab about dead /sessions/ addresses, where this image's
+gwl asks anyone (an older one sends them all to the site's front page)."
+  (let ((hooks (find-symbol (string '#:*unknown-session-recoveries*) :gwl)))
+    (when (and hooks (boundp hooks))
+      (pushnew 'lab-session-recovery (symbol-value hooks)))))
+
+
+;;
 ;; Publishing.
 ;;
 
@@ -1042,6 +1081,7 @@ page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet)."
                                   :server server :host host
                                   :destination (namestring *demos-css-directory*))
     (publish-gwl-app (format nil "~a/viewer" *url-prefix*) 'viewer :server server :host host))
+  (register-session-recovery!)
   (start-reaper!)
   (start-thumbnailer!)
   *url-prefix*)

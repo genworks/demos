@@ -643,6 +643,15 @@ open deployment's model file."
              (cond ((null deployed)
                     (respond-deployment req ent (deployment-page (gethash "title" record) "This deployment no longer builds on this host.  Its owner can deploy it again.")
                                   :response net.aserve:*response-internal-server-error* :type "text/html; charset=utf-8"))
+                   ;; the page instance's own address carries the request's
+                   ;; query, and d=<name> in it is how an instance that has
+                   ;; expired finds its way back here (lab-session-recovery)
+                   ((and (eq (session-kind deployed) :app) (app-defined? deployed)
+                         (not (equal (query-value req "d") name)))
+                    (net.aserve:with-http-response (req ent :response net.aserve:*response-found*)
+                      (setf (net.aserve:reply-header-slot-value req :location)
+                            (format nil "~a?d=~a~@[&owner=~a~]" (deployment-url name) name owner-key))
+                      (net.aserve:with-http-body (req ent))))
                    ((and (eq (session-kind deployed) :app) (app-defined? deployed))
                     (touch deployed)
                     ;; the instance knows which deployment it serves: its
