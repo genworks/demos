@@ -147,10 +147,19 @@ stale.  A session gone private closes on every sheet but its owner's."
 bar to the sheet's address for the session, so a reload finds it again."
   (format nil "(function(){var o={};try{o=JSON.parse(localStorage.getItem('prompt-lab-owners')||'{}')||{}}catch(e){}
 o[~a]=~a;try{localStorage.setItem('prompt-lab-owners',JSON.stringify(o))}catch(e){}
-history.replaceState(null,'',~a)})()"
+history.replaceState(null,'',~a)})();~a"
           (js-string-literal (session-id session))
           (js-string-literal (session-owner session))
-          (js-string-literal (format nil "~a/sheet?session=~a" *url-prefix* (session-id session)))))
+          (js-string-literal (format nil "~a/sheet?session=~a" *url-prefix* (session-id session)))
+          (keep-last-script (session-id session))))
+
+(defun keep-last-script (session-id)
+  "JavaScript: SESSION-ID as the session this browser was last in
+(localStorage prompt-lab-last, which the classic page keeps too), for an
+installed lab opened from its icon (?app=1)."
+  (format nil "(function(){var l={};try{l=JSON.parse(localStorage.getItem('prompt-lab-last')||'{}')||{}}catch(e){}
+if(l.session!==~a){l={session:~a,log:[]}}try{localStorage.setItem('prompt-lab-last',JSON.stringify(l))}catch(e){}})()"
+          (js-string-literal session-id) (js-string-literal session-id)))
 
 (defun owner-signal-expression (session-id)
   "A JavaScript expression: this browser's key for SESSION-ID, or ''."
@@ -246,9 +255,11 @@ SESSION's balance -- or nil."
          (engine (gethash "engine" summary))
          (here? (equal engine (engine-name)))
          (live? (if archive? (live? id) t))
+         ;; a live session to its sheet, an archived one to the sheet's
+         ;; archive view -- here, or on the other engine's lab
          (href (cond ((and here? live?) (format nil "~a/sheet?session=~a" *url-prefix* id))
-                     (here? (format nil "~a?archive=~a" *url-prefix* id))
-                     ((car *sibling-lab*) (format nil "~a~:[?archive=~a~;/sheet?session=~a~]"
+                     (here? (format nil "~a/sheet?archive=~a" *url-prefix* id))
+                     ((car *sibling-lab*) (format nil "~a/sheet?~:[archive~;session~]=~a"
                                                   (car *sibling-lab*) live? id))
                      (t nil)))
          (thumb (and archive? (gethash "thumb" summary)))
@@ -317,6 +328,9 @@ SESSION's balance -- or nil."
 .pl-meter{height:.45rem;background:var(--pl-panel-alt,#eee);border:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd);border-radius:var(--pl-radius-pill,9px);overflow:hidden;margin:.3rem 0}
 .pl-meter span{display:block;height:100%;background:var(--pl-accent,#366fc5)}
 .pl-line{color:var(--pl-ink-dim,#555);font-size:.9em;margin:.3rem 0}.pl-begging{color:var(--pl-status-fail,#b00);font-weight:600;margin:.3rem 0}
+.pl-doc{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;opacity:.75;font-size:.85em}
+.pl-toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);z-index:60;max-width:min(36rem,92vw);padding:.55rem .9rem;border-radius:var(--pl-radius,4px);background:var(--pl-label-bg,#26262b);color:var(--pl-label-ink,#fff);box-shadow:0 4px 18px rgba(0,0,0,.25);font-size:.95em}
+.pl-toast-error{background:var(--pl-status-fail,#b00018);color:#fff}
 .pl-pay{margin-top:.6rem}.pl-card-line{padding:.6rem;border:var(--pl-rule,1px) solid var(--pl-line,#ccc);border-radius:var(--pl-radius,4px);background:var(--pl-panel,#fff);margin:.3rem 0}
 .pl-topup{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem;font-size:.9em}
 .pl-private{display:inline-flex;gap:.3rem;align-items:center;cursor:pointer}
@@ -327,7 +341,7 @@ SESSION's balance -- or nil."
 .pl-entry-card:hover{background:var(--pl-hover-bg);outline:var(--pl-rule) solid var(--pl-hover-line)}
 .pl-thumb{grid-row:1/3;width:96px;height:72px;object-fit:contain;background:#fff;border:var(--pl-rule) solid var(--pl-line-soft)}
 .pl-entry-title{font-weight:600;overflow-wrap:anywhere;font-size:.95em}
-@media (max-width:47.99rem){.pl-head{padding:.3rem .6rem;gap:.5rem;flex-wrap:wrap}.pl-head .pl-engine{display:none}.pl-head nav{gap:.5rem;font-size:.8em}
+@media (max-width:47.99rem){.pl-head{padding:.3rem .6rem;gap:.5rem;flex-wrap:wrap}.pl-head .pl-engine,.pl-doc{display:none}.pl-head nav{gap:.5rem;font-size:.8em}
  .pl-thumb{width:72px;height:54px}.pl-list{padding:.5rem}}"
   "String. The lab's own cards on the sheet (its tiles), in the skin tokens
 (the sluice's tokens.css, SKIN-API.md), with fallbacks for the classic
@@ -351,14 +365,14 @@ window.plConfirmSave=function(){return !(dirty&&last!==base)||confirm('The model
 window.plSaved=function(ok,text){if(ok){dirty=false;base=null}state(ok?'saved and loaded':'saved; see the log',!ok)};
 window.plLock=function(flag){if(ed)ed.setReadOnly(!!flag);else if(area())area().readOnly=!!flag};
 window.plFold=function(all){if(ed){if(all)ed.foldAll();else ed.unfoldAll()}};
-window.plDownload=function(url,owner){var n=document.getElementById('pl-download-note');function say(t){if(n)n.textContent=t||''}
+window.plDownload=function(url,owner){var n=document.getElementById('pl-download-note');function say(t,bad){if(n)n.textContent=t||'';if(bad&&window.plToast)plToast(t,'error')}
  say('Making the file...');
  fetch(url,{headers:owner?{'X-Prompt-Lab-Owner':owner}:{}}).then(function(r){
-  if(!r.ok)return r.json().then(function(j){say(j.error||('The file could not be made ('+r.status+').'))},function(){say('The file could not be made ('+r.status+').')});
+  if(!r.ok)return r.json().then(function(j){say(j.error||('The file could not be made ('+r.status+').'),true)},function(){say('The file could not be made ('+r.status+').',true)});
   var cd=r.headers.get('Content-Disposition')||'',m=/filename=\"?([^\";]+)/.exec(cd),left=r.headers.get('X-Prompt-Lab-Note');
   return r.blob().then(function(b){var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=m?m[1]:'model';
    document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000);say(left||'')})
- }).catch(function(e){say('The file could not be fetched: '+e)})};
+ }).catch(function(e){say('The file could not be fetched: '+e,true)})};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount);else mount();
 })();"
   "String. The model file's editor on the sheet: the lab's CodeMirror bundle
@@ -368,6 +382,21 @@ calls; an edit in progress keeps its text and says the file changed.")
 
 
 
+
+(defparameter *sheet-ui-script*
+  "(function(){
+// a toast: a line at the foot of the screen for a few seconds, wherever
+// the page stands (a phone's other tab included)
+var timer=null;
+window.plToast=function(text,kind){if(!text)return;var t=document.getElementById('pl-toast');if(!t)return;
+ t.textContent=text;t.className='pl-toast pl-toast-'+(kind||'note');t.style.display='block';
+ if(timer)clearTimeout(timer);timer=setTimeout(function(){t.style.display='none'},kind==='error'?7000:4500)};
+// the documentation line: what the thing under the pointer is or does,
+// from its data-doc or its title (the sluice's controls carry titles)
+document.addEventListener('mouseover',function(e){var d=document.getElementById('pl-doc');if(!d||!e.target.closest)return;
+ var el=e.target.closest('[data-doc],[title]');d.textContent=el?(el.getAttribute('data-doc')||el.getAttribute('title')||''):''});
+})();"
+  "String. The sheet's toast (plToast) and its documentation line.")
 
 (defparameter *sheet-pay-script*
   "(function(){
@@ -430,7 +459,18 @@ log, status, credits and downloads sections are recomputed from."
     shown-source "" :settable)
    ("String or nil. The id of a private session named on the address, which
 the sheet shows only once its owner's key is proven (claim)."
-    private-id nil :settable))
+    private-id nil :settable)
+   ("String or nil. The archived session shown (?archive=<id>), read-only."
+    archive-id nil :settable)
+   ("Integer or nil. Which saved version of the archived model file the
+editor shows (?version=<n>); nil for the last."
+    archive-version nil :settable)
+   ("String or nil. A private archived session named on the address, shown
+once its owner's key is proven (claim)."
+    archive-pending nil :settable)
+   ("String or nil. An archive id the address named that the archive does
+not hold."
+    archive-missing nil :settable))
 
   :computed-slots
   (;; the sluice's inputs
@@ -451,12 +491,30 @@ the sheet shows only once its owner's key is proven (claim)."
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
    (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :wear-skin))
 
+   ;; the archived session's record and directory (browse.lisp)
+   (archive-directory (and (the archive-id) (archived-directory (the archive-id))))
+   (archive-record (let ((directory (the archive-directory)))
+                     (and directory (read-record (merge-pathnames "session.json" directory)))))
+   (archive-versions (let ((directory (the archive-directory)))
+                       (and directory (model-versions directory))))
+   ;; the model file as the editor shows it: the chosen version, else the last
+   (archive-source (let ((directory (the archive-directory)))
+                     (when directory
+                       (let* ((versions (the archive-versions))
+                              (version (the archive-version))
+                              (file (if (and version (<= 1 version (length versions)))
+                                        (nth (1- version) versions)
+                                        (merge-pathnames "model.lisp" directory))))
+                         (file-model-body file)))))
+
    (owner? (let ((session (the session)))
              (and session (the owner-key) (owner? session (the owner-key)) t)))
 
    ;; a new visitor builds into a session of their own; a session's
    ;; page is the owner's to build in
-   (editable? (or (and (null (the session)) (null (the private-id))) (the owner?)))
+   ;; (an archived session never is)
+   (editable? (and (null (the archive-id)) (null (the archive-pending)) (null (the archive-missing))
+                   (or (and (null (the session)) (null (the private-id))) (the owner?))))
 
    ;; the session the address names: the one shown, or a private one
    ;; waiting for its owner's key
@@ -468,9 +526,16 @@ the sheet shows only once its owner's key is proven (claim)."
       (when *turnstile-site-key*
         (htm (:script :src "https://challenges.cloudflare.com/turnstile/v0/api.js" :async "async" :defer "defer")
              (:script "window.plTurnstile=function(t){var e=document.getElementById('pl-turnstile');if(e){e.value=t;e.dispatchEvent(new Event('input',{bubbles:true}))}};")))
+      ;; the lab as an installable app (sheet-manifest)
+      (:link :rel "manifest" :href (format nil "~a/sheet-manifest.webmanifest" *url-prefix*))
+      (:meta :name "theme-color" :content (app-color "--pl-label-bg" "#101010"))
+      (let ((icon (find-if #'(lambda (i) (search "192" (second i))) *app-icons*)))
+        (when (and icon (static-file (first icon)))
+          (htm (:link :rel "apple-touch-icon" :href (static-url (first icon))))))
       (:script :defer "defer" :src (static-url "editor.js"))
       (:script (str *sheet-editor-script*))
       (:script (str *sheet-pay-script*))
+      (:script (str *sheet-ui-script*))
       (:style (str *sheet-css*))))
 
    ;; Written with the page, never redrawn: the lab's header, the page's
@@ -481,9 +546,16 @@ the sheet shows only once its owner's key is proven (claim)."
       (:div :id "pl-sheet" :style "display:contents"
             :|data-signals| (escape-string-minimal-plus-quotes (the initial-signals))
             ;; a browser holding this session's key makes the page its owner's
-            (when (and (the shown-id) (not (the owner?)))
+            (when (and (or (the shown-id) (the archive-pending)) (not (the owner?)))
               (htm (:span :|data-init| (format nil "$owner && ~a" (the (datastar-action :claim))))))
             (:span :|data-effect| "var b=$busy; if(window.plWasBusy && !b && window.sluiceTab && matchMedia('(max-width: 47.99rem)').matches){sluiceTab('model')} window.plWasBusy=b")
+            ;; opened from the installed app's icon (?app=1) with no session
+            ;; named: the session this browser was last in, if it owns it
+            (when (and (equal (cdr (assoc "app" (the query-toplevel) :test #'string-equal)) "1")
+                       (null (the shown-id)) (null (the archive-id)) (null (the archive-pending)))
+              (htm (:script (str (format nil "(function(){try{var l=JSON.parse(localStorage.getItem('prompt-lab-last')||'null');var o=JSON.parse(localStorage.getItem('prompt-lab-owners')||'{}')||{};
+if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))}catch(e){}})();"
+                                         (js-string-literal (format nil "~a/sheet?session=" *url-prefix*)))))))
             ;; the skin this browser chose, shared with the classic page
             ;; (localStorage prompt-lab-skin): worn when it is not the one
             ;; showing, and kept when View > Skin picks another
@@ -495,9 +567,15 @@ the sheet shows only once its owner's key is proven (claim)."
                     (format nil "$skinPref = (function(){try{return (localStorage.getItem('prompt-lab-skin')||'').toLowerCase()}catch(e){return ''}})(); $skinPref && $skinPref !== ~a && ~a"
                             (js-string-literal (sluice:skin-name (the skin)))
                             (the (datastar-action :wear-skin :options "{filterSignals: {include: /^skinPref$/}}")))))
+            ;; errors and notices as a toast too, seen from any tab
+            (:div :id "pl-toast" :class "pl-toast" :style "display:none" :role "status")
+            (:span :|data-effect| "$error && window.plToast && plToast($error, 'error')")
+            (:span :|data-effect| "$notice && window.plToast && plToast($notice, 'note')")
             (:header :class "pl-head"
                      (:h1 (esc (lab-title)))
                      (:span :class "pl-engine" (esc (engine-label)))
+                     ;; the documentation line (*sheet-ui-script*)
+                     (:span :id "pl-doc" :class "pl-doc")
                      (:nav (str (browse-links))
                            (:a :href (the classic-url) "the page")
                            (when *sibling-lab*
@@ -510,7 +588,8 @@ the sheet shows only once its owner's key is proven (claim)."
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+            (json-boolean (or (the archive-id) (the archive-pending)))
             (if (the cancelled?) "'The payment was cancelled; nothing was charged.'" "''")
             (json-boolean (and (the session) (session-busy? (the session))))
             ;; a browser holding the session's key shows the owner's page
@@ -519,7 +598,8 @@ the sheet shows only once its owner's key is proven (claim)."
             (if (and (the shown-id) (not (the editable?)))
                 (format nil "(~a !== '')" (owner-signal-expression (the shown-id)))
                 (json-boolean (the editable?)))
-            (if (the shown-id) (owner-signal-expression (the shown-id)) "''")
+            (let ((id (or (the shown-id) (the archive-pending))))
+              (if id (owner-signal-expression id) "''"))
             (js-string-literal (or (the query-checkout) ""))
             (if (the query-wallet)
                 (js-string-literal (the query-wallet))
@@ -554,8 +634,11 @@ the sheet shows only once its owner's key is proven (claim)."
                                     (:span :class "pl-busy" :|data-show| "$busy" "the agent is working...")))
                         ;; hidden until Datastar has read the signals: no
                         ;; banner flashes at an owner while the script loads
-                        (:div :class "pl-watch" :style "display:none" :|data-show| "!$editable"
+                        (:div :class "pl-watch" :style "display:none" :|data-show| "!$editable && !$archived"
                               "You are watching this session as it is built.  "
+                              (:a :href (format nil "~a/sheet" *url-prefix*) "Start your own") ".")
+                        (:div :class "pl-watch" :style "display:none" :|data-show| "$archived"
+                              "An archived session: its log, its model file and its model, read-only.  "
                               (:a :href (format nil "~a/sheet" *url-prefix*) "Start your own") ".")
                         (:p :class "pl-notice" :|data-show| "$notice" :|data-text| "$notice")
                         (:p :class "pl-error" :|data-show| "$error" :|data-text| "$error"))))
@@ -585,7 +668,9 @@ the sheet shows only once its owner's key is proven (claim)."
                                                  (the (datastar-action :save :options "{filterSignals: {include: /^(source|owner)$/}}")))
                                          "Save"))
                           (:textarea :id "pl-source" :spellcheck "false"
-                                     (esc (or (and session (ignore-errors (model-body session))) "")))))))
+                                     (esc (or (the archive-source)
+                                              (and session (ignore-errors (model-body session)))
+                                              "")))))))
 
    (status-section
     :type 'base-html-div
@@ -595,6 +680,38 @@ the sheet shows only once its owner's key is proven (claim)."
                     (with-lhtml-string ()
                       (:div :class "pl-card pl-status"
                             (cond
+                              ((the archive-missing)
+                               (htm (:span "The archive holds no session of that name.")))
+                              ((the archive-pending)
+                               (htm (:span "This archived session is private: it opens only in the browser that owned it.")))
+                              ((the archive-id)
+                               (let* ((record (the archive-record))
+                                      (id (the archive-id))
+                                      (engine (or (and record (gethash "engine" record)) "gendl"))
+                                      (created (and record (gethash "created" record)))
+                                      (versions (length (the archive-versions)))
+                                      (base (format nil "~a/sheet?archive=~a" *url-prefix* id)))
+                                 (htm (:span (fmt "Archived session ~a" id))
+                                      (when (integerp created)
+                                        (htm (:span (str (multiple-value-bind (s m h d mo y) (decode-universal-time created 0)
+                                                           (declare (ignore s))
+                                                           (format nil "~d-~2,'0d-~2,'0d ~2,'0d:~2,'0d UTC" y mo d h m))))))
+                                      (unless (equal engine (engine-name))
+                                        (htm (:span (fmt "built on ~a: " engine)
+                                                    (if (car *sibling-lab*)
+                                                        (htm (:a :href (format nil "~a/sheet?archive=~a" (car *sibling-lab*) id) "open it there"))
+                                                        (str "not drawn here")))))
+                                      (when (live? id)
+                                        (htm (:a :href (format nil "~a/sheet?session=~a" *url-prefix* id) "live now")))
+                                      ;; the model file's saved versions, for the editor
+                                      (when (> versions 1)
+                                        (htm (:span "versions:"
+                                                    (loop for v from 1 to versions
+                                                          do (htm " " (if (eql v (the archive-version))
+                                                                          (htm (:b (fmt "~d" v)))
+                                                                          (htm (:a :href (format nil "~a&version=~d" base v) (fmt "~d" v))))))
+                                                    " "
+                                                    (if (the archive-version) (htm (:a :href base "last")) (htm (:b "last")))))))))
                               ((the private-id)
                                (htm (:span "This session is private: it opens only in the browser that owns it.")))
                               ((null session)
@@ -623,7 +740,13 @@ the sheet shows only once its owner's key is proven (claim)."
     :inner-html (progn
                   (the revision)
                   (let* ((session (the session))
-                         (log (and session (session-log session)))
+                         ;; an archived session's log is its record's
+                         (log (if (the archive-id)
+                                  (let ((record (the archive-record)))
+                                    (loop for entry in (and record (gethash "log" record))
+                                          when (and (listp entry) (= (length entry) 3) (integerp (first entry)))
+                                            collect entry))
+                                  (and session (session-log session))))
                          (shown (last log *log-shown*)))
                     (with-lhtml-string ()
                       (:div :class "pl-card pl-log"
@@ -691,10 +814,19 @@ the sheet shows only once its owner's key is proven (claim)."
                                                 (escape-string-minimal-plus-quotes
                                                  (format nil "plDownload(~a, $owner)"
                                                          (js-string-literal
-                                                          (format nil "~a?session=~a&format=~a"
-                                                                  (door-path "download") (session-id session) (first entry)))))
+                                                          (format nil "~a?~:[session~;replay~]=~a&format=~a"
+                                                                  (door-path "download") (session-replay? session)
+                                                                  (session-id session) (first entry)))))
                                                 (esc (fourth entry)))))
                                 (htm (:p :class "pl-line" "The model's drawings and files, once it is built.")))
+                            ;; the model file in the host's terminal, for its owner
+                            (let ((console (and session (the owner?) (not (session-replay? session))
+                                                (ignore-errors (console-url session)))))
+                              (when console
+                                (htm (:p :class "pl-line"
+                                         (:a :href console :target "_blank" :rel "noopener"
+                                             :data-doc "Open the model file in a terminal on the host, beside the page"
+                                             "Open the file in a console")))))
                             (:p :id "pl-download-note" :class "pl-line")))))))
 
   :functions
@@ -705,10 +837,42 @@ the sheet shows only once its owner's key is proven (claim)."
     ;; (a private one only to its owner: the claim opens it, once the
     ;; browser has shown the key)
     (let* ((id (cdr (assoc "session" (the query-toplevel) :test #'string-equal)))
-           (session (and (stringp id) (find-session id))))
-      (cond ((null session))
+           (session (and (stringp id) (find-session id)))
+           (archive (cdr (assoc "archive" (the query-toplevel) :test #'string-equal))))
+      (cond ((and (null session) (stringp archive))
+             ;; ?archive=<id>[&version=<n>]: an archived session, read-only
+             (the (show-archive! archive nil)))
+            ((null session))
             ((visible-to? session nil) (the (show-session! session)))
             (t (the (set-slot! :private-id (session-id session)))))))
+
+   (show-archive!
+    (id key)
+    ;; An archived session: its record's log and numbers, the model file
+    ;; as it last was (or its &version=), and its model drawn by a REPLAY
+    ;; -- the last version compiled again in a package of its own
+    ;; (browse.lisp), which is the sheet's session from then on, so the
+    ;; page is read-only and the sluice draws it.  A private record waits
+    ;; for its owner's key (claim); a record from the other engine's room
+    ;; draws nothing here and links to that lab.
+    (let* ((directory (and *browsing?* (archived-directory id)))
+           (record (and directory (read-record (merge-pathnames "session.json" directory)))))
+      (cond ((null record)
+             (the (set-slot! :archive-missing id)))
+            ((not (record-visible? record key))
+             (the (set-slot! :archive-pending id)))
+            (t
+             (the (set-slot! :archive-pending nil))
+             (the (set-slot! :archive-id id))
+             (let ((version (ignore-errors (parse-integer (cdr (assoc "version" (the query-toplevel) :test #'string-equal))))))
+               (when version (the (set-slot! :archive-version version))))
+             (the (set-slot! :shown-source (or (the archive-source) "")))
+             (when (equal (or (gethash "engine" record) "gendl") (engine-name))
+               (let ((replay (ignore-errors (ensure-replay id))))
+                 (when replay
+                   (the (set-slot! :session replay))
+                   (the (set-slot! :model-stamp (model-stamp replay)))
+                   (the show-model!))))))))
 
    (show-session!
     (session)
@@ -780,6 +944,11 @@ the sheet shows only once its owner's key is proven (claim)."
     (signals)
     ;; the owner's browser holds the key; and back from paying, the
     ;; checkout it brings is credited once (as the page's confirm door)
+    (when (and (the archive-pending) (stringp (gethash "owner" signals)))
+      ;; a private archived session, shown now to the browser that owned it
+      (the (show-archive! (the archive-pending) (gethash "owner" signals)))
+      (sheet-send! self (datastar-script-event
+                         (format nil "plSetSource(~a)" (js-string-literal (the shown-source))))))
     (let* ((key (gethash "owner" signals))
            (checkout (gethash "checkout" signals))
            (wallet (gethash "wallet" signals))
@@ -795,7 +964,8 @@ the sheet shows only once its owner's key is proven (claim)."
       (when (and session (stringp key) (owner? session key))
         (the (set-slot! :owner-key key))
         (touch session)
-        (sheet-send! self (datastar-signals-event "{\"editable\": true}"))
+        (sheet-send! self (datastar-signals-event "{\"editable\": true}")
+                     (datastar-script-event (keep-last-script (session-id session))))
         (when (and (stringp checkout) (plusp (length checkout)) (wallet-id? wallet))
           (multiple-value-bind (outcome text) (confirm-topup! session wallet checkout)
             (sheet-send! self
@@ -1025,8 +1195,34 @@ var n=name(q||s||house);if(skins[n])l.setAttribute('href',skins[n])})();"
                             (dolist (s summaries)
                               (str (listing-entry s archive?))))))))))))
 
+(defun sheet-manifest ()
+  "Hash table. The web app manifest of the sheet: the classic page's
+(app.lisp), opening at <prefix>/sheet?app=1.  Its scope is the whole site:
+the sheet lives at the address gwl mints for each visit (/sessions/<id>/),
+outside the lab's prefix, and an installed app keeps in its window only
+what is in scope.  No worker: a minted session page cannot be kept for
+offline use, and a browser installs an app without one."
+  (let ((manifest (manifest)))
+    (setf (gethash "id" manifest) (format nil "~a/sheet" *url-prefix*)
+          (gethash "start_url" manifest) (format nil "~a/sheet?app=1" *url-prefix*)
+          (gethash "scope" manifest) "/"
+          (gethash "shortcuts" manifest)
+          (coerce (append (list (h "name" "New session" "url" (format nil "~a/sheet" *url-prefix*)))
+                          (when *browsing?*
+                            (list (h "name" "Live sessions" "url" (format nil "~a/sheet-list?browse=live" *url-prefix*))
+                                  (h "name" "Archive" "url" (format nil "~a/sheet-list?browse=archive" *url-prefix*)))))
+                  'vector))
+    manifest))
+
+(defun sheet-manifest-door (req ent)
+  "GET <prefix>/sheet-manifest.webmanifest."
+  (respond-text req ent (ascii-json (encode (sheet-manifest))) "application/manifest+json"))
+
 (defun publish-lab-sheet! (&key host)
-  "Publish the sheet at <prefix>/sheet, and its listings at
-<prefix>/sheet-list, beside the page."
+  "Publish the sheet at <prefix>/sheet, its listings at <prefix>/sheet-list
+and its app manifest, beside the page."
   (gwl::publish-gwl-app (format nil "~a/sheet" *url-prefix*) 'lab-sheet :host host)
-  (gwl::publish-gwl-app (format nil "~a/sheet-list" *url-prefix*) 'lab-listing :host host))
+  (gwl::publish-gwl-app (format nil "~a/sheet-list" *url-prefix*) 'lab-listing :host host)
+  (gwl:with-all-servers (server)
+    (net.aserve:publish :path (format nil "~a/sheet-manifest.webmanifest" *url-prefix*)
+                        :server server :host host :function #'sheet-manifest-door)))
