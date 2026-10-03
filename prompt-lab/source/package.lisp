@@ -37,4 +37,6 @@
              #:*turnstile-verify-url*
              #:*turnstile-secret-file*
              #:*browsing?*
+             #:*uploads?*
+             #:*upload-caps*
              #:*default-skin*))

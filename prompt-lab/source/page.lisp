@@ -391,6 +391,9 @@ file's place and the terminal opened on it."
        "model_defined" (if (model-defined? session) t 'yason:false)
        "model_file" (and owner? (namestring (session-model-file session)))
        "model_source" (model-body session)
+       ;; the visitor's uploaded files, as public as the session (uploads.lisp)
+       "files" (files-state (session-files session) (session-id session))
+       "uploads" (and owner? (uploads-state session))
        "viewer_url" (viewer-url session)
        ;; nil encodes as null; an empty vector would be the empty array
        "console_url" (and owner? (console-url session)))))
@@ -414,6 +417,8 @@ behind this room and the sibling lab on the other engine, if any."
                            "browsing" (if *browsing?* t 'yason:false)
                            ;; the files the model may be had as (export.lisp)
                            "downloads" (coerce (downloads-state) 'vector)
+                           ;; the caps on uploaded files, nil where none are taken (uploads.lisp)
+                           "uploads" (uploads-state)
                            ;; the community pot, where the gate keeps one
                            "pot" (pot-state))))
 
@@ -866,7 +871,7 @@ the model with one panel under it, the inputs or the tree."
 its manifest and retiring service worker beside the prefix, its doors
 under <prefix>/api/ (config, session, state,
 prompt, model, reload, topup, confirm, privacy; sessions, archive,
-archived, replay; agent), the tools' door for an external agent at
+archived, replay; upload, file; agent), the tools' door for an external agent at
 <prefix>/mcp, and the viewer at <prefix>/viewer, on every server.  The
 page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet)."
   (gwl:with-all-servers (server)
@@ -904,6 +909,9 @@ page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet)."
     (net.aserve:publish :path (door-path "thumb") :server server :host host :function #'thumb-door)
     ;; the model as files (export.lisp)
     (net.aserve:publish :path (door-path "download") :server server :host host :function #'download-door)
+    ;; the visitor's files (uploads.lisp)
+    (net.aserve:publish :path (door-path "upload") :server server :host host :function #'upload-door)
+    (net.aserve:publish :path (door-path "file") :server server :host host :function #'file-door)
     ;; an agent that runs elsewhere (external.lisp); shut unless *external-agent?*
     (net.aserve:publish :path (door-path "agent") :server server :host host :function #'agent-door)
     (net.aserve:publish :path (format nil "~a/mcp" *url-prefix*)

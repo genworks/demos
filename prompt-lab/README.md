@@ -26,8 +26,9 @@ built wrong, or a page that misbehaves are welcome at
   its doors (`page.lisp`), the sessions and their
   archive, the agent loop over the Messages API (`agent.lisp`), the
   tools the agent is given (write, read, evaluate, check, render, the
-  docs), the metering of compiles and runs, and the guards at the
-  door.  `parameters.lisp` holds what an instance sets.
+  docs, the visitor's files), the uploaded files themselves
+  (`uploads.lisp`), the metering of compiles and runs, and the guards
+  at the door.  `parameters.lisp` holds what an instance sets.
 - `prompt-lab-sheet/` -- the ASDF system `prompt-lab-sheet`, the
   page: the sluice, Gendl's object browser, opened on the session's
   model, with the lab's own parts (the prompt, the status and credits,
@@ -58,6 +59,34 @@ their own, or keep one **community pot**: a single balance that every
 build, by anyone, draws on, that anyone may add to up to a limit, and
 that stops the lab at zero until someone does.  The page shows
 whichever the gate says it keeps; the reference instance keeps a pot.
+
+## Building from a drawing: uploaded files
+
+A visitor may hand the agent files to build from: a 2D drawing as a
+PDF or an image (PNG, JPEG, GIF, WebP), or a text file (DXF, SVG, CSV,
+STEP, IGES).  A PDF or an image goes to the model with the visitor's
+next prompt, pages read as text and as pictures, and the agent builds
+the part as drawn, the drawing's dimensions as the model's inputs,
+saying which it could not read.  Text files it reads with its
+`read_file` tool; `list_files` gives it every file's path, so on a
+solids engine a STEP or IGES file can be imported outright.
+
+**An uploaded file is public with its session**, live and in the
+archive, for anyone to download, unless the session is private (a
+session that has added modeling credits may be).  The visitor declares
+the right to use and share each file before it is taken.  Files are
+only ever served as downloads.
+
+The caps are `*upload-caps*` in `source/uploads.lisp` (by default 2 MB
+a file, three files and a PDF of ten pages for a session; more for one
+that has added credits), and `*uploads?*` nil takes none.  Attached
+files travel with every call the session makes, so the gate must take
+a request that large.
+
+From a script: `POST <prefix>/api/upload` with `{"session": ...,
+"name": ..., "data": <the file in base64>, "rights": true}` and the
+owner's key; `GET <prefix>/api/file?session=...&name=...` fetches one.
+Where a human check stands, an upload needs its token (`"turnstile"`).
 
 ## Prompts from a script or an agent
 

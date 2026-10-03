@@ -325,6 +325,11 @@ SESSION.  Values: content blocks, and true on failure."
         ;; the reference (docs.lisp)
         ((string= name "search_docs") (search-docs (input "query" input) :hits (input "hits" input)))
         ((string= name "describe_object") (describe-type session (input "type" input)))
+        ;; the visitor's uploaded files (uploads.lisp)
+        ((string= name "list_files") (list-files-tool session))
+        ((string= name "read_file")
+         (read-file-tool session (input "name" input)
+                         :offset (input "offset" input) :limit (input "limit" input)))
         (t (values (list (text-result "Unknown tool ~a." name)) t))))
 
 (defun schema (properties &optional required)
@@ -338,13 +343,15 @@ SESSION.  Values: content blocks, and true on failure."
 
 (defun tool-definitions ()
   "The tools, as the Messages API's tools array (a vector of alists);
-render and search_docs only where they are offered."
+render, search_docs and the two file tools only where they are offered."
   (let ((tools (%tool-definitions)))
     (flet ((without (name tools)
              (remove name tools :key #'(lambda (tool) (cdr (assoc "name" tool :test #'string=)))
                                 :test #'string=)))
       (unless (render-offered?) (setq tools (without "render" tools)))
       (unless (search-offered?) (setq tools (without "search_docs" tools)))
+      (unless (uploads-offered?)
+        (setq tools (without "read_file" (without "list_files" tools))))
       tools)))
 
 (defun %tool-definitions ()
@@ -395,7 +402,20 @@ render and search_docs only where they are offered."
                                               ("description" . "Words to search for, e.g. extruded-solid profile, or keyway.")))
                                   ("hits" . (("type" . "integer")
                                              ("description" . "How many matches to return (default 5, at most 20)."))))
-                                '("query"))))))
+                                '("query"))))
+   ;; the visitor's uploaded files (uploads.lisp)
+   `(("name" . "list_files")
+     ("description" . "List the files the visitor has uploaded to this session: each one's name, kind, size and path on the host. A PDF or an image also arrives in the conversation with the visitor's message; a text file (DXF, SVG, CSV, STEP...) is read with read_file, or by its path from the model.")
+     ("input_schema" . ,(schema nil)))
+   `(("name" . "read_file")
+     ("description" . "Read an uploaded file. A text file comes back as text, at most 20000 characters a call: give OFFSET to read further into a long one. An image comes back as the image. A PDF is already in the conversation, attached to the visitor's message.")
+     ("input_schema" . ,(schema `(("name" . (("type" . "string")
+                                             ("description" . "The file's name, as list_files gives it.")))
+                                  ("offset" . (("type" . "integer")
+                                               ("description" . "Character to start from (default 0).")))
+                                  ("limit" . (("type" . "integer")
+                                              ("description" . "Characters to return (default and most: 20000)."))))
+                                '("name"))))))
 
 
 ;;

@@ -237,7 +237,9 @@ as it last was or its Nth version, and whether a replay can draw it."
                               "log" (log-vector log)
                               "versions" (length versions)
                               "version" (and version (<= 1 version (length versions)) version)
-                              "model_source" (file-model-body file))))))))
+                              "model_source" (file-model-body file)
+                              ;; the files the visitor uploaded (uploads.lisp)
+                              "files" (files-state (directory-files directory) id :archive? t))))))))
 
 
 ;;

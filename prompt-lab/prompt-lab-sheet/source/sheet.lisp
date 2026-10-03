@@ -337,6 +337,9 @@ SESSION's balance -- or nil."
 .pl-topup{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem;font-size:.9em}
 .pl-private{display:inline-flex;gap:.3rem;align-items:center;cursor:pointer}
 .pl-private input{accent-color:var(--pl-accent,#366fc5)}
+.pl-upload{margin-top:.6rem;padding-top:.5rem;border-top:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd);font-size:.9em}
+.pl-rights{display:block;color:var(--pl-ink-dim,#555)}.pl-rights input{accent-color:var(--pl-accent,#366fc5)}
+#pl-file{font:inherit;max-width:100%}
 .pl-list{max-width:60rem;margin:0 auto;padding:1rem}
 .pl-list h2{font-family:var(--pl-font-label);font-weight:var(--pl-label-weight);text-transform:var(--pl-label-case);letter-spacing:var(--pl-label-tracking)}
 .pl-entry-card{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:.8rem;align-items:center;padding:.6rem .7rem;margin-bottom:.5rem;background:var(--pl-panel);border:var(--pl-rule) solid var(--pl-line);border-radius:var(--pl-radius);color:var(--pl-ink);text-decoration:none}
@@ -397,8 +400,22 @@ window.plToast=function(text,kind){if(!text)return;var t=document.getElementById
 // from its data-doc or its title (the sluice's controls carry titles)
 document.addEventListener('mouseover',function(e){var d=document.getElementById('pl-doc');if(!d||!e.target.closest)return;
  var el=e.target.closest('[data-doc],[title]');d.textContent=el?(el.getAttribute('data-doc')||el.getAttribute('title')||''):''});
+// an upload: the chosen file read here and sent, base64, through the
+// sheet's upload action; what the lab answers comes as a notice or an error
+window.plUpload=function(el,owner,wallet,token){var f=el.files&&el.files[0],n=document.getElementById('pl-upload-note'),r=document.getElementById('pl-rights');
+ if(n&&!n.hint)n.hint=n.textContent;
+ function say(t){if(n)n.textContent=t||n.hint||''}
+ if(!f)return;
+ if(!r||!r.checked){say('Tick the box first: you declare the right to use and share the file.');el.value='';return}
+ say('Uploading '+f.name+'...');var fr=new FileReader();
+ fr.onload=function(){var s=String(fr.result),d=s.slice(s.indexOf(',')+1);
+  plAction('upload',{name:f.name,data:d,rights:true,owner:owner||'',wallet:wallet||'',turnstile:token||''})
+   .then(function(x){say(x.ok?'':'The upload did not go through ('+x.status+').');el.value=''},function(e){say('The upload did not go through: '+e);el.value=''})};
+ fr.onerror=function(){say('The file could not be read.');el.value=''};
+ fr.readAsDataURL(f)};
 })();"
-  "String. The sheet's toast (plToast) and its documentation line.")
+  "String. The sheet's toast (plToast), its documentation line and the
+upload control's reader (plUpload).")
 
 (defparameter *sheet-pay-script*
   "(function(){
@@ -479,6 +496,7 @@ not hold."
    (title (lab-title))
    (audience :public)
    (tiles (list (list :object (the prompt-tile) :place :left :tab "Prompt")
+                (list :object (the files-section) :place :left :tab "Prompt")
                 (list :object (the status-section) :place :left :tab "Prompt")
                 (list :object (the credits-section) :place :left :tab "Prompt")
                 (list :object (the downloads-section) :place :left :tab "Prompt")
@@ -491,7 +509,16 @@ not hold."
    (user-mode?-default nil)
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
-   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :wear-skin))
+   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :wear-skin :upload))
+
+   ;; the files the visitor uploaded (uploads.lisp): the archived session's
+   ;; from its archive directory, a live one's from its own
+   (shown-files (progn
+                  (the revision)
+                  (cond ((the archive-id)
+                         (let ((directory (the archive-directory)))
+                           (and directory (directory-files directory))))
+                        ((the session) (session-files (the session))))))
 
    ;; the archived session's record and directory (browse.lisp)
    (archive-directory (and (the archive-id) (archived-directory (the archive-id))))
@@ -633,7 +660,23 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              :|data-attr:disabled| (format nil "$busy || $sending || !$prompt.trim()~@[ || !$turnstile~]"
                                                                            *turnstile-site-key*)
                                              "Build")
-                                    (:span :class "pl-busy" :|data-show| "$busy" "the agent is working...")))
+                                    (:span :class "pl-busy" :|data-show| "$busy" "the agent is working..."))
+                              ;; a file for the agent to build from (uploads.lisp):
+                              ;; read here, sent through the upload action
+                              (when (uploads-offered?)
+                                (let ((caps (getf *upload-caps* :free)))
+                                  (htm (:div :class "pl-upload"
+                                             (:label :class "pl-rights"
+                                                     (:input :type "checkbox" :id "pl-rights")
+                                                     " I have the right to use and share the files I upload.  They are public with this session, here and in the archive, unless it is private (after a top-up).")
+                                             (:div :class "pl-row"
+                                                   (:input :type "file" :id "pl-file"
+                                                           :accept (format nil ".pdf,.png,.jpg,.jpeg,.gif,.webp~{,.~a~}" *upload-text-types*)
+                                                           :data-doc "A drawing or other file for the agent to build from: a PDF, an image, or a text file such as DXF"
+                                                           :|data-on:change| "plUpload(el, $owner, $wallet, $turnstile)"))
+                                             (:p :id "pl-upload-note" :class "pl-line"
+                                                 (fmt "Build from a drawing: a PDF of up to ~d pages, an image or a text file (DXF, SVG, CSV, STEP), ~a at most."
+                                                      (getf caps :pages) (size-label (getf caps :bytes)))))))))
                         ;; hidden until Datastar has read the signals: no
                         ;; banner flashes at an owner while the script loads
                         (:div :class "pl-watch" :style "display:none" :|data-show| "!$editable && !$archived"
@@ -736,6 +779,33 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                               (format nil "$private = el.checked; ~a"
                                                                       (the (datastar-action :privacy :options "{filterSignals: {include: /^(private|owner)$/}}"))))
                                                       " private"))))))))))))
+
+   ;; The visitor's uploaded files, each a download for whoever may see
+   ;; the session (the file door); nothing shows until there is one.
+   (files-section
+    :type 'base-html-div
+    :inner-html (let ((files (the shown-files))
+                      (session (the session)))
+                  (with-lhtml-string ()
+                    (when files
+                      (htm (:div :class "pl-card pl-files"
+                                 (:h2 "Uploaded files")
+                                 (dolist (file files)
+                                   (htm (:p :class "pl-line"
+                                            (:a :href "#"
+                                                :|data-on:click__prevent|
+                                                (escape-string-minimal-plus-quotes
+                                                 (format nil "plDownload(~a, $owner)"
+                                                         (js-string-literal
+                                                          (if (the archive-id)
+                                                              (file-url (the archive-id) (the-object file file-name) :archive? t)
+                                                              (file-url (session-id session) (the-object file file-name))))))
+                                                (esc (the-object file file-name)))
+                                            (fmt " (~a, ~a)" (the-object file kind-label) (the-object file size-label)))))
+                                 (:p :class "pl-line"
+                                     (str (if (and session (session-private? session))
+                                              "Private, with the session."
+                                              "Public, with the session.")))))))))
 
    (log-section
     :type 'base-html-div
@@ -1035,6 +1105,33 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
              (multiple-value-bind (started reason) (begin-prompt! (the session) prompt address token)
                (if started
                    (sheet-send! self (datastar-signals-event "{\"error\": \"\", \"prompt\": \"\"}"))
+                   (the (tell-error! reason)))
+               (the spent-token!))))))
+
+   (upload
+    (signals)
+    ;; a file for the agent to build from (uploads.lisp), the visitor's
+    ;; first act here opening the session as a first build does
+    (let ((address (client-address *datastar-request*))
+          (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
+      (cond ((the archive-id) (the (tell-error! "An archived session takes no uploads.")))
+            ((and (the session) (not (the owner?)))
+             (the (tell-error! "This session is someone else's; start your own to upload.")))
+            ((not (eq (gethash "rights" signals) t))
+             (the (tell-error! "Tick the box first: you declare the right to use and share the file.")))
+            ((and *turnstile-site-key* (null token))
+             (the (tell-error! "Complete the human check first.")))
+            ((the (own-session! address (gethash "wallet" signals)))
+             (multiple-value-bind (file reason)
+                 (accept-upload! (the session) (gethash "name" signals) (gethash "data" signals)
+                                 :rights? t :token token :address address)
+               (if file
+                   (sheet-send! self (datastar-signals-event
+                                      (with-output-to-string (s)
+                                        (yason:encode (h "error" ""
+                                                         "notice" (format nil "~a is uploaded; it goes to the agent with your next prompt."
+                                                                          (the-object file file-name)))
+                                                      s))))
                    (the (tell-error! reason)))
                (the spent-token!))))))
 

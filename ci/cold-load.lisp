@@ -388,6 +388,44 @@ loaded) its page too."
                      (and (eq (gethash "model_defined" state) t)
                           (eq (gethash "editable" state) t)
                           (search "define-object model" (gethash "model_source" state))))))
+          ;; a visitor's files (uploads.lisp): refused without the
+          ;; declaration of rights and when the lab cannot read the kind,
+          ;; kept and listed otherwise, fetched back byte for byte as a
+          ;; download, a name that climbs out of the directory not found,
+          ;; and brought into the conversation by the next prompt
+          (when (gethash "uploads" (json-of :get (door "config")))
+            (smoke "prompt-lab upload door keeps a file, and the file door hands it back"
+                   (lambda ()
+                     (let* ((text (format nil "name,mm~%width,120~%"))
+                            (data (uiop:symbol-call :cl-base64 :string-to-base64-string text))
+                            (file (format nil "http://127.0.0.1:~a~a?session=~a&name=" (http-port) (door "file") session)))
+                       (flet ((upload (name data &optional (rights t))
+                                (http :post (door "upload") :headers (owner-headers)
+                                      :json (if rights
+                                                (table "session" session "name" name "data" data "rights" t)
+                                                (table "session" session "name" name "data" data)))))
+                         (unless (eql 400 (nth-value 1 (upload "dims.csv" data nil)))
+                           (error "a file came in without the declaration of rights"))
+                         (unless (eql 400 (nth-value 1 (upload "tool.exe" data)))
+                           (error "a kind the lab does not read came in"))
+                         (unless (eql 200 (nth-value 1 (upload "dims.csv" data)))
+                           (error "the upload was refused"))
+                         (let ((files (gethash "files" (json-of :get (format nil "~a?session=~a" (door "state") session)))))
+                           (unless (and (= (length files) 1) (equal (gethash "name" (elt files 0)) "dims.csv"))
+                             (error "the state door does not list the file")))
+                         (multiple-value-bind (body status)
+                             (net.aserve.client:do-http-request (format nil "~adims.csv" file) :timeout 30)
+                           (unless (and (eql status 200) (equal body text))
+                             (error "the file door answered ~a" status)))
+                         (unless (eql 404 (nth-value 1 (net.aserve.client:do-http-request
+                                                           (format nil "~a../session.json" file) :timeout 30)))
+                           (error "the file door reached outside the session's files"))
+                         (let ((found (uiop:symbol-call :prompt-lab :find-session session)))
+                           (unless (equal (mapcar (lab :file-reference-name)
+                                                  (uiop:symbol-call :prompt-lab :pending-attachments found))
+                                          '("dims.csv"))
+                             (error "the file does not wait for the next prompt")))
+                         t)))))
           ;; the model as files (export.lisp): every format the config
           ;; door offers answers a file that starts as its kind does --
           ;; STEP, IGES and STL on the solids engine, where the box and

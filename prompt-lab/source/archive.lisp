@@ -25,6 +25,7 @@
 ;;                   each result
 ;;   model.lisp      the model file as it last was
 ;;   model-NNN.lisp  every distinct version of it, in the order written
+;;   files/          the files the visitor uploaded (uploads.lisp)
 ;;
 ;; Written after every prompt and every edit (save-session!) and once
 ;; more before a session is deleted; a version of the model file is kept
@@ -134,7 +135,9 @@ Never signals."
 (defun write-content-block (out block)
   (when (hash-table-p block)
     (let ((type (gethash "type" block)))
-      (cond ((equal type "text") (format out "### Agent~%~%~a~%~%" (gethash "text" block)))
+      (cond ((file-reference-name block) ; an uploaded file (uploads.lisp)
+             (format out "[uploaded file: ~a]~%~%" (file-reference-name block)))
+            ((equal type "text") (format out "### Agent~%~%~a~%~%" (gethash "text" block)))
             ((equal type "thinking")
              ;; an empty thinking block (the API returns those) says nothing
              (let ((thinking (gethash "thinking" block)))
@@ -196,6 +199,8 @@ Never signals; nil when there is no archive."
            (copy-file! record (merge-pathnames "session.json" directory))))
        (write-text-file (transcript-text session) (merge-pathnames "transcript.md" directory))
        (archive-model! session)
+       ;; the visitor's uploaded files (uploads.lisp)
+       (archive-files! session)
        directory))))
 
 (defun archive-stale-directory! (directory)
