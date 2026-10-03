@@ -23,6 +23,11 @@
              #:viewer
              #:web-app
              #:*kinds*
+             #:*deployments?*
+             #:*deployment-payments?*
+             #:*house-fee-percent*
+             #:book-revenue!
+             #:revenue-report
              #:publish-prompt-lab!
              #:*workspace-root*
              #:*url-prefix*

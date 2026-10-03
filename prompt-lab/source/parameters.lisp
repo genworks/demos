@@ -242,3 +242,36 @@ run-program stalls (the public workshop, 2026-09-27: every render sat
 150 s behind CCL's spinning process monitor, past the time limit, which
 cannot interrupt that wait) the tool is withheld and the agent works
 from check_model's numbers -- the visitor has the live viewer anyway.")
+
+;;
+;; Monetize: what a session built, deployed for others to use (deploy.lisp).
+;;
+
+(defparameter *deployments?* t
+  "Boolean. Whether a session's owner may deploy what it built (the
+page's Monetize button, the deploy door).  Nil shuts the doors; what is
+already deployed stays on disk and is not served.")
+
+(defparameter *deployed-root*
+  (namestring (merge-pathnames "prompt-lab-deployed/"
+                               (uiop:pathname-parent-directory-pathname (pathname *workspace-root*))))
+  "String. Directory under which every deployment is kept, by engine and
+name: <root>/<engine>/<name>/ holds deployment.json and model.lisp; the
+books are <root>/revenue.jsonl.")
+
+(defparameter *house-fee-percent* 25
+  "Number. The house's share of what a priced deployment's users pay, its
+hosting and licence fee, in percent.  Written into each deployment's
+record when it is deployed: a later change here does not reach back.")
+
+(defparameter *deployment-price-range* '(100 . 10000)
+  "Cons of integers. The least and the most a priced deployment may ask
+for a use, in cents.")
+
+(defparameter *max-deployments* 200
+  "Integer. Deployments this lab keeps for its engine, all owners together.")
+
+(defparameter *deployment-payments?* nil
+  "Boolean. Whether the gate behind this lab takes payment for a priced
+deployment (its deployment doors).  Nil: a priced deployment is kept with
+its terms and opens only to its owner until payments are on.")

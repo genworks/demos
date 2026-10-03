@@ -574,6 +574,41 @@ loaded) its page too."
                        (and (equal (gethash "kind" state) "app")
                             (eq (gethash "app_defined" state) t)
                             (page-ok? (gethash "app_url" state)))))))
+          ;; Monetize (deploy.lisp): the session's model deployed at an
+          ;; address of its own, open and free, then closed and priced,
+          ;; then taken down
+          (smoke "prompt-lab deploys a model: its page, its source, its files; closed and priced; taken down"
+                 (lambda ()
+                   (let* ((name "ci-smoke-plate")
+                          (address (format nil "~a/d/~a" prefix name)))
+                     (flet ((deploy (&rest terms)
+                              (json-of :post (door "deploy") :headers (owner-headers)
+                                       :json (apply #'table "session" session "name" name terms)))
+                            (status (path) (nth-value 1 (http :get path))))
+                       (unwind-protect
+                            (progn
+                              (unless (equal (gethash "url" (deploy "title" "A plate")) address)
+                                (error "the deploy door did not answer the deployment's address"))
+                              ;; the address sends to the viewer, asked here itself: this
+                              ;; client does not follow a second redirect
+                              (unless (page-ok? (format nil "~a/viewer?deployed=~a" prefix name))
+                                (error "the deployed model's page did not open"))
+                              (unless (search "define-object model" (http :get (format nil "~a/source" address)))
+                                (error "an open deployment did not serve its source"))
+                              (unless (eql 200 (status (format nil "~a?deployed=~a&format=svg" (door "download") name)))
+                                (error "a deployed model's drawing was not to be had"))
+                              (unless (eql 403 (nth-value 1 (http :post (door "deploy")
+                                                                  :json (table "session" session "name" name))))
+                                (error "a stranger deployed someone's session"))
+                              (deploy "closed" t "price_cents" 500 "payee" "owner@example.com")
+                              (unless (eql 404 (status (format nil "~a/source" address)))
+                                (error "a closed deployment served its source"))
+                              (unless (eql 402 (status address))
+                                (error "a priced deployment opened to a stranger"))
+                              (page-ok? (format nil "~a/viewer?deployed=~a&owner=~a" prefix name owner)))
+                         (http :post (door "undeploy") :headers (owner-headers) :json (table "name" name))
+                         (unless (eql 404 (status address))
+                           (error "the deployment is still there after it was taken down")))))))
           (setf (symbol-value (lab '#:*external-agent?*)) nil)
           ;; the community pot (page.lisp): what the lab has heard from a
           ;; gate that keeps one is everyone's to see, and an empty pot

@@ -89,6 +89,44 @@ and served by the lab's own host: **an instance that serves strangers
 should give the apps an origin of their own**, apart from anything
 that keeps a visitor's keys, before it offers this kind.
 
+## Monetize: deploying what a session built
+
+A session's owner may deploy what it built at an address of its own,
+`<prefix>/d/<name>`, for others to use (`source/deploy.lisp`; the
+page's **Monetize** button):
+
+- a **model** is deployed in a plain wrapper: the viewer, with a
+  control for each of the model's inputs and its drawings and files to
+  download;
+- a **web app** is served as it is.
+
+A deployment is a copy -- the model file as it was, and a record of its
+terms -- kept apart from the session, which may go on changing or go
+away; deploying again under the same name replaces it, and its owner
+may take it down.  The terms are the owner's:
+
+- **source**: open, served at `<prefix>/d/<name>/source` under the GNU
+  Affero General Public License, or closed, in which case the
+  deployment does not serve it;
+- **price**: free, or a price for a use.  Of what users pay, the house
+  keeps `*house-fee-percent*` (25) as its hosting and licence fee and
+  the owner is owed the rest.
+
+The lab keeps the terms and the books: `book-revenue!` appends a line
+for each settled payment, with the fee and the owner's share at the
+deployment's own terms and the engine and Lisp it ran on, and
+`revenue-report` sums them by runtime for a year or a quarter.
+**Taking the payment is the gate's, and that side is not written
+yet**: until an instance sets `*deployment-payments?*`, a priced
+deployment is kept with its terms and opens only to its owner.
+
+From a script: `POST <prefix>/api/deploy` with `{"session": ...,
+"name": ..., "title": ..., "blurb": ..., "closed": ..., "price_cents":
+..., "payee": ...}` and the owner's key (and the human check's token
+where one stands); `POST <prefix>/api/undeploy` with `{"name": ...}`;
+`GET <prefix>/api/deployments` lists them.  `*deployments?*` nil shuts
+all of it.
+
 ## Building from a drawing: uploaded files
 
 A visitor may hand the agent files to build from: a 2D drawing as a

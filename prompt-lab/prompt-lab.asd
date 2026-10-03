@@ -16,4 +16,5 @@
   (:file "source/skins") (:file "source/app") (:file "source/page")
   (:file "source/browse") (:file "source/thumbs")
   (:file "source/export") (:file "source/uploads")
-  (:file "source/routing") (:file "source/external")))
+  (:file "source/routing") (:file "source/deploy")
+  (:file "source/external")))

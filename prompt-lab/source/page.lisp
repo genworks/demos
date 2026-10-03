@@ -390,6 +390,9 @@ file's place and the terminal opened on it."
        "app_url" (and (app-defined? session)
                       (app-url session :owner-key (and owner? (session-private? session)
                                                        (session-owner session))))
+       ;; what the session built, deployed for others to use (deploy.lisp)
+       "deployment" (let ((record (and *deployments?* (session-deployment session))))
+                      (and record (deployment-state record :owner? owner?)))
        "created" (epoch-seconds (session-created session))
        "spend" (and owner? (spend-state session))
        ;; the community pot, where the gate keeps one: everyone's to see
@@ -828,8 +831,8 @@ the model with one panel under it, the inputs or the tree."
    ;; (the sluice is in *packages-to-lock*, GDL's reserved-word check).
    (additional-css-links (viewer-css-links (the page-skin) :phone? (the phone?)))
 
-   ;; on a phone the inspector holds the inputs alone
-   (user-mode?-default (the phone?))
+   ;; on a phone, and for a deployed model, the inspector holds the inputs alone
+   (user-mode?-default (or (the phone?) (stringp (the deployed-name))))
 
    (session-id (cdr (assoc "session" (the query-toplevel) :test #'string-equal)))
 
@@ -840,11 +843,21 @@ the model with one panel under it, the inputs or the tree."
    ;; the owner's page names its key (owner=) on the iframe
    (owner-key (cdr (assoc "owner" (the query-toplevel) :test #'string-equal)))
 
+   ;; ?deployed=<name> instead: a deployed model (deploy.lisp)
+   (deployed-name (cdr (assoc "deployed" (the query-toplevel) :test #'string-equal)))
+
+   ;; A deployed model's wrapper: what it is, and its files to download,
+   ;; in a tile at the left; the inspector holds its inputs alone.  (An
+   ;; INPUT of the sluice; nil for a session's or a replay's viewer.)
+   (tiles (when (and (stringp (the deployed-name)) (the session))
+            (list (list :object (the deployed-tile) :place :left :tab "About"))))
+
    ;; a private session shows only to its owner's key
-   (session (let* ((id (the session-id)) (replay (the replay-id))
+   (session (let* ((id (the session-id)) (replay (the replay-id)) (deployed (the deployed-name))
                    (session (cond ((stringp id) (find-session id))
-                                  ((stringp replay) (find-replay replay)))))
-              (and session (visible-to? session (the owner-key)) session)))
+                                  ((stringp replay) (find-replay replay))
+                                  ((stringp deployed) (deployed-for-viewer deployed (the owner-key))))))
+              (and session (or (stringp deployed) (visible-to? session (the owner-key))) session)))
 
    ;; only the owner's draws are metered -- a watcher's cost the owner nothing
    (owner-viewing? (let ((session (the session)))
@@ -861,6 +874,34 @@ the model with one panel under it, the inputs or the tree."
           (str (cond ((null (the session)) "This session does not exist any more.")
                      ((null (the root-object-type)) "No model has been built in this session yet.")
                      (t "The model's tree is at the left; click a node to draw it here.")))))))
+
+  :objects
+  ((deployed-tile
+    :type 'base-html-div
+    :inner-html (let* ((name (the deployed-name))
+                       (record (and (stringp name) (deployment-record name)))
+                       (key (and record (deployment-priced? record) (the owner-key))))
+                  (with-lhtml-string ()
+                    (when record
+                      (htm (:div :style "padding:.7rem;font-size:.9rem;line-height:1.45"
+                                 (:h2 :style "font-size:1.05rem;margin:0 0 .4rem" (esc (gethash "title" record)))
+                                 (let ((blurb (gethash "blurb" record)))
+                                   (when (plusp (length blurb)) (htm (:p :style "margin:0 0 .6rem" (esc blurb)))))
+                                 (:p :style "margin:0 0 .6rem"
+                                     "Change the inputs in the inspector and the model follows.")
+                                 (:p :style "margin:0 0 .3rem;font-weight:600" "Download")
+                                 (:p :style "margin:0 0 .6rem"
+                                     (dolist (entry (download-formats))
+                                       (htm (:a :style "display:inline-block;margin:0 .5rem .3rem 0"
+                                                :href (format nil "~a?deployed=~a&format=~a~@[&owner=~a~]"
+                                                              (door-path "download") name (first entry) key)
+                                                (esc (fourth entry))))))
+                                 (unless (truthy? (gethash "closed" record))
+                                   (htm (:p :style "margin:0 0 .6rem"
+                                            (:a :href (format nil "~a/source" (deployment-url name)) "Its source")
+                                            ", under the GNU Affero General Public License.")))
+                                 (:p :style "margin:0;opacity:.7"
+                                     "Built in the " (:a :href *url-prefix* (esc (lab-title))) "."))))))))
 
   :functions
   ((set-instantiation-time!
@@ -978,6 +1019,12 @@ page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet)."
     (net.aserve:publish :path (door-path "agent") :server server :host host :function #'agent-door)
     (net.aserve:publish :path (format nil "~a/mcp" *url-prefix*)
                         :server server :host host :function #'mcp-door)
+    ;; Monetize: what a session built, deployed for others to use (deploy.lisp)
+    (net.aserve:publish :path (door-path "deploy") :server server :host host :function #'deploy-door)
+    (net.aserve:publish :path (door-path "undeploy") :server server :host host :function #'undeploy-door)
+    (net.aserve:publish :path (door-path "deployments") :server server :host host :function #'deployments-door)
+    (net.aserve:publish-prefix :prefix (format nil "~a/d/" *url-prefix*)
+                               :server server :host host :function #'deployed-door)
     ;; a session's web app and the stylesheet it wears (kinds.lisp)
     (net.aserve:publish :path (format nil "~a/app" *url-prefix*)
                         :server server :host host :function #'app-door)

@@ -102,7 +102,10 @@ stale.  A session gone private closes on every sheet but its owner's."
            (the-object sheet (set-slot! :shown-source body))
            (sheet-send! sheet (datastar-script-event (format nil "plSetSource(~a)" (js-string-literal body))))))
        (sheet-send! sheet (datastar-signals-event
-                           (format nil "{\"busy\": ~a}" (json-boolean (session-busy? session)))))
+                           (format nil "{\"busy\": ~a, \"built\": ~a}" (json-boolean (session-busy? session))
+                                   ;; something to deploy (the Monetize tile)
+                                   (json-boolean (and (not (session-replay? session))
+                                                      (or (model-defined? session) (app-defined? session)))))))
        (sheet-changed! sheet)))))
 
 (pushnew 'sheets-hear *session-change-hooks*)
@@ -344,6 +347,10 @@ SESSION's balance -- or nil."
 .pl-kinds{margin:0 0 .45rem;gap:.7rem;flex-wrap:wrap;font-size:.9em}.pl-kinds .pl-line{margin:0}
 .pl-pick{display:inline-flex;gap:.3rem;align-items:center;cursor:pointer}.pl-pick input{accent-color:var(--pl-accent,#366fc5);margin:0}
 .pl-open-app{font-weight:600;color:var(--pl-link,#1550a8)}
+.pl-monetize .pl-open-app{font-weight:400;font-size:.85em;overflow-wrap:anywhere}
+.pl-deploy{margin-top:.5rem;font-size:.9em}.pl-deploy label{display:block;margin:.45rem 0 0;color:var(--pl-ink-dim,#555)}
+.pl-deploy label.pl-pick{display:flex;color:var(--pl-ink,#111)}
+.pl-deploy input[type=text],.pl-deploy input[type=email],.pl-deploy input[type=number],.pl-deploy textarea{display:block;width:100%;box-sizing:border-box;font:inherit;padding:.3rem;margin-top:.15rem;background:var(--pl-panel,#fff);color:var(--pl-ink,#111);border:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd);border-radius:var(--pl-radius,4px)}
 .pl-list{max-width:60rem;margin:0 auto;padding:1rem}
 .pl-list h2{font-family:var(--pl-font-label);font-weight:var(--pl-label-weight);text-transform:var(--pl-label-case);letter-spacing:var(--pl-label-tracking)}
 .pl-entry-card{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:.8rem;align-items:center;padding:.6rem .7rem;margin-bottom:.5rem;background:var(--pl-panel);border:var(--pl-rule) solid var(--pl-line);border-radius:var(--pl-radius);color:var(--pl-ink);text-decoration:none}
@@ -530,6 +537,7 @@ not hold."
    (audience :public)
    (tiles (list (list :object (the prompt-tile) :place :left :tab "Prompt")
                 (list :object (the app-section) :place :left :tab "Prompt")
+                (list :object (the monetize-tile) :place :left :tab "Prompt")
                 (list :object (the files-section) :place :left :tab "Prompt")
                 (list :object (the status-section) :place :left :tab "Prompt")
                 (list :object (the credits-section) :place :left :tab "Prompt")
@@ -543,7 +551,8 @@ not hold."
    (user-mode?-default nil)
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
-   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :wear-skin :upload :adopt))
+   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :wear-skin :upload :adopt
+                           :deploy :undeploy))
 
    ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
    ;; sibling, on this site) whose files this lab is offered (routing.lisp)
@@ -665,7 +674,15 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{built: ~a, deployed: ~a, monetize: false, dname: '', dtitle: '', dblurb: '', dclosed: false, dpriced: false, dprice: 5, dpayee: '', kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+            ;; Monetize (deploy.lisp): whether there is something to deploy,
+            ;; and where this session is deployed already
+            (json-boolean (let ((session (the session)))
+                            (and session (not (session-replay? session))
+                                 (or (model-defined? session) (app-defined? session)))))
+            (js-string-literal (let ((record (and (the session) *deployments?*
+                                                  (ignore-errors (session-deployment (the session))))))
+                                 (if record (deployment-url (gethash "name" record)) "")))
             ;; what the next prompt builds (kinds.lisp): the session's kind,
             ;; where this lab still offers it, else the lab's default
             (js-string-literal (kind-name (or (and (the session) (parse-kind (session-kind (the session))))
@@ -783,6 +800,55 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                        (str (if (the owner?)
                                                 "  -- the page your prompts built.  It opens afresh from the model file each time."
                                                 "  -- a page built by this session's visitor, not by Genworks."))))))))))
+
+   ;; Monetize (deploy.lisp): the owner deploys what the session built
+   ;; at an address of its own, on terms of their choosing.  Like the
+   ;; prompt, a tile that reads nothing that changes, so what is typed
+   ;; stays; what it shows changes through signals.
+   (monetize-tile
+    :type 'base-html-div
+    :inner-html (with-lhtml-string ()
+                  (when *deployments?*
+                    (htm (:div :class "pl-card pl-monetize" :style "display:none" :|data-show| "$editable && $built"
+                               (:div :class "pl-row" :style "margin-top:0"
+                                     (:button :type "button" :class "pl-build pl-monetize-button"
+                                              :data-doc "Deploy what this session built at an address of its own, for others to use: open or closed source, free or priced"
+                                              :|data-on:click| "$monetize = !$monetize"
+                                              "Monetize")
+                                     (:a :class "pl-open-app" :target "_blank" :rel "noopener"
+                                         :|data-show| "$deployed" :|data-attr:href| "$deployed" :|data-text| "$deployed"))
+                               (:div :class "pl-deploy" :|data-show| "$monetize"
+                                     (:p :class "pl-line"
+                                         "Deploy what you built at an address of its own.  A model gets a page where others change its inputs and download its files; a web app is served as it is.  It is a copy: deploy again to update it.")
+                                     (:label "Name in the address"
+                                             (:input :type "text" :maxlength "40" :placeholder "shelf-bracket" :|data-bind:dname| ""))
+                                     (:label "Title"
+                                             (:input :type "text" :maxlength "80" :|data-bind:dtitle| ""))
+                                     (:label "What it is, in a line or two"
+                                             (:textarea :rows "2" :maxlength "400" :|data-bind:dblurb| ""))
+                                     (:label :class "pl-pick"
+                                             (:input :type "checkbox" :|data-bind:dclosed| "")
+                                             " Closed source: the deployment does not serve its source")
+                                     (:label :class "pl-pick"
+                                             (:input :type "checkbox" :|data-bind:dpriced| "")
+                                             " Charge for its use")
+                                     (:div :|data-show| "$dpriced"
+                                           (:label "Price of a use, in dollars"
+                                                   (:input :type "number" :min "1" :max "100" :step "1" :|data-bind:dprice| ""))
+                                           (:label "Where to reach you about your share (email)"
+                                                   (:input :type "email" :maxlength "200" :|data-bind:dpayee| ""))
+                                           (:p :class "pl-line"
+                                               (fmt "Of what its users pay you receive ~d%; ~d% is the hosting and licence fee.  Taking payment is not switched on here yet: until it is, a priced deployment opens only to you."
+                                                    (- 100 *house-fee-percent*) *house-fee-percent*)))
+                                     (:div :class "pl-row"
+                                           (:button :type "button" :class "pl-download"
+                                                    :|data-attr:disabled| "!$dname.trim()"
+                                                    :|data-on:click| (the (datastar-action :deploy :options "{filterSignals: {include: /^(d[a-z]+|owner|turnstile)$/}}"))
+                                                    "Deploy")
+                                           (:button :type "button" :class "pl-download" :|data-show| "$deployed"
+                                                    :|data-on:click| (format nil "confirm('Take the deployment down?') && ~a"
+                                                                             (the (datastar-action :undeploy :options "{filterSignals: {include: /^(owner)$/}}")))
+                                                    "Take it down"))))))))
 
    ;; The model file's editor, under the panes.  Its card is never
    ;; morphed (data-ignore-morph): CodeMirror builds its own DOM beside
@@ -1235,6 +1301,52 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                                       (if kind (kind-name kind) "")))))))
                      (t (the (tell-error! reason))))
                (the spent-token!))))))
+
+   (deploy
+    (signals)
+    ;; Monetize (deploy.lisp): the owner deploys what the session built,
+    ;; on the terms the tile's signals carry
+    (let ((session (the session))
+          (address (client-address *datastar-request*))
+          (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
+      (if (not (the owner?))
+          (the (tell-error! "Only the session's owner may deploy it."))
+          (multiple-value-bind (ok? reason) (topup-check! session token address)
+            (if (not ok?)
+                (the (tell-error! reason))
+                (multiple-value-bind (record reason)
+                    (deploy-session! session
+                                     :name (gethash "dname" signals) :title (gethash "dtitle" signals)
+                                     :blurb (gethash "dblurb" signals)
+                                     :closed? (eq (gethash "dclosed" signals) t)
+                                     :price-cents (and (eq (gethash "dpriced" signals) t)
+                                                       (let ((price (gethash "dprice" signals)))
+                                                         (when (stringp price)
+                                                           (setq price (ignore-errors (parse-integer price :junk-allowed t))))
+                                                         (and (realp price) (round (* 100 price)))))
+                                     :payee (gethash "dpayee" signals))
+                  (if record
+                      (sheet-send! self (datastar-signals-event
+                                         (with-output-to-string (s)
+                                           (yason:encode (h "error" "" "monetize" 'yason:false
+                                                            "deployed" (deployment-url (gethash "name" record))
+                                                            "notice" (format nil "Deployed at ~a." (deployment-url (gethash "name" record))))
+                                                         s))))
+                      (the (tell-error! reason)))))
+            (the spent-token!)))))
+
+   (undeploy
+    (signals)
+    (let* ((session (and signals (the session)))
+           (record (and session (the owner?) (session-deployment session))))
+      (if (null record)
+          (the (tell-error! "This session has no deployment of yours to take down."))
+          (multiple-value-bind (ok? reason) (undeploy! (gethash "name" record) (session-owner session))
+            (if ok?
+                (progn (log-event session :note "The deployment ~a was taken down." (gethash "name" record))
+                       (sheet-send! self (datastar-signals-event
+                                          "{\"deployed\": \"\", \"error\": \"\", \"notice\": \"The deployment is taken down.\"}")))
+                (the (tell-error! reason)))))))
 
    (upload
     (signals)
