@@ -20,8 +20,9 @@
 ;;         Ghostscript, as for the render tool
 ;;   step  the model's solids, on an engine with them (*engine* :solid)
 ;;   iges  the same
+;;   stl   the same solids as one triangle mesh, in STL's text form
 ;;
-;; STEP and IGES carry solids only: a primitive of the free engine's
+;; STEP, IGES and STL carry solids only: a primitive of the free engine's
 ;; kind (box, cylinder, cone, sphere, torus, global-polygon-projection) is
 ;; written as the solid of the same shape, made for the purpose, and kept
 ;; only when its bounding box is the primitive's own; what is already a
@@ -38,7 +39,8 @@
     ("svg" "image/svg+xml" "svg" "SVG drawing")
     ("png" "image/png" "png" "PNG picture")
     ("step" "model/step" "stp" "STEP solids")
-    ("iges" "model/iges" "igs" "IGES solids"))
+    ("iges" "model/iges" "igs" "IGES solids")
+    ("stl" "model/stl" "stl" "STL mesh"))
   "Each: the format's name on the address, its content type, the file's
 extension, and the label the page shows.")
 
@@ -54,11 +56,11 @@ extension, and the label the page shows.")
     (and symbol (find-class symbol nil) t)))
 
 (defun download-formats ()
-  "List of the formats this lab offers: the drawings everywhere, STEP and
-IGES where there are solids, PNG where the rasteriser is aboard."
+  "List of the formats this lab offers: the drawings everywhere, STEP,
+IGES and STL where there are solids, PNG where the rasteriser is aboard."
   (remove-if #'(lambda (entry)
                  (let ((name (first entry)))
-                   (or (and (member name '("step" "iges") :test #'string=)
+                   (or (and (member name '("step" "iges" "stl") :test #'string=)
                             (not (solids-available?)))
                        (and (string= name "png") (not (raster-available?))))))
              *download-formats*))
@@ -223,10 +225,24 @@ there is nothing to write."
                  (values nil (format nil "None of the model's ~a parts is a solid or the shape of one (a box, cylinder, cone, sphere, torus or extruded outline), so there is nothing to write as ~:@(~a~)."
                                      (length left-out) kind))
                  (progn
-                   (if (string= kind "step")
-                       (with-format (step file) (dolist (solid solids) (write-the-object solid cad-output)))
-                       (with-format (iges file) (dolist (solid solids) (write-the-object solid cad-output))))
-                   (values t (left-out-note solids left-out)))))))))
+                   (cond ((string= kind "step")
+                          (with-format (step file) (dolist (solid solids) (write-the-object solid cad-output))))
+                         ((string= kind "iges")
+                          (with-format (iges file) (dolist (solid solids) (write-the-object solid cad-output))))
+                         (t
+                          (with-format (stl file) (dolist (solid solids) (write-the-object solid cad-output)))))
+                   ;; the stl lens warns and goes on when a solid does not
+                   ;; tessellate, so a file may come out with no triangle
+                   (if (and (string= kind "stl") (not (stl-facets? file)))
+                       (values nil "None of the model's solids could be meshed, so there is nothing to write as STL.")
+                       (values t (left-out-note solids left-out))))))))))
+
+(defun stl-facets? (file)
+  "Whether the text STL in FILE holds at least one triangle."
+  (with-open-file (in file)
+    (loop for line = (read-line in nil nil)
+          while line
+          thereis (search "facet normal" line))))
 
 
 ;;

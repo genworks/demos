@@ -390,12 +390,13 @@ loaded) its page too."
                           (search "define-object model" (gethash "model_source" state))))))
           ;; the model as files (export.lisp): every format the config
           ;; door offers answers a file that starts as its kind does --
-          ;; STEP and IGES on the solids engine, where the box and the
-          ;; cylinder are written as the solids of their shapes
+          ;; STEP, IGES and STL on the solids engine, where the box and
+          ;; the cylinder are written as the solids of their shapes
           (smoke "prompt-lab download door answers every format it offers"
                  (lambda ()
                    (let ((magic '(("pdf" . "%PDF") ("svg" . "<") ("png" . "PNG")
-                                  ("step" . "ISO-10303") ("iges" . "S      1"))))
+                                  ("step" . "ISO-10303") ("iges" . "S      1")
+                                  ("stl" . "facet normal"))))
                      (dolist (offer (coerce (gethash "downloads" (json-of :get (door "config"))) 'list) t)
                        (let ((kind (gethash "format" offer)))
                          (multiple-value-bind (body status)
