@@ -845,7 +845,7 @@ the model with one panel under it, the inputs or the tree."
     ;; hidden lines removed by default: the wireframe reads as a solid
     ;; object rather than a cage -- up to *hidden-lines-max-leaves*;
     ;; removal is quadratic in the edges, so a larger model opens as the
-    ;; plain wireframe and View > Hidden Lines turns removal back on
+    ;; plain wireframe and a pane's View > Hidden lines turns removal back on
     (when (and (the root-object)
                (<= (or (ignore-errors (length (the root-object leaves))) 0)
                    *hidden-lines-max-leaves*))

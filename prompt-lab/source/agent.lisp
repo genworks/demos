@@ -404,6 +404,11 @@ no stream (a refusal), its parsed body and status."
           (failure (values failure status gate))
           ((null message)
            (error "The API's stream ended before its message began."))
+          ;; cut on the way (a gate's or proxy's timeout): a reply with no
+          ;; stop reason is not one to act on
+          ((null (gethash "stop_reason" message))
+           (session-text-changed! session nil)
+           (error "The model's reply was cut off before it was complete; nothing was built. Send the prompt again."))
           (t
            (setf (gethash "content" message)
                  (loop for i from 0 below (hash-table-count blocks)

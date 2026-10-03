@@ -49,7 +49,7 @@ again to be drawn (a replay, browse.lisp): scratch, rebuilt on demand.")
   "Integer. The viewer opens a model of at most this many leaves with its
 hidden lines removed; a larger one opens as the plain wireframe, since
 removal is quadratic in the edges (the 213-leaf Eiffel tower took 132 s).
-The sluice's View > Hidden Lines turns removal back on.")
+A pane's View > Hidden lines turns removal back on.")
 
 (defparameter *max-replays* 12
   "Integer. Replays held at once; the least recently used goes first.")

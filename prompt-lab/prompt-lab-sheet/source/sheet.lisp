@@ -298,6 +298,8 @@ SESSION's balance -- or nil."
 .pl-row{display:flex;gap:.8rem;align-items:center;margin-top:.5rem}
 .pl-build{padding:.35rem 1.2rem;font:inherit;background:var(--pl-accent,#366fc5);color:var(--pl-accent-ink,#fff);border:0;border-radius:var(--pl-radius,4px);cursor:pointer;font-weight:var(--pl-label-weight,700);text-transform:var(--pl-label-case)}
 .pl-build:disabled{opacity:.4;cursor:default}.pl-busy{color:var(--pl-status-busy,#a60)}
+.pl-busy::before{content:'';display:inline-block;width:.75em;height:.75em;margin-right:.45em;vertical-align:-.08em;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:pl-spin .8s linear infinite}
+@keyframes pl-spin{to{transform:rotate(360deg)}}
 .pl-error{color:var(--pl-status-fail,#b00);margin:.4rem 0 0}.pl-notice{color:var(--pl-status-pass,#060);margin:.4rem 0 0}
 .pl-status{display:flex;flex-wrap:wrap;gap:.3rem 1rem;color:var(--pl-ink-dim,#555);font-size:.9em}
 .pl-entry{display:grid;grid-template-columns:5rem 1fr;gap:.5rem;padding:.2rem 0;border-bottom:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd)}
@@ -563,7 +565,7 @@ not hold."
 if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))}catch(e){}})();"
                                          (js-string-literal (format nil "~a?session=" *url-prefix*)))))))
             ;; the skin this browser chose (localStorage prompt-lab-skin): worn when it is not the one
-            ;; showing, and kept when View > Skin picks another
+            ;; showing, and kept when Page > Skin picks another
             (:script (str (format nil "window.plIid=~a;" (js-string-literal (the instance-id)))))
             (:script "window.sluiceSkinChosen=function(n){try{localStorage.setItem('prompt-lab-skin',n)}catch(e){}};")
             (:span :|data-init|
@@ -893,7 +895,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                  (not (eq (the root-object-type) (model-symbol session))))
         (the (set-slot! :root-object-type (model-symbol session)))
         ;; hidden lines removed up to *hidden-lines-max-leaves* leaves
-        ;; (quadratic in the edges; View > Hidden Lines turns it on for
+        ;; (quadratic in the edges; a pane's View > Hidden lines turns it on for
         ;; a larger model), and the model's leaves drawn
         (when (and (the root-object)
                    (<= (or (ignore-errors (length (the root-object leaves))) 0)
