@@ -286,8 +286,8 @@ name: <root>/<engine>/<name>/ holds deployment.json and model.lisp; the
 books are <root>/revenue.jsonl.")
 
 (defparameter *house-fee-percents* '(:open 10 :closed 15)
-  "Plist. The house's share of what a deployment's users pay, its hosting
-and licence fee, in percent, by the deployment's source terms: open (the
+  "Plist. The house's share of what a deployment's users pay, its
+monetization fee, in percent, by the deployment's source terms: open (the
 GNU Affero General Public License) or closed.  Written into each
 deployment's record when it is deployed: a later change here does not
 reach back.")

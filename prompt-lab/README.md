@@ -92,8 +92,11 @@ and it is served from the lab's own origin.
 ## Monetize: deploying what a session built
 
 A session's owner may deploy what it built at an address of its own,
-`<prefix>/d/<name>`, for others to use (`source/deploy.lisp`; the
-page's **Monetize** button):
+`<prefix>/d/<name>`, for others to pay to use (`source/deploy.lisp`;
+the page's **Monetize** button).  The button is greyed until what was
+built has a monetization story: the owner tells the agent, in a prompt,
+what should cost money, and the agent writes the tollbooths into the
+source.  Then:
 
 - a **model** is deployed in a plain wrapper: the viewer, with a
   control for each of the model's inputs and its drawings and files to
@@ -126,9 +129,16 @@ other.  `*closed-source?*` nil offers no such choice.
   `file-link` gives a download of the model as it stands in the
   visitor's page, and `file-tolls` puts a format behind a toll.  The
   price is always the app's own on the server, never the browser's.
-- A deployed model may ask a price for each download of its files.
+- A model says what its downloads cost in two computed slots of
+  `MODEL`: `tolls`, as above, and `file-tolls`, a plist from download
+  format to toll.  The page of the deployed model shows the prices; a
+  format not named is free.
 
-Of what users pay, the house keeps its hosting and licence fee and the
+Nothing is deployed that charges for nothing (`monetizable?`: a priced
+toll, and for a model a download it stands on); the state door answers
+`monetizable`.
+
+Of what users pay, the house keeps its **monetization fee** and the
 author is owed the rest: `*house-fee-percents*`, 10% of an open-source
 deployment's takings and 15% of a closed-source one's, written into
 each deployment's record on the day.
@@ -165,8 +175,8 @@ owner.  Nothing a deployment does is metered or limited.
 
 From a script: `POST <prefix>/api/session` with `{"closed": true}` for
 a closed-source session; `POST <prefix>/api/deploy` with `{"session":
-..., "name": ..., "title": ..., "blurb": ..., "price_cents": ...,
-"payee": ...}` and the owner's key (and the human check's token where
+..., "name": ..., "payee": ..., "title": ..., "blurb": ...}` and the
+owner's key (and the human check's token where
 one stands); `POST <prefix>/api/undeploy` with `{"name": ...}`; `GET
 <prefix>/api/deployments` lists them.  `*deployments?*` nil shuts all
 of it.

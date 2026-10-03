@@ -581,13 +581,38 @@ loaded) its page too."
                  (lambda ()
                    (let* ((name "ci-smoke-plate")
                           (address (format nil "~a/d/~a" prefix name))
-                          (drawing (format nil "~a?deployed=~a&format=svg" (door "download") name)))
+                          (drawing (format nil "~a?deployed=~a&format=svg" (door "download") name))
+                          ;; a session of its own, on a model that says what it charges for
+                          (opened (json-of :post (door "session") :json (table)))
+                          (tolled (gethash "session" opened))
+                          (owner (gethash "owner" opened))
+                          (headers (list (cons "X-Prompt-Lab-Owner" owner))))
                      (flet ((deploy (&rest terms)
-                              (json-of :post (door "deploy") :headers (owner-headers)
-                                       :json (apply #'table "session" session "name" name terms)))
+                              (json-of :post (door "deploy") :headers headers
+                                       :json (apply #'table "session" tolled "name" name
+                                                    "payee" "owner@example.com" terms)))
                             (status (path) (nth-value 1 (http :get path))))
                        (unwind-protect
                             (progn
+                              ;; nothing is deployed that charges for nothing
+                              (json-of :post (door "model") :headers headers
+                                       :json (table "session" tolled "source" *smoke-model*))
+                              (unless (eql 400 (nth-value 1 (http :post (door "deploy") :headers headers
+                                                                  :json (table "session" tolled "name" name
+                                                                               "payee" "owner@example.com"))))
+                                (error "a model with no tolls was deployed"))
+                              (json-of :post (door "model") :headers headers
+                                       :json (table "session" tolled
+                                                    "source" "(define-object model (box)
+  :input-slots ((length 30) (width 20) (height 10))
+  :computed-slots
+  ((tolls (list (list :key :drawing :label \"SVG drawing\" :cents 500)))
+   (file-tolls (list :svg :drawing))))"))
+                              (unless (eq (gethash "monetizable"
+                                                   (json-of :get (format nil "~a?session=~a" (door "state") tolled)
+                                                            :headers headers))
+                                          t)
+                                (error "a model with a toll on a download does not read as monetizable"))
                               (let ((deployment (deploy "title" "A plate")))
                                 (unless (equal (gethash "url" deployment) address)
                                   (error "the deploy door did not answer the deployment's address"))
@@ -600,18 +625,17 @@ loaded) its page too."
                                 (error "the deployed model's page did not open"))
                               (unless (search "define-object model" (http :get (format nil "~a/source" address)))
                                 (error "an open deployment did not serve its source"))
-                              (unless (eql 200 (status drawing))
-                                (error "a deployed model's drawing was not to be had"))
-                              (unless (eql 403 (nth-value 1 (http :post (door "deploy")
-                                                                  :json (table "session" session "name" name))))
-                                (error "a stranger deployed someone's session"))
-                              (deploy "price_cents" 500 "payee" "owner@example.com")
-                              (unless (page-ok? (format nil "~a/viewer?deployed=~a" prefix name))
-                                (error "a priced model's page did not open"))
-                              (unless (eql 404 (status drawing))
+                              ;; the download it priced is its owner's alone for now;
+                              ;; the one it did not is anyone's
+                              (unless (eql 402 (status drawing))
                                 (error "a priced download opened to a stranger"))
+                              (unless (eql 200 (status (format nil "~a?deployed=~a&format=pdf" (door "download") name)))
+                                (error "a deployed model's free drawing was not to be had"))
+                              (unless (eql 403 (nth-value 1 (http :post (door "deploy")
+                                                                  :json (table "session" tolled "name" name))))
+                                (error "a stranger deployed someone's session"))
                               (eql 200 (status (format nil "~a&owner=~a" drawing owner))))
-                         (http :post (door "undeploy") :headers (owner-headers) :json (table "name" name))
+                         (http :post (door "undeploy") :headers headers :json (table "name" name))
                          (unless (eql 404 (status address))
                            (error "the deployment is still there after it was taken down")))))))
           ;; closed source is chosen as a session opens: out of sight, its
@@ -623,12 +647,18 @@ loaded) its page too."
                           (headers (list (cons "X-Prompt-Lab-Owner" (gethash "owner" opened))))
                           (name "ci-smoke-closed"))
                      (json-of :post (door "model") :headers headers
-                              :json (table "session" closed "source" *smoke-model*))
+                              :json (table "session" closed
+                                           "source" "(define-object model (box)
+  :input-slots ((length 30) (width 20) (height 10))
+  :computed-slots
+  ((tolls (list (list :key :drawing :label \"SVG drawing\" :cents 500)))
+   (file-tolls (list :svg :drawing))))"))
                      (unless (eql 403 (nth-value 1 (http :get (format nil "~a?session=~a" (door "state") closed))))
                        (error "a closed-source session showed itself to a stranger"))
                      (unwind-protect
                           (let ((deployment (json-of :post (door "deploy") :headers headers
-                                                     :json (table "session" closed "name" name))))
+                                                     :json (table "session" closed "name" name
+                                                                  "payee" "owner@example.com"))))
                             (and (eq (gethash "closed" deployment) t)
                                  (eql (gethash "fee_percent" deployment)
                                       (uiop:symbol-call :prompt-lab :house-fee-percent t))
@@ -654,7 +684,8 @@ loaded) its page too."
                               :json (table "event" "stopped" "session" app "text" "Only a test."))
                      (unwind-protect
                           (progn
-                            (json-of :post (door "deploy") :headers headers :json (table "session" app "name" name))
+                            (json-of :post (door "deploy") :headers headers
+                                     :json (table "session" app "name" name "payee" "owner@example.com"))
                             (let* ((deployed (uiop:symbol-call :prompt-lab :ensure-deployed name))
                                    (page (gdl:make-object (uiop:symbol-call :prompt-lab :app-symbol deployed)
                                                           :deployment-name name))

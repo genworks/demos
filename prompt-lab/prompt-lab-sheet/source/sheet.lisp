@@ -102,10 +102,15 @@ stale.  A session gone private closes on every sheet but its owner's."
            (the-object sheet (set-slot! :shown-source body))
            (sheet-send! sheet (datastar-script-event (format nil "plSetSource(~a)" (js-string-literal body))))))
        (sheet-send! sheet (datastar-signals-event
-                           (format nil "{\"busy\": ~a, \"built\": ~a}" (json-boolean (session-busy? session))
+                           (format nil "{\"busy\": ~a, \"built\": ~a~@[, \"story\": ~a~]}" (json-boolean (session-busy? session))
                                    ;; something to deploy (the Monetize tile)
                                    (json-boolean (and (not (session-replay? session))
-                                                      (or (model-defined? session) (app-defined? session)))))))
+                                                      (or (model-defined? session) (app-defined? session))))
+                                   ;; and whether it charges for anything yet, which
+                                   ;; opens Monetize: asked once a build has settled
+                                   ;; (it builds the thing, once per compile)
+                                   (unless (or (session-busy? session) (session-replay? session))
+                                     (json-boolean (ignore-errors (monetizable? session)))))))
        (sheet-changed! sheet)))))
 
 (pushnew 'sheets-hear *session-change-hooks*)
@@ -672,7 +677,12 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpriced: false, dprice: 5, dpayee: '', kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+            ;; whether what the session built charges for anything yet: the
+            ;; Monetize button is greyed until it does (deploy.lisp)
+            (json-boolean (let ((session (the session)))
+                            (and session (not (session-replay? session)) (not (session-busy? session))
+                                 (ignore-errors (monetizable? session)))))
             ;; a session that has topped up is not public unless it says
             ;; so: its uploads want no acknowledgement
             (json-boolean (and (the session) (ignore-errors (paid? (the session)))))
@@ -739,14 +749,14 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              " Closed source")
                                      ;; the hosting fee follows the box as it is ticked
                                      (:p :class "pl-line pl-fee" :style "display:none" :|data-show| "!$opened"
-                                         "Hosting fee if you deploy it: "
+                                         "Monetization fee: "
                                          (:b :|data-text| (format nil "$closedPick ? '~d%' : '~d%'"
                                                                   (house-fee-percent t) (house-fee-percent nil)))
                                          (:span :|data-show| "$closedPick"
                                                 " -- nobody else sees the session; its source becomes public if you never deploy it.")
                                          (:span :|data-show| "!$closedPick" " -- open source, public as you build."))
                                      (:p :class "pl-line" :style "display:none" :|data-show| "$opened && $closed"
-                                         (fmt "Closed source, ~d% hosting fee: deploy it with Monetize, or its source becomes public when the session ends."
+                                         (fmt "Closed source, ~d% monetization fee: deploy it with Monetize, or its source becomes public when the session ends."
                                               (house-fee-percent t)))))
                               (:textarea :id "pl-prompt" :rows "4" :|data-bind:prompt| ""
                                          :|data-attr:placeholder| "$kind == 'app' ? 'Describe the web app, e.g. a page that sizes a shelf bracket from its load and shows it' : 'Describe what to build, e.g. a picnic table with two benches'"
@@ -848,13 +858,18 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                   (when *deployments?*
                     (htm (:div :class "pl-card pl-monetize" :style "display:none" :|data-show| "$editable && $built"
                                (:div :class "pl-row" :style "margin-top:0"
+                                     ;; greyed until what was built charges for something:
+                                     ;; the visitor says what, the agent writes the tollbooths
                                      (:button :type "button" :class "pl-build pl-monetize-button"
-                                              :data-doc "Deploy what this session built at an address of its own, for others to use: open or closed source, free or priced"
+                                              :data-doc "Deploy what this session built at an address of its own, for others to pay to use.  It opens once the agent has written what it charges for."
+                                              :|data-attr:disabled| "!$story"
                                               :|data-on:click| "$monetize = !$monetize"
                                               "Monetize")
                                      (:a :class "pl-open-app" :target "_blank" :rel "noopener"
                                          :|data-show| "$deployed" :|data-attr:href| "$deployed" :|data-text| "$deployed"))
-                               (:div :class "pl-deploy" :|data-show| "$monetize"
+                               (:p :class "pl-line" :|data-show| "!$story"
+                                   "Nothing here charges yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download', 'a $5 pass unlocks the results' -- and Monetize opens when it has written that in.")
+                               (:div :class "pl-deploy" :|data-show| "$monetize && $story"
                                      (:p :class "pl-line"
                                          "Deploy what you built at an address of its own.  A model gets a page where others change its inputs and download its files; a web app is served as it is.  It is a copy: deploy again to update it.")
                                      (:label "Name in the address"
@@ -865,28 +880,20 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              (:textarea :rows "2" :maxlength "400" :|data-bind:dblurb| ""))
                                      ;; the source terms were the session's choice as it opened
                                      (:p :class "pl-line" :|data-show| "!$closed"
-                                         (fmt "Open source, under the GNU Affero General Public License: the deployment serves its source.  Of what its users pay you receive ~d%; ~d% is the hosting and licence fee."
+                                         (fmt "Open source, under the GNU Affero General Public License: the deployment serves its source.  Of what its users pay you receive ~d%; ~d% is the monetization fee."
                                               (- 100 (house-fee-percent nil)) (house-fee-percent nil)))
                                      (:p :class "pl-line" :|data-show| "$closed"
-                                         (fmt "Closed source, as you chose when the session opened: the deployment does not serve its source.  Of what its users pay you receive ~d%; ~d% is the hosting and licence fee."
+                                         (fmt "Closed source, as you chose when the session opened: the deployment does not serve its source.  Of what its users pay you receive ~d%; ~d% is the monetization fee."
                                               (- 100 (house-fee-percent t)) (house-fee-percent t)))
                                      ;; the hosting terms, in short, by the source terms
                                      (:p :class "pl-line" :|data-show| "!$closed"
                                          "Hosting: an open-source deployment with no tollbooth, or with no revenue for an extended period, may be un-hosted -- or kept, if we and its visitors find it interesting.")
                                      (:p :class "pl-line" :|data-show| "$closed"
                                          "Hosting: a closed-source deployment that shows no revenue, or too little, for some time may be taken down.  Its code then stays yours, still closed, and is wiped from our systems.")
-                                     ;; a model's price is for a download; a web app keeps tollbooths of its own
-                                     (:div :|data-show| "$kind != 'app'"
-                                           (:label :class "pl-pick"
-                                                   (:input :type "checkbox" :|data-bind:dpriced| "")
-                                                   " Charge for each download of its files")
-                                           (:div :|data-show| "$dpriced"
-                                                 (:label "Price of a download, in dollars"
-                                                         (:input :type "number" :min "1" :max "100" :step "1" :|data-bind:dprice| ""))
-                                                 (:p :class "pl-line"
-                                                     "Taking payment is not switched on here yet: until it is, the model opens to everyone and its downloads only to you.")))
-                                     (:p :class "pl-line" :|data-show| "$kind == 'app'"
-                                         "A web app charges at tollbooths of its own, wherever you want them: ask the agent, e.g. 'charge $3 for each STEP download' or 'a $5 day pass unlocks the results table'.  Here they take test payments, booked and marked as tests: no money moves yet.")
+                                     ;; what it charges for is in the source, written by
+                                     ;; the agent at the visitor's word (deploy.lisp)
+                                     (:p :class "pl-line"
+                                         "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  No money moves yet: a web app's tolls are taken as test payments, booked and marked as tests, and a model's priced downloads open only to you.")
                                      (:label "Where to reach you about your share (email)"
                                              (:input :type "email" :maxlength "200" :|data-bind:dpayee| ""))
                                      (:p :class "pl-line"
@@ -1320,8 +1327,15 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                  (watch-session! self session)
                  (sheet-send! self (datastar-script-event (owners-script session))
                               (datastar-signals-event
-                               (format nil "{\"opened\": true, \"closed\": ~a}"
-                                       (json-boolean (session-closed? session)))))
+                               ;; the owner signal too: it was read from the
+                               ;; browser's keys when the page opened, before
+                               ;; there was a session, and what the page sends
+                               ;; with a download or an upload is that signal --
+                               ;; without it a private (closed-source) session's
+                               ;; own downloads answered 'No such session'
+                               (format nil "{\"opened\": true, \"closed\": ~a, \"owner\": \"~a\"}"
+                                       (json-boolean (session-closed? session))
+                                       (session-owner session))))
                  session)
                 (t (the (tell-error! reason)) nil)))))
 
@@ -1380,11 +1394,6 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                     (deploy-session! session
                                      :name (gethash "dname" signals) :title (gethash "dtitle" signals)
                                      :blurb (gethash "dblurb" signals)
-                                     :price-cents (and (eq (gethash "dpriced" signals) t)
-                                                       (let ((price (gethash "dprice" signals)))
-                                                         (when (stringp price)
-                                                           (setq price (ignore-errors (parse-integer price :junk-allowed t))))
-                                                         (and (realp price) (round (* 100 price)))))
                                      :payee (gethash "dpayee" signals))
                   (if record
                       (sheet-send! self (datastar-signals-event

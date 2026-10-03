@@ -168,29 +168,99 @@ never deployed.  Never signals."
                  (gethash "closed" record) 'yason:false)
            (write-text-file (with-output-to-string (out) (yason:encode record out)) file)))))))
 
-(defun deploy-session! (session &key name title blurb price-cents payee)
-  "Deploy what SESSION built as NAME on the given terms.  Values: the
-record, or nil and the reason.  Its source is closed when the session
-was opened closed-source, else open.  Deploying again from the same
-session under the same name replaces the copy and the terms."
+;;
+;; The monetization story.  Nothing is deployed until what was built says
+;; what it charges for: its TOLLS, which the visitor asks the agent for
+;; in plain words and the agent writes into the source -- on a web app,
+;; with the booths placed on its page (kinds.lisp); on a model, with
+;; FILE-TOLLS saying which of its downloads cost what.  The tolls are
+;; where a payment gateway plugs in (charge-toll!).
+;;
+
+(defun valid-toll? (toll)
+  (and (listp toll) (keywordp (ignore-errors (getf toll :key)))
+       (stringp (getf toll :label))
+       (integerp (getf toll :cents)) (not (minusp (getf toll :cents)))))
+
+(defvar *built-tolls* (make-hash-table :test #'equal)
+  "Package name -> (stamp tolls file-tolls): what the object built there
+declares, as of the compile the stamp dates.")
+
+(defun built-tolls (session)
+  "The tolls of what SESSION built -- its APP's, or its MODEL's -- and, a
+second value, its file-tolls (a plist, download format to toll key).  Nil
+when it declares none or does not build.  Read once per compile."
+  (let* ((key (session-package-name session))
+         (stamp (ignore-errors (file-write-date (make-pathname :type "fasl"
+                                                               :defaults (session-model-file session)))))
+         (kept (bt:with-lock-held (*kinds-lock*) (gethash key *built-tolls*))))
+    (unless (and kept stamp (eql (first kept) stamp))
+      (let* ((object (ignore-errors
+                      (with-time-limit (*eval-seconds* "build")
+                        (let ((symbol (built-symbol session)))
+                          (and symbol (find-class symbol nil) (make-object symbol))))))
+             (tolls (and object (ignore-errors (remove-if-not #'valid-toll? (the-object object tolls)))))
+             (file-tolls (and object tolls (ignore-errors (the-object object file-tolls)))))
+        (setq kept (list stamp tolls (and (listp file-tolls) file-tolls)))
+        (bt:with-lock-held (*kinds-lock*) (setf (gethash key *built-tolls*) kept))))
+    (values (second kept) (third kept))))
+
+(defun forget-built-tolls! (session)
+  "The model file is being compiled again: what was read of the old one
+goes.  (The stamp alone would not do: a file's date is in whole seconds,
+and two compiles can share one.)"
+  (bt:with-lock-held (*kinds-lock*) (remhash (session-package-name session) *built-tolls*)))
+
+(defun monetizable? (session)
+  "Whether what SESSION built has a monetization story: at least one toll
+with a price, and for a model a download that toll stands on."
+  (multiple-value-bind (tolls file-tolls) (ignore-errors (built-tolls session))
+    (and (some #'(lambda (toll) (plusp (getf toll :cents))) tolls)
+         (or (eq (session-kind session) :app) (file-prices tolls file-tolls))
+         t)))
+
+(defun file-prices (tolls file-tolls)
+  "Alist of download format (a string) and cents, from TOLLS and FILE-TOLLS."
+  (loop for (format key) on file-tolls by #'cddr
+        for toll = (find key tolls :key #'(lambda (toll) (getf toll :key)))
+        when (and toll (symbolp format) (plusp (getf toll :cents)))
+          collect (cons (string-downcase (symbol-name format)) (getf toll :cents))))
+
+(defun deployment-file-price (record format)
+  "What deployed model RECORD asks for a download in FORMAT, in cents; nil
+when that one is free."
+  (let ((prices (gethash "file_prices" record)))
+    (and (hash-table-p prices)
+         (let ((cents (gethash format prices))) (and (realp cents) (plusp cents) cents)))))
+
+(defun deploy-session! (session &key name title blurb payee)
+  "Deploy what SESSION built as NAME.  Values: the record, or nil and the
+reason.  It must have a monetization story (monetizable?).  Its source is
+closed when the session was opened closed-source, else open.  Deploying
+again from the same session under the same name replaces the copy and the
+terms."
   (bt:with-lock-held (*deploy-lock*)
     (let* ((closed? (session-closed? session))
            (name (and (stringp name) (string-downcase (string-trim " " name))))
            (existing (and (deployment-name? name) (deployment-record name)))
            (mine (session-deployment session))
-           ;; a price is a deployed MODEL's, for a download; a web app
-           ;; keeps tollbooths of its own (kinds.lisp)
-           (price (if (and (integerp price-cents) (plusp price-cents)
-                           (not (eq (session-kind session) :app)))
-                      price-cents
-                      0))
+           (app? (eq (session-kind session) :app))
+           ;; a deployed MODEL's prices, by download; a web app keeps
+           ;; tollbooths of its own on its page (kinds.lisp)
+           (prices (unless app?
+                     (multiple-value-bind (tolls file-tolls) (built-tolls session)
+                       (file-prices tolls file-tolls))))
+           (price (reduce #'max prices :key #'cdr :initial-value 0))
            (payee (clip-line payee 200))
            (symbol (ignore-errors (built-symbol session))))
       (cond
         ((not *deployments?*) (values nil "This lab deploys nothing."))
         ((not (and symbol (find-class symbol nil)))
-         (values nil (format nil "There is nothing to deploy yet: build a ~:[model~;web app~] first."
-                             (eq (session-kind session) :app))))
+         (values nil (format nil "There is nothing to deploy yet: build a ~:[model~;web app~] first." app?)))
+        ((not (monetizable? session))
+         (values nil (if app?
+                         "This app charges for nothing yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download', 'a $5 day pass unlocks the results' -- and Monetize opens when it has written the tollbooths."
+                         "This model charges for nothing yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download' -- and Monetize opens when it has written that in.")))
         ((not (deployment-name? name))
          (values nil "Give it a name for its address: 3 to 40 lower-case letters, digits and hyphens, a letter first."))
         ((and existing (not (equal (gethash "owner" existing) (session-owner session))))
@@ -200,14 +270,7 @@ session under the same name replaces the copy and the terms."
                              (gethash "name" mine))))
         ((and (null existing) (>= (length (deployment-records)) *max-deployments*))
          (values nil "This lab holds all the deployments it takes."))
-        ((and (plusp price) (not (<= (car *deployment-price-range*) price (cdr *deployment-price-range*))))
-         (values nil (format nil "A price is between $~,2f and $~,2f a download."
-                             (/ (car *deployment-price-range*) 100) (/ (cdr *deployment-price-range*) 100))))
-        ((and (or (plusp price) (eq (session-kind session) :app) (plusp (length payee)))
-              (plusp (length payee))
-              (not (and (find #\@ payee) (> (length payee) 5))))
-         (values nil "That does not read as an email address."))
-        ((and (plusp price) (zerop (length payee)))
+        ((not (and (find #\@ payee) (> (length payee) 5)))
          (values nil "Say where your share is to be paid: an email address we can reach you at."))
         (t
          (let* ((directory (deployment-directory name))
@@ -222,6 +285,11 @@ session under the same name replaces the copy and the terms."
                            "engine" (engine-name)
                            "lisp" (lisp-name)
                            "closed" (if closed? t 'yason:false)
+                           ;; a model's downloads that cost, and the most any does
+                           "file_prices" (let ((table (make-hash-table :test #'equal)))
+                                           (loop for (format . cents) in prices
+                                                 do (setf (gethash format table) cents))
+                                           table)
                            "price_cents" price
                            "fee_percent" (house-fee-percent closed?)
                            "payee" payee
@@ -232,9 +300,8 @@ session under the same name replaces the copy and the terms."
            (write-text-file (with-output-to-string (out) (yason:encode record out))
                             (merge-pathnames "deployment.json" directory))
            (drop-deployed! name)
-           (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the hosting and licence fee~@[; $~,2f a download~]."
-                      name (deployment-url name) closed? (house-fee-percent closed?)
-                      (and (plusp price) (/ price 100)))
+           (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee."
+                      name (deployment-url name) closed? (house-fee-percent closed?))
            (deployment-record name)))))))
 
 (defun undeploy! (name owner-key)
@@ -300,13 +367,13 @@ none or its file no longer compiles."
                       (bt:with-lock-held (*deployed-lock*)
                         (setf (gethash name *deployed*) deployed)))))))))))
 
-(defun deployment-admits? (record owner-key)
-  "Whether a deployed model's downloads open to a visitor holding OWNER-KEY
-(or none): a free one's to everyone, a priced one's to its owner -- and to
-a visitor who has paid, once the gate takes payment
-(*deployment-payments?*; the gate's side of that is not written yet, so
-no one else is let in)."
-  (or (not (deployment-priced? record))
+(defun deployment-admits? (record format owner-key)
+  "Whether a deployed model's download in FORMAT opens to a visitor holding
+OWNER-KEY (or none): a free format to everyone, a priced one to its owner
+-- and to a visitor who has paid, once a gateway takes payment
+(*deployment-payments?*; that side is not written yet, so no one else is
+let in)."
+  (or (not (deployment-file-price record format))
       (and (stringp owner-key) (equal (gethash "owner" record) owner-key))))
 
 (defun deployed-for-viewer (name)
@@ -314,11 +381,11 @@ no one else is let in)."
 everyone."
   (and *deployments?* (deployment-record name) (ensure-deployed name)))
 
-(defun deployed-for-download (name owner-key)
+(defun deployed-for-download (name format owner-key)
   "The running deployment NAME for the download door, when the visitor may
-have its files."
+have its file in FORMAT."
   (let ((record (and *deployments?* (deployment-record name))))
-    (and record (deployment-admits? record owner-key) (ensure-deployed name))))
+    (and record (deployment-admits? record format owner-key) (ensure-deployed name))))
 
 
 ;;
@@ -467,10 +534,11 @@ payments are left out unless TESTS?."
   (refuse req ent net.aserve:*response-not-found* "This lab deploys nothing."))
 
 (defun deploy-door (req ent)
-  "POST <prefix>/api/deploy {session, name, title?, blurb?, price_cents?,
-payee?, turnstile?}: the session's owner deploys what it built; answers
-the deployment.  Its source is closed when the session was opened
-closed-source.  Where a human check stands it wants its token."
+  "POST <prefix>/api/deploy {session, name, payee, title?, blurb?,
+turnstile?}: the session's owner deploys what it built, once it charges
+for something (monetizable?); answers the deployment.  Its source is
+closed when the session was opened closed-source.  Where a human check
+stands it wants its token."
   (let* ((json (request-json req))
          (session (requested-session req json)))
     (cond ((not *deployments?*) (deployments-off req ent))
@@ -484,7 +552,6 @@ closed-source.  Where a human check stands it wants its token."
                        (deploy-session! session
                                         :name (gethash "name" json) :title (gethash "title" json)
                                         :blurb (gethash "blurb" json)
-                                        :price-cents (gethash "price_cents" json)
                                         :payee (gethash "payee" json))
                      (if record
                          (respond-json req ent (deployment-state record :owner? t))

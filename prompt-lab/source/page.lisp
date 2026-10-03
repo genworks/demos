@@ -388,6 +388,9 @@ file's place and the terminal opened on it."
        "kind" (kind-name (session-kind session))
        ;; opened closed-source (deploy.lisp)
        "closed" (if (session-closed? session) t 'yason:false)
+       ;; whether what it built charges for anything yet: Monetize wants that
+       "monetizable" (if (and (not (session-busy? session)) (ignore-errors (monetizable? session)))
+                         t 'yason:false)
        "app_defined" (if (app-defined? session) t 'yason:false)
        "app_url" (and (app-defined? session)
                       (app-url session :owner-key (and owner? (session-private? session)
@@ -902,7 +905,10 @@ the model with one panel under it, the inputs or the tree."
                                        (htm (:a :style "display:inline-block;margin:0 .5rem .3rem 0"
                                                 :href (format nil "~a?deployed=~a&format=~a~@[&owner=~a~]"
                                                               (door-path "download") name (first entry) key)
-                                                (esc (fourth entry))))))
+                                                (esc (fourth entry))
+                                                ;; what the author charges for this one
+                                                (let ((cents (deployment-file-price record (first entry))))
+                                                  (when cents (fmt " ($~,2f)" (/ cents 100))))))))
                                  (unless (truthy? (gethash "closed" record))
                                    (htm (:p :style "margin:0 0 .6rem"
                                             (:a :href (format nil "~a/source" (deployment-url name)) "Its source")

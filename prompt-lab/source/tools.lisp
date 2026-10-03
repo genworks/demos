@@ -97,6 +97,8 @@ version that fails to compile is kept too."
   (let ((file (session-model-file session))
         (warnings nil))
     (archive-model! session)
+    ;; what the old file charged for is no longer what this one does (deploy.lisp)
+    (forget-built-tolls! session)
     ;; a compile costs credits by the volume of the file (meter.lisp)
     (multiple-value-bind (ok? reason)
         (meter! session :compile
@@ -263,7 +265,15 @@ of 2026-09-25)."
                                                    crowd (length leaves)))
                                          (cond (mismatches
                                                 (format nil "SIZE MISMATCH: ~{~a~^; ~}." mismatches))
-                                               (expected-size "Expected size matched."))))))
+                                               (expected-size "Expected size matched."))
+                                         ;; what a deployed copy would charge for (deploy.lisp)
+                                         (let ((prices (ignore-errors
+                                                        (file-prices (remove-if-not #'valid-toll? (the-object model tolls))
+                                                                     (the-object model file-tolls)))))
+                                           (when prices
+                                             (format nil "Charges when deployed: ~{~a~^, ~}."
+                                                     (loop for (format . cents) in prices
+                                                           collect (format nil "~a $~,2f" format (/ cents 100))))))))))
          (and (or pile? broken mismatches) t))))
     (error (condition)
       (values (list (text-result "MODEL does not build with default inputs: ~a" condition)) t))))

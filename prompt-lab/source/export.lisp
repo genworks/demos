@@ -262,12 +262,18 @@ with no solids), 429 when the owner's credits are spent."
          (deployed (query-value req "deployed"))
          (session (cond ((stringp id) (find-session id))
                         ((stringp replay) (find-replay replay))
-                        ((stringp deployed)
-                         (deployed-for-download deployed (or key (query-value req "owner"))))))
+                        ((stringp deployed) (deployed-for-viewer deployed))))
          (kind (string-downcase (or (query-value req "format") "")))
-         (entry (assoc kind (download-formats) :test #'string=)))
+         (entry (assoc kind (download-formats) :test #'string=))
+         (record (and session (stringp deployed) (deployment-record deployed))))
     (cond ((or (null session) (not (visible-to? session key))) (no-such-session req ent))
           ((null entry) (refuse req ent "No such download here: ~a." kind))
+          ;; a deployed model's priced download: its owner's alone until a
+          ;; gateway takes the payment
+          ((and record (not (deployment-admits? record kind (or key (query-value req "owner")))))
+           (refuse req ent (net.aserve::make-resp 402 "Payment Required")
+                   "This file costs $~,2f.  Taking payment is not switched on here yet."
+                   (/ (deployment-file-price record kind) 100)))
           ((not (model-defined? session)) (refuse req ent "No model has been built in this session yet."))
           (t
            (when (owner? session key)
