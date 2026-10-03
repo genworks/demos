@@ -62,8 +62,52 @@
   ;; True while a prompt is being worked on.
   (busy? nil))
 
+;;
+;; A session's id is its name: in its address, in the listings, on its
+;; package and its directory.  It is not a secret -- the owner key is --
+;; so it may as well be something a person can say: an adjective, a thing
+;; from the workshop and two digits, brisk-flange-42.  (Until 2026-10-03
+;; an id was twelve hex digits; the archive is full of those, and they
+;; are ids still.)
+;;
+
+(defparameter *id-adjectives*
+  '("able" "ample" "bold" "brave" "breezy" "bright" "brisk" "calm" "candid" "chipper"
+    "clever" "crisp" "dandy" "dapper" "deft" "eager" "earnest" "fair" "gallant" "game"
+    "gentle" "glad" "handy" "hardy" "hearty" "jaunty" "jolly" "keen" "kindly" "lively"
+    "lucky" "merry" "mighty" "modest" "nimble" "noble" "patient" "perky" "plucky" "proud"
+    "quick" "quiet" "ready" "robust" "sly" "snug" "spry" "stalwart" "steady" "stout"
+    "sturdy" "sunny" "tidy" "trusty" "upbeat" "valiant" "wily" "witty" "zesty" "zippy")
+  "List of strings. The first word of a session's id.")
+
+(defparameter *id-nouns*
+  '("anvil" "arbor" "axle" "baffle" "bearing" "bellows" "bevel" "bobbin" "bolt" "bracket"
+    "bushing" "caliper" "cam" "capstan" "chamfer" "chisel" "chuck" "clamp" "clevis" "cog"
+    "collet" "coupling" "crank" "dowel" "ferrule" "fillet" "fixture" "flange" "flywheel" "gasket"
+    "gear" "gimbal" "girder" "grommet" "gusset" "hinge" "hopper" "jig" "journal" "keyway"
+    "knurl" "lathe" "lever" "linkage" "mallet" "mandrel" "manifold" "nozzle" "pawl" "pinion"
+    "piston" "pivot" "plinth" "plunger" "pulley" "ratchet" "rivet" "rotor" "shackle" "shim"
+    "spindle" "spline" "spigot" "sprocket" "strut" "swivel" "tappet" "tenon" "thimble" "toggle"
+    "trestle" "trunnion" "turret" "valve" "vise" "washer" "wedge" "winch" "yoke" "widget")
+  "List of strings. The second word of a session's id.")
+
+(defun session-id-taken? (id)
+  "Whether ID already names a session: a live one, a directory a restarted
+Lisp left, or one in the archive."
+  (or (bt:with-lock-held (*sessions-lock*) (gethash id *sessions*))
+      (probe-file (merge-pathnames (format nil "~a/" id) *workspace-root*))
+      (ignore-errors (archived-directory id))))
+
 (defun new-session-id ()
-  (format nil "~(~{~2,'0x~}~)" (loop repeat 6 collect (random 256 (make-random-state t)))))
+  "A fresh id: adjective-noun-NN, one nothing here has been called."
+  (let ((state (make-random-state t)))
+    (flet ((pick (words) (nth (random (length words) state) words)))
+      (loop repeat 200
+            for id = (format nil "~a-~a-~d" (pick *id-adjectives*) (pick *id-nouns*)
+                             (+ 10 (random 90 state)))
+            unless (session-id-taken? id) return id
+            ;; every name tried was taken: the old kind, which never is
+            finally (return (format nil "~(~{~2,'0x~}~)" (loop repeat 6 collect (random 256 state))))))))
 
 (defun new-owner-key ()
   "32 hex digits from the kernel's random source, else from random."
@@ -148,7 +192,15 @@ restart has emptied the table (see save-session!); nil when neither."
 ;;
 
 (defun session-id? (id)
-  (and (stringp id) (= (length id) 12) (every #'(lambda (c) (digit-char-p c 16)) id)))
+  "Whether ID reads as a session's id: a name of lower-case letters,
+digits and hyphens that begins with a letter (which twelve hex digits
+beginning with a letter also are), or the twelve hex digits of an older
+session.  Nothing that could leave its directory."
+  (and (stringp id)
+       (or (and (= (length id) 12) (every #'(lambda (c) (digit-char-p c 16)) id))
+           (and (<= 5 (length id) 40)
+                (char<= #\a (char id 0) #\z)
+                (every #'(lambda (c) (or (char<= #\a c #\z) (char<= #\0 c #\9) (char= c #\-))) id)))))
 
 (defun session-state-file (session)
   (merge-pathnames "session.json" (session-directory session)))
