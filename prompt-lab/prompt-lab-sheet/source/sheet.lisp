@@ -847,6 +847,11 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      (:p :class "pl-line" :|data-show| "$closed"
                                          (fmt "Closed source, as you chose when the session opened: the deployment does not serve its source.  Of what its users pay you receive ~d%; ~d% is the hosting and licence fee."
                                               (- 100 (house-fee-percent t)) (house-fee-percent t)))
+                                     ;; the hosting terms, in short, by the source terms
+                                     (:p :class "pl-line" :|data-show| "!$closed"
+                                         "Hosting: an open-source deployment with no tollbooth, or with no revenue for an extended period, may be un-hosted -- or kept, if we and its visitors find it interesting.")
+                                     (:p :class "pl-line" :|data-show| "$closed"
+                                         "Hosting: a closed-source deployment that shows no revenue, or too little, for some time may be taken down.  Its code then stays yours, still closed, and is wiped from our systems.")
                                      ;; a model's price is for a download; a web app keeps tollbooths of its own
                                      (:div :|data-show| "$kind != 'app'"
                                            (:label :class "pl-pick"

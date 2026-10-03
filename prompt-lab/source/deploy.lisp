@@ -338,7 +338,10 @@ those out).  Returns the line booked."
   (let* ((record (or (deployment-record name) (error "There is no deployment ~a." name)))
          (closed? (truthy? (gethash "closed" record)))
          (percent (or (gethash "fee_percent" record) (house-fee-percent closed?)))
-         (fee (round (* gross-cents percent) 100))
+         ;; exact, never rounded to the cent on a line: a small toll's
+         ;; fee is a fraction of one, and the sums are what get rounded
+         (fee (let ((exact (/ (* gross-cents percent) 100)))
+                (if (integerp exact) exact (float exact))))
          (line (h "time" (get-universal-time)
                   "name" name
                   "engine" (gethash "engine" record)

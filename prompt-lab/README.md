@@ -131,6 +131,16 @@ author is owed the rest: `*house-fee-percents*`, 10% of an open-source
 deployment's takings and 15% of a closed-source one's, written into
 each deployment's record on the day.
 
+Hosting is at the house's discretion.  A closed-source deployment that
+shows no revenue, or too little, for some time may be taken down: its
+code stays the author's, still closed, and is wiped from the house's
+systems.  An open-source deployment with no tollbooth, or with no
+revenue for an extended period, may be un-hosted -- or kept, where the
+house and its visitors find it interesting.
+
+A toll has no minimum, and the fee on a line of the books is exact,
+never rounded to the cent: it is the sums that are rounded.
+
 The lab keeps the terms and the books: `book-revenue!` appends a line
 for each payment, with the fee and the author's share at the
 deployment's own terms, the tollbooth, and the engine and Lisp it ran
