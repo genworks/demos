@@ -139,7 +139,16 @@ revenue for an extended period, may be un-hosted -- or kept, where the
 house and its visitors find it interesting.
 
 A toll has no minimum, and the fee on a line of the books is exact,
-never rounded to the cent: it is the sums that are rounded.
+never rounded to the cent: it is the sums that are rounded.  What a
+payment cost to take by card comes **off the top**: the house's fee
+and the author's share are split from what is left, each bearing the
+card cost in its own proportion.  The author's share accumulates
+through a quarter and is paid out after it; a deployment's owner reads
+what it has taken, quarter by quarter, at
+`<prefix>/api/earnings?name=<name>`.
+
+The lab keeps a deployment's code as a file, and nothing more: its
+author keeps their own copy.
 
 The lab keeps the terms and the books: `book-revenue!` appends a line
 for each payment, with the fee and the author's share at the

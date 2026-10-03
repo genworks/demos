@@ -330,18 +330,26 @@ have its files."
 
 (defun revenue-file () (merge-pathnames "revenue.jsonl" *deployed-root*))
 
-(defun book-revenue! (name gross-cents &key reference toll test?)
-  "Book a payment of GROSS-CENTS to deployment NAME.  REFERENCE is the
-payment's id at whoever settled it, TOLL the name of the tollbooth it was
-paid at, TEST? true for a payment no money moved for (the reports leave
-those out).  Returns the line booked."
+(defun exact-cents (amount)
+  "AMOUNT as the books write it: exact, never rounded to the cent on a
+line -- a small toll's fee is a fraction of one, and the sums are what
+get rounded."
+  (if (integerp amount) amount (float amount)))
+
+(defun book-revenue! (name gross-cents &key reference toll test? (card-cents 0))
+  "Book a payment of GROSS-CENTS to deployment NAME.  CARD-CENTS is what
+it cost to take the payment by card -- for a toll paid from a prepaid
+balance, the payment's share of what the balance's purchase cost -- and
+comes OFF THE TOP: the house's fee and the author's share are split from
+what is left, so each bears the card cost in its own proportion.
+REFERENCE is the payment's id at whoever settled it, TOLL the name of the
+tollbooth it was paid at, TEST? true for a payment no money moved for
+(the reports leave those out).  Returns the line booked."
   (let* ((record (or (deployment-record name) (error "There is no deployment ~a." name)))
          (closed? (truthy? (gethash "closed" record)))
          (percent (or (gethash "fee_percent" record) (house-fee-percent closed?)))
-         ;; exact, never rounded to the cent on a line: a small toll's
-         ;; fee is a fraction of one, and the sums are what get rounded
-         (fee (let ((exact (/ (* gross-cents percent) 100)))
-                (if (integerp exact) exact (float exact))))
+         (net (- gross-cents card-cents))
+         (fee (/ (* net percent) 100))
          (line (h "time" (get-universal-time)
                   "name" name
                   "engine" (gethash "engine" record)
@@ -350,9 +358,13 @@ those out).  Returns the line booked."
                   "test" (if test? t 'yason:false)
                   "toll" toll
                   "gross_cents" gross-cents
+                  "card_cents" (exact-cents card-cents)
                   "fee_percent" percent
-                  "fee_cents" fee
-                  "payee_cents" (- gross-cents fee)
+                  ;; the house's fee as kept, after its share of the card
+                  ;; cost, and as it stood before that share
+                  "fee_cents" (exact-cents fee)
+                  "fee_before_card_cents" (exact-cents (/ (* gross-cents percent) 100))
+                  "payee_cents" (exact-cents (- net fee))
                   "payee" (gethash "payee" record)
                   "reference" reference)))
     (bt:with-lock-held (*deploy-lock*)
@@ -386,12 +398,41 @@ paid out is not kept here: whoever disburses keeps that."
           (incf (getf sum :payments))
           (incf (getf sum :payee-cents) (gethash "payee_cents" line)))))))
 
+(defun line-quarter (line)
+  "The year and quarter (1-4, UTC) of a line of the books, as a list."
+  (multiple-value-bind (s m hour d month year) (decode-universal-time (gethash "time" line) 0)
+    (declare (ignore s m hour d))
+    (list year (1+ (floor (1- month) 3)))))
+
+(defun earnings (name &key tests?)
+  "What deployment NAME has taken, quarter by quarter, the latest first: a
+list of plists (:year :quarter :payments :gross-cents :card-cents
+:fee-cents :payee-cents).  The author's share accumulates through a
+quarter and is paid out after it."
+  (let ((sums nil))
+    (dolist (line (revenue-lines)
+                  (sort sums #'> :key #'(lambda (sum) (+ (* 4 (getf sum :year)) (getf sum :quarter)))))
+      (when (and (equal (gethash "name" line) name) (or tests? (not (gethash "test" line))))
+        (destructuring-bind (year quarter) (line-quarter line)
+          (let ((sum (or (find-if #'(lambda (sum) (and (eql (getf sum :year) year) (eql (getf sum :quarter) quarter)))
+                                  sums)
+                         (first (push (list :year year :quarter quarter :payments 0 :gross-cents 0
+                                            :card-cents 0 :fee-cents 0 :payee-cents 0)
+                                      sums)))))
+            (incf (getf sum :payments))
+            (incf (getf sum :gross-cents) (gethash "gross_cents" line))
+            (incf (getf sum :card-cents) (or (gethash "card_cents" line) 0))
+            (incf (getf sum :fee-cents) (gethash "fee_cents" line))
+            (incf (getf sum :payee-cents) (gethash "payee_cents" line))))))))
+
 (defun revenue-report (&key year quarter tests?)
   "The books summed by runtime -- the Lisp and the engine (\"gendl\", or
 \"solid\" for one with the solids kernel) -- for YEAR and QUARTER (1-4,
 UTC) when given: a list of plists (:lisp :engine :payments :gross-cents
-:fee-cents :payee-cents), one per runtime.  :fee-cents is the house's
-revenue from that runtime.  Test payments are left out unless TESTS?."
+:card-cents :fee-cents :fee-before-card-cents :payee-cents), one per
+runtime.  :fee-cents is the house's revenue from that runtime as kept,
+:fee-before-card-cents the same before its share of the card cost.  Test
+payments are left out unless TESTS?."
   (let ((sums nil))
     (dolist (line (revenue-lines) (sort sums #'string< :key #'(lambda (sum) (getf sum :lisp))))
       (multiple-value-bind (s m hour d month line-year) (decode-universal-time (gethash "time" line) 0)
@@ -405,11 +446,16 @@ revenue from that runtime.  Test payments are left out unless TESTS?."
                                                         (equal (getf sum :engine) engine)))
                                    sums)
                           (first (push (list :lisp lisp :engine engine :payments 0 :gross-cents 0
-                                             :fee-cents 0 :payee-cents 0)
+                                             :card-cents 0 :fee-cents 0 :fee-before-card-cents 0
+                                             :payee-cents 0)
                                        sums)))))
             (incf (getf sum :payments))
             (incf (getf sum :gross-cents) (gethash "gross_cents" line))
+            (incf (getf sum :card-cents) (or (gethash "card_cents" line) 0))
             (incf (getf sum :fee-cents) (gethash "fee_cents" line))
+            ;; a line older than the field: no card cost was booked
+            (incf (getf sum :fee-before-card-cents)
+                  (or (gethash "fee_before_card_cents" line) (gethash "fee_cents" line)))
             (incf (getf sum :payee-cents) (gethash "payee_cents" line))))))))
 
 
@@ -462,6 +508,37 @@ newest first."
   (if (not *deployments?*)
       (deployments-off req ent)
       (respond-json req ent (h "deployments" (map 'vector #'deployment-state (deployment-records))))))
+
+(defun earnings-door (req ent)
+  "GET <prefix>/api/earnings?name=<name>, with the owner's key (its header,
+or owner=): what the deployment has taken, quarter by quarter -- the
+payments, what they cost to take by card, the house's fee and the
+author's share, which accumulates through a quarter and is paid out after
+it -- and the same for its test payments, apart."
+  (let* ((name (query-value req "name"))
+         (key (or (request-owner-key req) (query-value req "owner")))
+         (record (and *deployments?* (stringp name) (deployment-record name))))
+    (cond ((null record) (refuse req ent net.aserve:*response-not-found* "There is no such deployment."))
+          ((not (and (stringp key) (equal (gethash "owner" record) key))) (not-yours req ent))
+          (t (flet ((quarters (sums)
+                      (map 'vector #'(lambda (sum)
+                                       (h "year" (getf sum :year) "quarter" (getf sum :quarter)
+                                          "payments" (getf sum :payments)
+                                          "gross_cents" (getf sum :gross-cents)
+                                          "card_cents" (getf sum :card-cents)
+                                          "fee_cents" (getf sum :fee-cents)
+                                          "yours_cents" (getf sum :payee-cents)))
+                           sums)))
+               (let ((real (earnings name))
+                     (all (earnings name :tests? t)))
+                 (respond-json req ent
+                               (h "name" name
+                                  "fee_percent" (gethash "fee_percent" record)
+                                  "payee" (gethash "payee" record)
+                                  "quarters" (quarters real)
+                                  ;; test payments included: no money moved for those
+                                  "quarters_with_tests" (quarters all)
+                                  "paid_out" "After each quarter, once the share owed has reached the house's minimum; a smaller sum carries to the next."))))))))
 
 (defun app-file-door (req ent)
   "GET <prefix>/app-file?iid=<instance>&format=<name>: a web app's model as

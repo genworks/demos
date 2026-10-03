@@ -866,6 +866,14 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                          "A web app charges at tollbooths of its own, wherever you want them: ask the agent, e.g. 'charge $3 for each STEP download' or 'a $5 day pass unlocks the results table'.  Here they take test payments, booked and marked as tests: no money moves yet.")
                                      (:label "Where to reach you about your share (email)"
                                              (:input :type "email" :maxlength "200" :|data-bind:dpayee| ""))
+                                     (:p :class "pl-line"
+                                         "Your share accumulates through each quarter and is paid out after it.  "
+                                         (:a :target "_blank" :rel "noopener" :|data-show| "$deployed"
+                                             :|data-attr:href| (format nil "'~a?name=' + $deployed.split('/').pop() + '&owner=' + $owner"
+                                                                       (door-path "earnings"))
+                                             "What it has taken so far"))
+                                     (:p :class "pl-line"
+                                         "Keep a copy of the model file for your own records: the lab holds your code as a file, and the editor shows all of it.")
                                      (:div :class "pl-row"
                                            (:button :type "button" :class "pl-download"
                                                     :|data-attr:disabled| "!$dname.trim()"

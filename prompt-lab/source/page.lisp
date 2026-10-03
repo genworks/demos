@@ -1030,6 +1030,7 @@ page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet)."
     (net.aserve:publish :path (door-path "deploy") :server server :host host :function #'deploy-door)
     (net.aserve:publish :path (door-path "undeploy") :server server :host host :function #'undeploy-door)
     (net.aserve:publish :path (door-path "deployments") :server server :host host :function #'deployments-door)
+    (net.aserve:publish :path (door-path "earnings") :server server :host host :function #'earnings-door)
     (net.aserve:publish-prefix :prefix (format nil "~a/d/" *url-prefix*)
                                :server server :host host :function #'deployed-door)
     (net.aserve:publish :path (format nil "~a/app-file" *url-prefix*)
