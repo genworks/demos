@@ -9,7 +9,8 @@
 (in-package :prompt-lab)
 
 ;;;;
-;;;; The lab as one gwl sheet, at <prefix>/sheet: THE SLUICE, opened on
+;;;; The lab as one gwl sheet, at <prefix> (and <prefix>/sheet, the address
+;;;; it had beside the classic page, now at <prefix>/classic): THE SLUICE, opened on
 ;;;; the session's model, with the lab's own sections as its tiles.
 ;;;;
 ;;;; The same sessions, agent, guards and archive as the page at
@@ -150,7 +151,7 @@ o[~a]=~a;try{localStorage.setItem('prompt-lab-owners',JSON.stringify(o))}catch(e
 history.replaceState(null,'',~a)})();~a"
           (js-string-literal (session-id session))
           (js-string-literal (session-owner session))
-          (js-string-literal (format nil "~a/sheet?session=~a" *url-prefix* (session-id session)))
+          (js-string-literal (format nil "~a?session=~a" *url-prefix* (session-id session)))
           (keep-last-script (session-id session))))
 
 (defun keep-last-script (session-id)
@@ -257,9 +258,9 @@ SESSION's balance -- or nil."
          (live? (if archive? (live? id) t))
          ;; a live session to its sheet, an archived one to the sheet's
          ;; archive view -- here, or on the other engine's lab
-         (href (cond ((and here? live?) (format nil "~a/sheet?session=~a" *url-prefix* id))
-                     (here? (format nil "~a/sheet?archive=~a" *url-prefix* id))
-                     ((car *sibling-lab*) (format nil "~a/sheet?~:[archive~;session~]=~a"
+         (href (cond ((and here? live?) (format nil "~a?session=~a" *url-prefix* id))
+                     (here? (format nil "~a?archive=~a" *url-prefix* id))
+                     ((car *sibling-lab*) (format nil "~a?~:[archive~;session~]=~a"
                                                   (car *sibling-lab*) live? id))
                      (t nil)))
          (thumb (and archive? (gethash "thumb" summary)))
@@ -549,13 +550,19 @@ not hold."
             (when (and (or (the shown-id) (the archive-pending)) (not (the owner?)))
               (htm (:span :|data-init| (format nil "$owner && ~a" (the (datastar-action :claim))))))
             (:span :|data-effect| "var b=$busy; if(window.plWasBusy && !b && window.sluiceTab && matchMedia('(max-width: 47.99rem)').matches){sluiceTab('model')} window.plWasBusy=b")
+            ;; ?browse=live|archive, the classic page's listing addresses:
+            ;; the listings are a page of their own
+            (let ((browse (cdr (assoc "browse" (the query-toplevel) :test #'string-equal))))
+              (when (member browse '("live" "archive") :test #'equal)
+                (htm (:script (str (format nil "location.replace(~a);"
+                                           (js-string-literal (format nil "~a/sheet-list?browse=~a" *url-prefix* browse))))))))
             ;; opened from the installed app's icon (?app=1) with no session
             ;; named: the session this browser was last in, if it owns it
             (when (and (equal (cdr (assoc "app" (the query-toplevel) :test #'string-equal)) "1")
                        (null (the shown-id)) (null (the archive-id)) (null (the archive-pending)))
               (htm (:script (str (format nil "(function(){try{var l=JSON.parse(localStorage.getItem('prompt-lab-last')||'null');var o=JSON.parse(localStorage.getItem('prompt-lab-owners')||'{}')||{};
 if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))}catch(e){}})();"
-                                         (js-string-literal (format nil "~a/sheet?session=" *url-prefix*)))))))
+                                         (js-string-literal (format nil "~a?session=" *url-prefix*)))))))
             ;; the skin this browser chose, shared with the classic page
             ;; (localStorage prompt-lab-skin): worn when it is not the one
             ;; showing, and kept when View > Skin picks another
@@ -579,7 +586,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                      (:nav (str (browse-links))
                            (:a :href (the classic-url) "the page")
                            (when *sibling-lab*
-                             (htm (:a :href (format nil "~a/sheet" (car *sibling-lab*)) (esc (cdr *sibling-lab*))))))))))
+                             (htm (:a :href (car *sibling-lab*) (esc (cdr *sibling-lab*))))))))))
 
    ;; back from Stripe the address carries the checkout and the wallet;
    ;; the wallet otherwise comes from where the page keeps it
@@ -605,9 +612,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                 (js-string-literal (the query-wallet))
                 "(function(){try{return localStorage.getItem('prompt-lab-wallet')||''}catch(e){return ''}})()")))
 
+   ;; the classic page, kept for a while at <prefix>/classic
    (classic-url (if (the session)
-                    (format nil "~a?session=~a" *url-prefix* (session-id (the session)))
-                    *url-prefix*)))
+                    (format nil "~a/classic?session=~a" *url-prefix* (session-id (the session)))
+                    (format nil "~a/classic" *url-prefix*))))
 
   :objects
   (;; The prompt, as a tile that never goes stale (it reads nothing that
@@ -636,10 +644,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                         ;; banner flashes at an owner while the script loads
                         (:div :class "pl-watch" :style "display:none" :|data-show| "!$editable && !$archived"
                               "You are watching this session as it is built.  "
-                              (:a :href (format nil "~a/sheet" *url-prefix*) "Start your own") ".")
+                              (:a :href *url-prefix* "Start your own") ".")
                         (:div :class "pl-watch" :style "display:none" :|data-show| "$archived"
                               "An archived session: its log, its model file and its model, read-only.  "
-                              (:a :href (format nil "~a/sheet" *url-prefix*) "Start your own") ".")
+                              (:a :href *url-prefix* "Start your own") ".")
                         (:p :class "pl-notice" :|data-show| "$notice" :|data-text| "$notice")
                         (:p :class "pl-error" :|data-show| "$error" :|data-text| "$error"))))
 
@@ -690,7 +698,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                       (engine (or (and record (gethash "engine" record)) "gendl"))
                                       (created (and record (gethash "created" record)))
                                       (versions (length (the archive-versions)))
-                                      (base (format nil "~a/sheet?archive=~a" *url-prefix* id)))
+                                      (base (format nil "~a?archive=~a" *url-prefix* id)))
                                  (htm (:span (fmt "Archived session ~a" id))
                                       (when (integerp created)
                                         (htm (:span (str (multiple-value-bind (s m h d mo y) (decode-universal-time created 0)
@@ -699,10 +707,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                       (unless (equal engine (engine-name))
                                         (htm (:span (fmt "built on ~a: " engine)
                                                     (if (car *sibling-lab*)
-                                                        (htm (:a :href (format nil "~a/sheet?archive=~a" (car *sibling-lab*) id) "open it there"))
+                                                        (htm (:a :href (format nil "~a?archive=~a" (car *sibling-lab*) id) "open it there"))
                                                         (str "not drawn here")))))
                                       (when (live? id)
-                                        (htm (:a :href (format nil "~a/sheet?session=~a" *url-prefix* id) "live now")))
+                                        (htm (:a :href (format nil "~a?session=~a" *url-prefix* id) "live now")))
                                       ;; the model file's saved versions, for the editor
                                       (when (> versions 1)
                                         (htm (:span "versions:"
@@ -974,7 +982,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                          (datastar-script-event
                           (format nil "try{localStorage.setItem('prompt-lab-wallet',~a)}catch(e){};history.replaceState(null,'',~a)"
                                   (js-string-literal wallet)
-                                  (js-string-literal (format nil "~a/sheet?session=~a" *url-prefix* (session-id session))))))
+                                  (js-string-literal (format nil "~a?session=~a" *url-prefix* (session-id session))))))
             (unless (member outcome '("credited" "already") :test #'equal)
               (the (tell-error! text))))))))
 
@@ -1046,7 +1054,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     ;; no form in the page, only the hosted page.
     (let ((key (publishable-key session)))
       (multiple-value-bind (answer reason)
-          (begin-topup! session amount (page-url *datastar-request* session :path "/sheet")
+          (begin-topup! session amount (page-url *datastar-request* session)
                         :embedded? (and key t) :flow (and key card? "card"))
         (let ((secret (and answer (gethash "client_secret" answer)))
               (url (and answer (gethash "url" answer))))
@@ -1184,7 +1192,7 @@ var n=name(q||s||house);if(skins[n])l.setAttribute('href',skins[n])})();"
                        (:h1 (esc (lab-title)))
                        (:span :class "pl-engine" (esc (engine-label)))
                        (:nav (str (browse-links))
-                             (:a :href (format nil "~a/sheet" *url-prefix*) "start your own")))
+                             (:a :href *url-prefix* "start your own")))
               (:main :class "pl-list"
                      (:h2 (str (if archive? "Archived sessions" "Live sessions")))
                      (cond ((not *browsing?*)
@@ -1197,17 +1205,18 @@ var n=name(q||s||house);if(skins[n])l.setAttribute('href',skins[n])})();"
 
 (defun sheet-manifest ()
   "Hash table. The web app manifest of the sheet: the classic page's
-(app.lisp), opening at <prefix>/sheet?app=1.  Its scope is the whole site:
+(app.lisp), opening at <prefix>?app=1, under the classic manifest's id, so
+an app installed from the classic page becomes the sheet's.  Its scope is the whole site:
 the sheet lives at the address gwl mints for each visit (/sessions/<id>/),
 outside the lab's prefix, and an installed app keeps in its window only
 what is in scope.  No worker: a minted session page cannot be kept for
 offline use, and a browser installs an app without one."
   (let ((manifest (manifest)))
-    (setf (gethash "id" manifest) (format nil "~a/sheet" *url-prefix*)
-          (gethash "start_url" manifest) (format nil "~a/sheet?app=1" *url-prefix*)
+    (setf (gethash "id" manifest) *url-prefix*
+          (gethash "start_url" manifest) (format nil "~a?app=1" *url-prefix*)
           (gethash "scope" manifest) "/"
           (gethash "shortcuts" manifest)
-          (coerce (append (list (h "name" "New session" "url" (format nil "~a/sheet" *url-prefix*)))
+          (coerce (append (list (h "name" "New session" "url" *url-prefix*))
                           (when *browsing?*
                             (list (h "name" "Live sessions" "url" (format nil "~a/sheet-list?browse=live" *url-prefix*))
                                   (h "name" "Archive" "url" (format nil "~a/sheet-list?browse=archive" *url-prefix*)))))
@@ -1219,10 +1228,20 @@ offline use, and a browser installs an app without one."
   (respond-text req ent (ascii-json (encode (sheet-manifest))) "application/manifest+json"))
 
 (defun publish-lab-sheet! (&key host)
-  "Publish the sheet at <prefix>/sheet, its listings at <prefix>/sheet-list
-and its app manifest, beside the page."
-  (gwl::publish-gwl-app (format nil "~a/sheet" *url-prefix*) 'lab-sheet :host host)
+  "THE SHEET TAKES THE PREFIX (2026-10-02): publish it at <prefix> -- over
+the classic page, which publish-prompt-lab! put there and which moves to
+<prefix>/classic for a while -- and at <prefix>/sheet, its address before;
+its listings at <prefix>/sheet-list; its manifest at both manifest
+addresses.  The classic page's service worker is retired (*app?* nil: its
+door answers a worker that drops the lab's caches and unregisters itself),
+since the sheet keeps none.  Call after publish-prompt-lab!."
+  (setq *app?* nil)
+  (gwl::publish-gwl-app *url-prefix* 'lab-sheet :host host)
+  (gwl::publish-gwl-app (concatenate 'string *url-prefix* "/sheet") 'lab-sheet :host host)
   (gwl::publish-gwl-app (format nil "~a/sheet-list" *url-prefix*) 'lab-listing :host host)
   (gwl:with-all-servers (server)
-    (net.aserve:publish :path (format nil "~a/sheet-manifest.webmanifest" *url-prefix*)
-                        :server server :host host :function #'sheet-manifest-door)))
+    (net.aserve:publish :path (format nil "~a/classic" *url-prefix*) :server server :host host
+                        :function #'page-door :content-type "text/html; charset=utf-8")
+    (dolist (name '("manifest.webmanifest" "sheet-manifest.webmanifest"))
+      (net.aserve:publish :path (format nil "~a/~a" *url-prefix* name)
+                          :server server :host host :function #'sheet-manifest-door))))

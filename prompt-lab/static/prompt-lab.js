@@ -18,6 +18,9 @@
 (function () {
   var lab = window.promptLab || { house: 'workstation', skins: [], aliases: {}, skin: null, pinned: null };
   var base = location.pathname.replace(/\/+$/, '');
+  // the lab's doors are under its prefix, which the page may not be at
+  // (the classic page at <prefix>/classic once the sheet took the prefix)
+  var doors = lab.prefix || base;
   var params = new URLSearchParams(location.search);
   var session = params.get('session');
   // ?archive=<id>: an archived session, read-only; ?browse=live|archive:
@@ -749,7 +752,7 @@
     var headers = {}, key = archiveId ? owners[archiveId] : ownerKey();
     if (key) headers['X-Prompt-Lab-Owner'] = key;
     downloadSays('Writing ' + format.toUpperCase() + '\u2026');
-    fetch(base + '/api/download?' + downloadQuery + '&format=' + encodeURIComponent(format), { headers: headers })
+    fetch(doors + '/api/download?' + downloadQuery + '&format=' + encodeURIComponent(format), { headers: headers })
       .then(function (r) {
         if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || ('download failed: ' + r.status)); });
         var name = (/filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '') || [])[1] || ('model.' + format);
@@ -780,7 +783,7 @@
 
   function loadConfig() {
     if (configLoaded) return Promise.resolve();
-    return fetch(base + '/api/config').then(function (r) { return r.json(); }).then(function (config) {
+    return fetch(doors + '/api/config').then(function (r) { return r.json(); }).then(function (config) {
       configLoaded = true;
       if (!session) reach(true);
       engineHere = config.engine || null;
@@ -831,7 +834,7 @@
     var headers = body ? { 'Content-Type': 'application/json' } : {};
     if (ownerKey()) headers['X-Prompt-Lab-Owner'] = ownerKey();
     var options = body ? { method: 'POST', headers: headers, body: JSON.stringify(body) } : { headers: headers };
-    return fetch(base + '/api/' + path + (body ? '' : '?session=' + encodeURIComponent(session)), options)
+    return fetch(doors + '/api/' + path + (body ? '' : '?session=' + encodeURIComponent(session)), options)
       .then(function (r) { return r.json().then(function (j) { j._status = r.status; return j; }); });
   }
 
@@ -840,7 +843,7 @@
     // this browser's key for an archived session it opened: a private
     // one answers only to it
     var key = archiveId && owners[archiveId];
-    return fetch(base + '/api/' + path, key ? { headers: { 'X-Prompt-Lab-Owner': key } } : {})
+    return fetch(doors + '/api/' + path, key ? { headers: { 'X-Prompt-Lab-Owner': key } } : {})
       .then(function (r) { return r.json().then(function (j) { j._status = r.status; return j; }); });
   }
 
@@ -1047,7 +1050,7 @@
       }
       $('viewer-empty').textContent = 'Building the model to draw it\u2026 a large one takes a while.';
       var key = owners[a.id] || null;
-      return fetch(base + '/api/replay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: a.id, owner: key }) })
+      return fetch(doors + '/api/replay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: a.id, owner: key }) })
         .then(function (r) { return r.json(); })
         .then(function (r) {
           if (r.error || !r.ok) { $('viewer-empty').textContent = r.error || ('The model did not build again: ' + (r.text || '')); return; }
@@ -1085,7 +1088,7 @@
     thumb.className = 'thumb';
     if (s.thumb) {
       var img = document.createElement('img');
-      img.src = base + '/api/thumb?id=' + encodeURIComponent(s.id) + '&v=' + s.thumb;
+      img.src = doors + '/api/thumb?id=' + encodeURIComponent(s.id) + '&v=' + s.thumb;
       img.alt = '';
       img.loading = 'lazy';
       img.decoding = 'async';
