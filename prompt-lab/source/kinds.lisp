@@ -141,10 +141,11 @@ sections, and objects when it shows geometry."
 page without geometry."
     objects nil)
    ("List of plists, the app's tollbooths: what a visitor pays for.  Each
-is (:key <keyword> :label <string> :cents <integer>) with :uses <n> (the
-payment covers n uses, spent with use-toll!) or :seconds <n> (it covers
-that long), or neither (it covers this visit).  The cents may be computed
-from the model."
+is (:key <keyword> :label <string> :rivets <integer>) with :uses <n>
+(the payment covers n uses, spent with use-toll!) or :seconds <n> (it
+covers that long), or neither (it covers this visit).  The price is in
+rivets, the lab's own unit (an older :cents is read the same), and may
+be computed from the model."
     tolls nil)
    ("Plist, download format keyword (:pdf :svg :png :step :iges :stl) to
 the key of the toll its file-link asks for; a format not named is free."
@@ -221,7 +222,8 @@ line saying it is paid.  Put it in a section, so it redraws when paid."
               (t (htm (:button :type "button"
                                :class "inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
                                :onclick (the (gdl-ajax-call :function-key :pay-toll! :arguments (list key)))
-                               (fmt "$~,2f -- ~a~a" (/ (getf toll :cents) 100) (getf toll :label)
+                               (fmt "~:d ~a -- ~a~a" (monocle:toll-price toll) (units (monocle:toll-price toll))
+                                    (getf toll :label)
                                     (toll-mode-note self)))))))))
 
    ("String of html. A link that downloads the first of objects as FORMAT
@@ -363,11 +365,7 @@ the page says, cut at LIMIT characters."
                  ;; the tollbooths: each a key, a label and a price, and
                  ;; every toll a file is put behind one of them
                  (tolls (when mixed? (the-object app tolls)))
-                 (bad-tolls (remove-if #'(lambda (toll)
-                                           (and (listp toll) (keywordp (getf toll :key))
-                                                (stringp (getf toll :label)) (integerp (getf toll :cents))
-                                                (not (minusp (getf toll :cents)))))
-                                       tolls))
+                 (bad-tolls (remove-if-not #'monocle:toll-fault tolls))
                  (lost-tolls (when mixed?
                                (loop for (nil key) on (the-object app file-tolls) by #'cddr
                                      unless (find key tolls :key #'(lambda (toll) (and (listp toll) (getf toll :key))))
@@ -407,13 +405,15 @@ the page says, cut at LIMIT characters."
                                               (when (and tolls (not bad-tolls))
                                                 (format nil "Tollbooths: ~{~a~^; ~}."
                                                         (mapcar #'(lambda (toll)
-                                                                    (format nil "~(~a~) \"~a\" $~,2f~@[, ~a uses~]~@[, ~a s~]"
+                                                                    (format nil "~(~a~) \"~a\" ~:d ~a~@[, ~a uses~]~@[, ~a s~]"
                                                                             (getf toll :key) (getf toll :label)
-                                                                            (/ (getf toll :cents) 100)
+                                                                            (monocle:toll-price toll)
+                                                                            (units (monocle:toll-price toll))
                                                                             (getf toll :uses) (getf toll :seconds)))
                                                                 tolls)))
                                               (when bad-tolls
-                                                "ERROR: every toll is (:key <keyword> :label <string> :cents <integer>), with :uses or :seconds if wanted.")
+                                                (format nil "ERROR: every toll is (:key <keyword> :label <string> :rivets <integer>), with :uses or :seconds if wanted: ~a."
+                                                        (monocle:toll-fault (first bad-tolls))))
                                               (when lost-tolls
                                                 (format nil "ERROR: file-tolls names tolls that tolls does not declare: ~{~(~a~)~^, ~}." lost-tolls))
                                               (when broken
@@ -507,7 +507,7 @@ Rules for the page:
 - Html is cl-who: (str <string>) puts a string in, (fmt ..) a formatted one, (esc <string>) one that came from the visitor, and htm goes back to html inside a Lisp form.  A table of results is :table with :thead and :tbody.
 - Style with the classes the recipe uses (they are in the page's stylesheet; other utility classes may not be) and a :style attribute for anything else.
 - The page loads nothing from another site and carries no script of yours unless the request cannot be met without one.
-- Charging, when the visitor asks for it, is done with tollbooths, placed wherever they say.  Declare them in APP's input-slots: (tolls (list (list :key :cad :label \"STEP download\" :cents 300 :uses 1))) -- with :uses n the payment covers n uses, with :seconds n it covers that long, with neither it covers this visit; the cents may be computed, from the model's size say.  (the (toll-button :cad)) is the booth, a pay button that turns into a paid line: put it in a section.  (the (toll-paid? :cad)) says whether to show what the toll guards, and (the (use-toll! :cad)) spends one use.  (the (file-link :step :label \"STEP file\")) is a link that downloads the first of objects as it stands, inputs and all (:pdf :svg :png anywhere; :step :iges :stl on a solids engine); name the format in (file-tolls (list :step :cad)) and the link wants that toll paid and spends a use of it.  The tollbooths are the app's payment points: the lab takes the payment at them.  Write no payment code of your own.  An app with at least one priced toll can be deployed with the Monetize button; say in your reply where the booths are, what they charge, and that Monetize now opens.
+- Charging, when the visitor asks for it, is done with tollbooths, placed wherever they say.  Declare them in APP's input-slots: (tolls (list (list :key :cad :label \"STEP download\" :rivets 300 :uses 1))) -- with :uses n the payment covers n uses, with :seconds n it covers that long, with neither it covers this visit.  Prices are in rivets, the lab's own unit, which visitors buy in packets, never in money; at today's rate a rivet is a cent, so a visitor who asks for $3 means 300 rivets.  A price may be computed, from the model's size say.  (the (toll-button :cad)) is the booth, a pay button that turns into a paid line: put it in a section.  (the (toll-paid? :cad)) says whether to show what the toll guards, and (the (use-toll! :cad)) spends one use.  (the (file-link :step :label \"STEP file\")) is a link that downloads the first of objects as it stands, inputs and all (:pdf :svg :png anywhere; :step :iges :stl on a solids engine); name the format in (file-tolls (list :step :cad)) and the link wants that toll paid and spends a use of it.  The tollbooths are the app's payment points: the lab takes the payment at them.  Write no payment code of your own.  An app with at least one priced toll can be deployed with the Monetize button; say in your reply where the booths are, what they charge, and that Monetize now opens.
 - Name your own objects and functions with names of your own: a definition named like something Lisp, Gendl or GWL already has (start, publish, header, title ...) is refused.
 - Never include an in-package form."
           (and (member :model *kinds*) t)

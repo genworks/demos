@@ -677,7 +677,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', dpot: 0, kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             ;; whether what the session built charges for anything yet: the
             ;; Monetize button is greyed until it does (deploy.lisp)
             (json-boolean (let ((session (the session)))
@@ -868,7 +868,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      (:a :class "pl-open-app" :target "_blank" :rel "noopener"
                                          :|data-show| "$deployed" :|data-attr:href| "$deployed" :|data-text| "$deployed"))
                                (:p :class "pl-line" :|data-show| "!$story"
-                                   "Nothing here charges yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download', 'a $5 pass unlocks the results' -- and Monetize opens when it has written that in.")
+                                   (unit-text "Nothing here charges yet.  Tell the agent what should cost {units} -- 'charge 300 {units} for each STEP download', 'a pass for 500 {units} unlocks the results' -- and Monetize opens when it has written that in."))
                                (:div :class "pl-deploy" :|data-show| "$monetize && $story"
                                      (:p :class "pl-line"
                                          "Deploy what you built at an address of its own.  A model gets a page where others change its inputs and download its files; a web app is served as it is.  It is a copy: deploy again to update it.")
@@ -880,11 +880,23 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              (:textarea :rows "2" :maxlength "400" :|data-bind:dblurb| ""))
                                      ;; the source terms were the session's choice as it opened
                                      (:p :class "pl-line" :|data-show| "!$closed"
-                                         (fmt "Open source, under the GNU Affero General Public License: the deployment serves its source.  Of what its users pay you receive ~d%; ~d% is the monetization fee."
-                                              (- 100 (house-fee-percent nil)) (house-fee-percent nil)))
+                                         (fmt "Open source, under the GNU Affero General Public License: the deployment serves its source.  Of what its users pay, in ~a, ~d% is the monetization fee."
+                                              (units) (house-fee-percent nil)))
                                      (:p :class "pl-line" :|data-show| "$closed"
-                                         (fmt "Closed source, as you chose when the session opened: the deployment does not serve its source.  Of what its users pay you receive ~d%; ~d% is the monetization fee."
-                                              (- 100 (house-fee-percent t)) (house-fee-percent t)))
+                                         (fmt "Closed source, as you chose when the session opened: the deployment does not serve its source.  Of what its users pay, in ~a, ~d% is the monetization fee."
+                                              (units) (house-fee-percent t)))
+                                     ;; the author's slider: points of every payment, on top of
+                                     ;; the fee, for the community pot (deploy.lisp)
+                                     (when *pot-percent-least*
+                                       (htm (:label :data-doc (unit-text "Give more of every payment to the community pot of {units} that pays for everyone's builds.  It is taken on top of the monetization fee, and kept with the deployment's terms.")
+                                                    (:span :|data-text| (format nil "'To the community pot, on top of the fee: ' + $dpot + '%'"))
+                                                    (:input :type "range" :step "1"
+                                                            :min (format nil "~d" *pot-percent-least*)
+                                                            :max "50" :|data-bind:dpot| ""))
+                                            (:p :class "pl-line"
+                                                (:span :|data-text|
+                                                       (format nil "'You receive ' + (($closed ? ~d : ~d) - Number($dpot)) + '% of what its users pay.'"
+                                                               (- 100 (house-fee-percent t)) (- 100 (house-fee-percent nil)))))))
                                      ;; the hosting terms, in short, by the source terms
                                      (:p :class "pl-line" :|data-show| "!$closed"
                                          "Hosting: an open-source deployment with no tollbooth, or with no revenue for an extended period, may be un-hosted -- or kept, if we and its visitors find it interesting.")
@@ -897,7 +909,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      (:label "Where to reach you about your share (email)"
                                              (:input :type "email" :maxlength "200" :|data-bind:dpayee| ""))
                                      (:p :class "pl-line"
-                                         "Your share accumulates through each quarter and is paid out after it.  "
+                                         (unit-text "Your share is held in {units} through each quarter and paid out after it, at that day's rate.  ")
                                          (:a :target "_blank" :rel "noopener" :|data-show| "$deployed"
                                              :|data-attr:href| (format nil "'~a?name=' + $deployed.split('/').pop() + '&owner=' + $owner"
                                                                        (door-path "earnings"))
@@ -1394,7 +1406,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                     (deploy-session! session
                                      :name (gethash "dname" signals) :title (gethash "dtitle" signals)
                                      :blurb (gethash "dblurb" signals)
-                                     :payee (gethash "dpayee" signals))
+                                     :payee (gethash "dpayee" signals)
+                                     :pot-percent (let ((pot (gethash "dpot" signals)))
+                                                    (cond ((realp pot) pot)
+                                                          ((stringp pot) (ignore-errors (parse-integer pot :junk-allowed t))))))
                   (if record
                       (sheet-send! self (datastar-signals-event
                                          (with-output-to-string (s)

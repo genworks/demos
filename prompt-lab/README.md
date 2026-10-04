@@ -123,7 +123,7 @@ other.  `*closed-source?*` nil offers no such choice.
 - A web app has **tollbooths**, which the author asks the agent to put
   wherever they like -- a price for each CAD download, a pass that
   unlocks a results table for a day, a price computed from the model.
-  The app declares them (`tolls`: a key, a label, the cents, and
+  The app declares them (`tolls`: a key, a label, the price in rivets, and
   `:uses` or `:seconds` when the payment covers so many uses or so
   long) and places them (`toll-button`, `toll-paid?`, `use-toll!`);
   `file-link` gives a download of the model as it stands in the
@@ -138,10 +138,17 @@ Nothing is deployed that charges for nothing (`monetizable?`: a priced
 toll, and for a model a download it stands on); the state door answers
 `monetizable`.
 
-Of what users pay, the house keeps its **monetization fee** and the
-author is owed the rest: `*house-fee-percents*`, 10% of an open-source
-deployment's takings and 15% of a closed-source one's, written into
-each deployment's record on the day.
+Everything is priced and paid in **rivets**, the lab's own unit, which
+visitors buy in packets.  Of what users pay, the house keeps its
+**monetization fee**: `*house-fee-percents*`, 10% of an open-source
+deployment's takings and 15% of a closed-source one's.  The author may
+give more, to the lab's community pot of rivets that pays for
+everyone's builds: a slider on the Monetize form, from
+`*pot-percent-least*` upwards, in points on top of the fee.  The author
+is owed the rest, held in rivets and paid out after each quarter at
+that day's rate.  The terms are written into each deployment's record
+on the day.  The records and the books are kept by
+[Monocle](https://gitlab.common-lisp.net/clo/monocle).
 
 Hosting is at the house's discretion.  A closed-source deployment that
 shows no revenue, or too little, for some time may be taken down: its

@@ -148,8 +148,10 @@ is, and the balance door reports both before the first build.")
 
 (defparameter *unit* '("rivet" . "rivets")
   "Cons of strings, singular and plural. What the page calls the unit
-builds are paid in -- bought, given free, or drawn from a community pot;
-a hundredth of a dollar when bought plain.  One name, said in one place:
+builds, and a deployed app's tollbooths, are paid in -- bought in packets,
+given free, or drawn from a community pot.  A rivet is Genworks' own
+currency: what a packet buys, and what a rivet is worth when an author is
+paid, may change (monocle:payout-amount).  One name, said in one place:
 the doors' field names (credits, credits_used ...) and the gate's are
 program names and stay as they are.")
 
@@ -297,12 +299,20 @@ reach back.")
 once, booked as a test payment: no money moves), or nil (no toll can be
 paid).  A real provider is the gate's to add.")
 
+(defparameter *pot-percent-least* 0
+  "Number or nil. The least an author adds of every payment to the lab's
+community pot of rivets, in percentage points on top of the monetization
+fee; the Monetize tile's slider starts here and goes up.  Nil: no slider,
+and nothing goes to the pot.  The fee itself is the house's.")
+
 (defun lab-house ()
   "This lab as Monocle knows it: where its deployments and books are kept,
-the engine and the Lisp they run on, the fees and the toll provider, as
-the parameters above stand now."
-  (monocle:make-house :root *deployed-root* :runtime (engine-name)
-                      :fee-percents *house-fee-percents* :provider *toll-provider*))
+the engine and the Lisp they run on, its unit (rivets), the fees, the
+community pot's least share and the toll provider, as the parameters
+above stand now."
+  (monocle:make-house :root *deployed-root* :runtime (engine-name) :unit :rivets
+                      :fee-percents *house-fee-percents* :pot-percent *pot-percent-least*
+                      :provider *toll-provider*))
 
 (defun house-fee-percent (closed?) (monocle:fee-percent (lab-house) closed?))
 

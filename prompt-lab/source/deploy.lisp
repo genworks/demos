@@ -77,8 +77,11 @@ owner what is owed."
        "closed" (if (truthy? (gethash "closed" record)) t 'yason:false)
        "source_url" (unless (truthy? (gethash "closed" record))
                       (format nil "~a/source" (deployment-url name)))
-       "price_cents" (or (gethash "price_cents" record) 0)
+       ;; the most any of its files costs, in the lab's unit, named for it
+       (monocle:amount-field (lab-house) "price") (or (monocle:record-price record) 0)
        "fee_percent" (gethash "fee_percent" record)
+       ;; what its author adds for the community pot, on top of the fee
+       "pot_percent" (or (gethash "pot_percent" record) 0)
        ;; a priced deployment opens to others once the gate takes payment
        "open" (if (or (not (deployment-priced? record)) *deployment-payments?*) t 'yason:false)
        "deployed" (gethash "deployed" record)
@@ -189,21 +192,22 @@ and two compiles can share one.)"
   "Whether what SESSION built has a monetization story: at least one toll
 with a price, and for a model a download that toll stands on."
   (multiple-value-bind (tolls file-tolls) (ignore-errors (built-tolls session))
-    (and (some #'(lambda (toll) (plusp (getf toll :cents))) tolls)
+    (and (some #'(lambda (toll) (plusp (monocle:toll-price toll))) tolls)
          (or (eq (session-kind session) :app) (file-prices tolls file-tolls))
          t)))
 
 (defun deployment-file-price (record format)
-  "What deployed model RECORD asks for a download in FORMAT, in cents; nil
-when that one is free."
+  "What deployed model RECORD asks for a download in FORMAT, in rivets;
+nil when that one is free."
   (monocle:record-file-price record format))
 
-(defun deploy-session! (session &key name title blurb payee)
+(defun deploy-session! (session &key name title blurb payee pot-percent)
   "Deploy what SESSION built as NAME.  Values: the record, or nil and the
 reason.  It must have a monetization story (monetizable?).  Its source is
-closed when the session was opened closed-source, else open.  Deploying
-again from the same session under the same name replaces the copy and the
-terms."
+closed when the session was opened closed-source, else open.  POT-PERCENT
+is the author's slider: points of every payment, on top of the fee, for
+the lab's community pot.  Deploying again from the same session under the
+same name replaces the copy and the terms."
   (bt:with-lock-held (*deploy-lock*)
     (let* ((closed? (session-closed? session))
            (name (and (stringp name) (string-downcase (string-trim " " name))))
@@ -223,8 +227,8 @@ terms."
          (values nil (format nil "There is nothing to deploy yet: build a ~:[model~;web app~] first." app?)))
         ((not (monetizable? session))
          (values nil (if app?
-                         "This app charges for nothing yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download', 'a $5 day pass unlocks the results' -- and Monetize opens when it has written the tollbooths."
-                         "This model charges for nothing yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download' -- and Monetize opens when it has written that in.")))
+                         (unit-text "This app charges for nothing yet.  Tell the agent what should cost {units} -- 'charge 300 {units} for each STEP download', 'a day pass for 500 {units} unlocks the results' -- and Monetize opens when it has written the tollbooths.")
+                         (unit-text "This model charges for nothing yet.  Tell the agent what should cost {units} -- 'charge 300 {units} for each STEP download' -- and Monetize opens when it has written that in."))))
         ((not (deployment-name? name))
          (values nil "Give it a name for its address: 3 to 40 lower-case letters, digits and hyphens, a letter first."))
         ((and existing (not (equal (gethash "owner" existing) (session-owner session))))
@@ -245,15 +249,18 @@ terms."
                                              :name name :title title :blurb blurb
                                              :owner (session-owner session) :payee payee
                                              :closed? closed? :file-prices prices :existing existing
+                                             :pot-percent (and (realp pot-percent) pot-percent)
                                              :fields (list "session" (session-id session)
                                                            "kind" (kind-name (session-kind session))))))
            (ensure-directories-exist directory)
            (write-text-file (model-body session) (merge-pathnames "model.lisp" directory))
            (monocle:save-record! (lab-house) record)
            (drop-deployed! name)
-           (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee."
-                      name (deployment-url name) closed? (house-fee-percent closed?))
-           (deployment-record name)))))))
+           (let ((saved (deployment-record name)))
+             (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee~@[ and ~a% goes to the community pot~]."
+                        name (deployment-url name) closed? (house-fee-percent closed?)
+                        (let ((pot (gethash "pot_percent" saved))) (and (realp pot) (plusp pot) pot)))
+             saved)))))))
 
 (defun undeploy! (name owner-key)
   "Take deployment NAME down for the holder of OWNER-KEY.  Values: true, or
@@ -385,7 +392,7 @@ runtime.  Test payments are left out unless TESTS?."
 
 (defun deploy-door (req ent)
   "POST <prefix>/api/deploy {session, name, payee, title?, blurb?,
-turnstile?}: the session's owner deploys what it built, once it charges
+pot_percent?, turnstile?}: the session's owner deploys what it built, once it charges
 for something (monetizable?); answers the deployment.  Its source is
 closed when the session was opened closed-source.  Where a human check
 stands it wants its token."
@@ -402,7 +409,8 @@ stands it wants its token."
                        (deploy-session! session
                                         :name (gethash "name" json) :title (gethash "title" json)
                                         :blurb (gethash "blurb" json)
-                                        :payee (gethash "payee" json))
+                                        :payee (gethash "payee" json)
+                                        :pot-percent (gethash "pot_percent" json))
                      (if record
                          (respond-json req ent (deployment-state record :owner? t))
                          (refuse req ent "~a" reason)))))))))
@@ -437,25 +445,32 @@ it -- and the same for its test payments, apart."
          (record (and *deployments?* (stringp name) (deployment-record name))))
     (cond ((null record) (refuse req ent net.aserve:*response-not-found* "There is no such deployment."))
           ((not (and (stringp key) (equal (gethash "owner" record) key))) (not-yours req ent))
+          ;; the amounts are in the lab's unit and named for it: gross_rivets ...
           (t (flet ((quarters (sums)
-                      (map 'vector #'(lambda (sum)
-                                       (h "year" (getf sum :year) "quarter" (getf sum :quarter)
-                                          "payments" (getf sum :payments)
-                                          "gross_cents" (getf sum :gross-cents)
-                                          "card_cents" (getf sum :card-cents)
-                                          "fee_cents" (getf sum :fee-cents)
-                                          "yours_cents" (getf sum :payee-cents)))
-                           sums)))
+                      (let ((house (lab-house)))
+                        (flet ((amount (sum stem) (or (getf sum (monocle:amount-key house stem)) 0))
+                               (field (stem) (monocle:amount-field house stem)))
+                          (map 'vector #'(lambda (sum)
+                                           (h "year" (getf sum :year) "quarter" (getf sum :quarter)
+                                              "payments" (getf sum :payments)
+                                              (field "gross") (amount sum :gross)
+                                              (field "card") (amount sum :card)
+                                              (field "fee") (amount sum :fee)
+                                              (field "pot") (amount sum :pot)
+                                              (field "yours") (amount sum :payee)))
+                               sums)))))
                (let ((real (earnings name))
                      (all (earnings name :tests? t)))
                  (respond-json req ent
                                (h "name" name
+                                  "unit" (units)
                                   "fee_percent" (gethash "fee_percent" record)
+                                  "pot_percent" (or (gethash "pot_percent" record) 0)
                                   "payee" (gethash "payee" record)
                                   "quarters" (quarters real)
                                   ;; test payments included: no money moved for those
                                   "quarters_with_tests" (quarters all)
-                                  "paid_out" "After each quarter, once the share owed has reached the house's minimum; a smaller sum carries to the next."))))))))
+                                  "paid_out" (unit-text "Held in {units}, and paid out after a quarter once the share owed has reached the house's minimum, at that day's rate for a rivet; a smaller sum carries to the next.")))))))))
 
 (defun app-file-door (req ent)
   "GET <prefix>/app-file?iid=<instance>&format=<name>: a web app's model as

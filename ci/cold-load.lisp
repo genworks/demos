@@ -613,7 +613,7 @@ loaded) its page too."
                                                     "source" "(define-object model (box)
   :input-slots ((length 30) (width 20) (height 10))
   :computed-slots
-  ((tolls (list (list :key :drawing :label \"SVG drawing\" :cents 500)))
+  ((tolls (list (list :key :drawing :label \"SVG drawing\" :rivets 500)))
    (file-tolls (list :svg :drawing))))"))
                               (unless (eq (gethash "monetizable"
                                                    (json-of :get (format nil "~a?session=~a" (door "state") tolled)
@@ -658,7 +658,7 @@ loaded) its page too."
                                            "source" "(define-object model (box)
   :input-slots ((length 30) (width 20) (height 10))
   :computed-slots
-  ((tolls (list (list :key :drawing :label \"SVG drawing\" :cents 500)))
+  ((tolls (list (list :key :drawing :label \"SVG drawing\" :rivets 500)))
    (file-tolls (list :svg :drawing))))"))
                      (unless (eql 403 (nth-value 1 (http :get (format nil "~a?session=~a" (door "state") closed))))
                        (error "a closed-source session showed itself to a stranger"))
@@ -679,7 +679,7 @@ loaded) its page too."
                           (mark "(objects (list (the model))))")
                           (at (or (search mark recipe) (error "the recipe has lost the line the test puts a toll after")))
                           (tolled (concatenate 'string (subseq recipe 0 at)
-                                               "(objects (list (the model))) (tolls (list (list :key :pass :label \"A pass\" :cents 200))))"
+                                               "(objects (list (the model))) (tolls (list (list :key :pass :label \"A pass\" :rivets 200))))"
                                                (subseq recipe (+ at (length mark)))))
                           (brief (json-of :post (door "agent")
                                           :json (table "event" "prompt" "text" "A tolled plate sizer." "kind" "app"
@@ -691,8 +691,12 @@ loaded) its page too."
                               :json (table "event" "stopped" "session" app "text" "Only a test."))
                      (unwind-protect
                           (progn
-                            (json-of :post (door "deploy") :headers headers
-                                     :json (table "session" app "name" name "payee" "owner@example.com"))
+                            ;; the author's slider: 20 points for the community pot
+                            (let ((deployment (json-of :post (door "deploy") :headers headers
+                                                       :json (table "session" app "name" name "payee" "owner@example.com"
+                                                                    "pot_percent" 20))))
+                              (unless (eql (gethash "pot_percent" deployment) 20)
+                                (error "the author's share for the community pot was not kept with the deployment")))
                             (let* ((deployed (uiop:symbol-call :prompt-lab :ensure-deployed name))
                                    (page (gdl:make-object (uiop:symbol-call :prompt-lab :app-symbol deployed)
                                                           :deployment-name name))
@@ -700,14 +704,15 @@ loaded) its page too."
                               (when (gdl:the-object page (toll-paid? :pass)) (error "the toll was paid before it was paid"))
                               (gdl:the-object page (pay-toll! :pass))
                               (unless (gdl:the-object page (toll-paid? :pass)) (error "the toll was not paid after it was"))
-                              ;; the card cost comes off the top, the fee and the
-                              ;; author's share from what is left (open source: a tenth)
+                              ;; the card cost comes off the top, then the fee (open
+                              ;; source: a tenth) and the pot's 20 points, in rivets
                               (let ((line (uiop:symbol-call :prompt-lab :book-revenue! name 1000
                                                             :card-cents 60 :test? t)))
-                                (unless (and (= (gethash "fee_cents" line) 94)
-                                             (= (gethash "payee_cents" line) 846)
-                                             (= (gethash "fee_before_card_cents" line) 100))
-                                  (error "the card cost did not come off the top")))
+                                (unless (and (= (gethash "fee_rivets" line) 94)
+                                             (= (gethash "pot_rivets" line) 188)
+                                             (= (gethash "payee_rivets" line) 658)
+                                             (= (gethash "fee_before_card_rivets" line) 100))
+                                  (error "the card cost, the fee and the pot's share did not split as they should")))
                               (unless (eql 403 (nth-value 1 (http :get (format nil "~a?name=~a" (door "earnings") name))))
                                 (error "a stranger read a deployment's earnings"))
                               (let* ((earned (json-of :get (format nil "~a?name=~a" (door "earnings") name)
@@ -715,10 +720,12 @@ loaded) its page too."
                                      (quarter (first (gethash "quarters_with_tests" earned)))
                                      (line (first (last (uiop:symbol-call :prompt-lab :revenue-lines) 2))))
                                 (and (= (length (uiop:symbol-call :prompt-lab :revenue-lines)) (+ 2 before))
-                                     (eql (gethash "gross_cents" line) 200)
+                                     (eql (gethash "gross_rivets" line) 200)
+                                     (eql (gethash "pot_rivets" line) 40)
                                      (eq (gethash "test" line) t)
                                      (eql (gethash "payments" quarter) 2)
-                                     (= (gethash "yours_cents" quarter) (+ 180 846))
+                                     (= (gethash "yours_rivets" quarter) (+ 140 658))
+                                     (equal (gethash "unit" earned) "rivets")
                                      (zerop (length (gethash "quarters" earned)))
                                      (null (uiop:symbol-call :prompt-lab :revenue-report))))))
                        (http :post (door "undeploy") :headers headers :json (table "name" name))))))
