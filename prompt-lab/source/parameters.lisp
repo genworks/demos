@@ -292,8 +292,19 @@ GNU Affero General Public License) or closed.  Written into each
 deployment's record when it is deployed: a later change here does not
 reach back.")
 
-(defun house-fee-percent (closed?)
-  (getf *house-fee-percents* (if closed? :closed :open)))
+(defparameter *toll-provider* :test
+  "Keyword or nil. How a deployed app's tolls are taken: :test (granted at
+once, booked as a test payment: no money moves), or nil (no toll can be
+paid).  A real provider is the gate's to add.")
+
+(defun lab-house ()
+  "This lab as Monocle knows it: where its deployments and books are kept,
+the engine and the Lisp they run on, the fees and the toll provider, as
+the parameters above stand now."
+  (monocle:make-house :root *deployed-root* :runtime (engine-name)
+                      :fee-percents *house-fee-percents* :provider *toll-provider*))
+
+(defun house-fee-percent (closed?) (monocle:fee-percent (lab-house) closed?))
 
 (defparameter *closed-source?* t
   "Boolean. Whether a visitor may open a session whose source is closed

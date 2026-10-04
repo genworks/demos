@@ -33,41 +33,27 @@
 ;; Lisp it ran on, so that what hosted applications earn can be reported
 ;; by runtime.
 ;;
-
-(defun lisp-name ()
-  "The Lisp this room runs, as the books name it."
-  (format nil "~a ~a" (lisp-implementation-type) (lisp-implementation-version)))
-
-(defun truthy? (value) (or (eq value t) (eq value 'yason:true)))
+;; The records, the tolls' declaration, the provider's seam and the books
+;; are Monocle's (the monocle system); the lab is one house of it
+;; (lab-house, parameters.lisp).  What is here is the lab's own: what it
+;; deploys (a session's model file), how that runs (compiled into this
+;; image), closed sessions, and the doors.
+;;
 
 
 ;;
 ;; The record.
 ;;
 
-(defun deployment-name? (name)
-  "A deployment's name, the last part of its address: 3 to 40 of a-z, 0-9
-and hyphen, a letter first."
-  (and (stringp name) (<= 3 (length name) 40)
-       (lower-case-p (char name 0)) (char<= #\a (char name 0) #\z)
-       (every #'(lambda (c) (or (char<= #\a c #\z) (digit-char-p c) (char= c #\-))) name)))
-
-(defun deployment-directory (name)
-  (merge-pathnames (format nil "~a/~a/" (engine-name) name) *deployed-root*))
+(defun deployment-directory (name) (monocle:deployment-directory (lab-house) name))
 
 (defun deployment-record (name)
   "The record of deployment NAME on this engine, a hash table, or nil."
-  (and (deployment-name? name)
-       (read-record (merge-pathnames "deployment.json" (deployment-directory name)))))
+  (monocle:deployment-record (lab-house) name))
 
 (defun deployment-records ()
   "Every deployment of this engine, the newest first."
-  (sort (remove-duplicates
-         (remove nil (mapcar #'(lambda (directory)
-                                 (read-record (merge-pathnames "deployment.json" directory)))
-                             (directory (merge-pathnames (format nil "~a/*/" (engine-name)) *deployed-root*))))
-         :key #'(lambda (record) (gethash "name" record)) :test #'equal)
-        #'> :key #'(lambda (record) (let ((at (gethash "deployed" record))) (if (realp at) at 0)))))
+  (monocle:deployment-records (lab-house)))
 
 (defun session-deployment (session)
   "The deployment made from SESSION, its record, or nil."
@@ -76,8 +62,7 @@ and hyphen, a letter first."
 
 (defun deployment-url (name) (format nil "~a/d/~a" *url-prefix* name))
 
-(defun deployment-priced? (record)
-  (let ((price (gethash "price_cents" record))) (and (integerp price) (plusp price))))
+(defun deployment-priced? (record) (monocle:record-priced? record))
 
 (defun deployment-state (record &key owner?)
   "RECORD as the doors answer it: the terms everyone may read, and for its
@@ -98,12 +83,6 @@ owner what is owed."
        "open" (if (or (not (deployment-priced? record)) *deployment-payments?*) t 'yason:false)
        "deployed" (gethash "deployed" record)
        "payee" (and owner? (gethash "payee" record)))))
-
-(defun clip-line (text limit)
-  "TEXT on one line, its ends trimmed, LIMIT characters at most."
-  (let ((line (string-trim " " (substitute-if #\space #'(lambda (c) (member c '(#\newline #\return #\tab)))
-                                              (if (stringp text) text "")))))
-    (subseq line 0 (min limit (length line)))))
 
 (defvar *deploy-lock* (bt:make-lock "prompt-lab deployments"))
 
@@ -177,11 +156,6 @@ never deployed.  Never signals."
 ;; where a payment gateway plugs in (charge-toll!).
 ;;
 
-(defun valid-toll? (toll)
-  (and (listp toll) (keywordp (ignore-errors (getf toll :key)))
-       (stringp (getf toll :label))
-       (integerp (getf toll :cents)) (not (minusp (getf toll :cents)))))
-
 (defvar *built-tolls* (make-hash-table :test #'equal)
   "Package name -> (stamp tolls file-tolls): what the object built there
 declares, as of the compile the stamp dates.")
@@ -219,19 +193,10 @@ with a price, and for a model a download that toll stands on."
          (or (eq (session-kind session) :app) (file-prices tolls file-tolls))
          t)))
 
-(defun file-prices (tolls file-tolls)
-  "Alist of download format (a string) and cents, from TOLLS and FILE-TOLLS."
-  (loop for (format key) on file-tolls by #'cddr
-        for toll = (find key tolls :key #'(lambda (toll) (getf toll :key)))
-        when (and toll (symbolp format) (plusp (getf toll :cents)))
-          collect (cons (string-downcase (symbol-name format)) (getf toll :cents))))
-
 (defun deployment-file-price (record format)
   "What deployed model RECORD asks for a download in FORMAT, in cents; nil
 when that one is free."
-  (let ((prices (gethash "file_prices" record)))
-    (and (hash-table-p prices)
-         (let ((cents (gethash format prices))) (and (realp cents) (plusp cents) cents)))))
+  (monocle:record-file-price record format))
 
 (defun deploy-session! (session &key name title blurb payee)
   "Deploy what SESSION built as NAME.  Values: the record, or nil and the
@@ -250,7 +215,6 @@ terms."
            (prices (unless app?
                      (multiple-value-bind (tolls file-tolls) (built-tolls session)
                        (file-prices tolls file-tolls))))
-           (price (reduce #'max prices :key #'cdr :initial-value 0))
            (payee (clip-line payee 200))
            (symbol (ignore-errors (built-symbol session))))
       (cond
@@ -274,31 +238,18 @@ terms."
          (values nil "Say where your share is to be paid: an email address we can reach you at."))
         (t
          (let* ((directory (deployment-directory name))
-                (record (h "version" 1
-                           "name" name
-                           "title" (let ((title (clip-line title 80))) (if (plusp (length title)) title name))
-                           "blurb" (clip-line blurb 400)
-                           "session" (session-id session)
-                           "owner" (session-owner session)
-                           "kind" (kind-name (session-kind session))
-                           ;; what it runs on: revenue is reported by runtime
-                           "engine" (engine-name)
-                           "lisp" (lisp-name)
-                           "closed" (if closed? t 'yason:false)
-                           ;; a model's downloads that cost, and the most any does
-                           "file_prices" (let ((table (make-hash-table :test #'equal)))
-                                           (loop for (format . cents) in prices
-                                                 do (setf (gethash format table) cents))
-                                           table)
-                           "price_cents" price
-                           "fee_percent" (house-fee-percent closed?)
-                           "payee" payee
-                           "created" (or (and existing (gethash "created" existing)) (get-universal-time))
-                           "deployed" (get-universal-time))))
+                ;; the terms as they stand today, what it runs on (revenue
+                ;; is reported by runtime), a model's downloads that cost;
+                ;; and the lab's own: the session it came from and its kind
+                (record (monocle:make-record (lab-house)
+                                             :name name :title title :blurb blurb
+                                             :owner (session-owner session) :payee payee
+                                             :closed? closed? :file-prices prices :existing existing
+                                             :fields (list "session" (session-id session)
+                                                           "kind" (kind-name (session-kind session))))))
            (ensure-directories-exist directory)
            (write-text-file (model-body session) (merge-pathnames "model.lisp" directory))
-           (write-text-file (with-output-to-string (out) (yason:encode record out))
-                            (merge-pathnames "deployment.json" directory))
+           (monocle:save-record! (lab-house) record)
            (drop-deployed! name)
            (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee."
                       name (deployment-url name) closed? (house-fee-percent closed?))
@@ -313,8 +264,7 @@ nil and the reason.  The books keep what it earned."
             ((not (and (stringp owner-key) (equal (gethash "owner" record) owner-key)))
              (values nil "Only its owner may take a deployment down."))
             (t (drop-deployed! name)
-               (uiop:delete-directory-tree (pathname (deployment-directory name))
-                                           :validate t :if-does-not-exist :ignore)
+               (monocle:delete-deployment! (lab-house) name)
                t)))))
 
 
@@ -395,135 +345,35 @@ have its file in FORMAT."
 ;; settled a payment; nothing here takes money.
 ;;
 
-(defun revenue-file () (merge-pathnames "revenue.jsonl" *deployed-root*))
+(defun revenue-file () (monocle:revenue-file (lab-house)))
 
-(defun exact-cents (amount)
-  "AMOUNT as the books write it: exact, never rounded to the cent on a
-line -- a small toll's fee is a fraction of one, and the sums are what
-get rounded."
-  (if (integerp amount) amount (float amount)))
+(defun book-revenue! (name gross-cents &rest keys &key reference toll test? (card-cents 0))
+  "Book a payment of GROSS-CENTS to deployment NAME in the lab's books
+(monocle:book-revenue!, which says what each argument is).  Returns the
+line booked."
+  (declare (ignore reference toll test? card-cents))
+  (apply #'monocle:book-revenue! (lab-house) name gross-cents keys))
 
-(defun book-revenue! (name gross-cents &key reference toll test? (card-cents 0))
-  "Book a payment of GROSS-CENTS to deployment NAME.  CARD-CENTS is what
-it cost to take the payment by card -- for a toll paid from a prepaid
-balance, the payment's share of what the balance's purchase cost -- and
-comes OFF THE TOP: the house's fee and the author's share are split from
-what is left, so each bears the card cost in its own proportion.
-REFERENCE is the payment's id at whoever settled it, TOLL the name of the
-tollbooth it was paid at, TEST? true for a payment no money moved for
-(the reports leave those out).  Returns the line booked."
-  (let* ((record (or (deployment-record name) (error "There is no deployment ~a." name)))
-         (closed? (truthy? (gethash "closed" record)))
-         (percent (or (gethash "fee_percent" record) (house-fee-percent closed?)))
-         (net (- gross-cents card-cents))
-         (fee (/ (* net percent) 100))
-         (line (h "time" (get-universal-time)
-                  "name" name
-                  "engine" (gethash "engine" record)
-                  "lisp" (gethash "lisp" record)
-                  "closed" (if closed? t 'yason:false)
-                  "test" (if test? t 'yason:false)
-                  "toll" toll
-                  "gross_cents" gross-cents
-                  "card_cents" (exact-cents card-cents)
-                  "fee_percent" percent
-                  ;; the house's fee as kept, after its share of the card
-                  ;; cost, and as it stood before that share
-                  "fee_cents" (exact-cents fee)
-                  "fee_before_card_cents" (exact-cents (/ (* gross-cents percent) 100))
-                  "payee_cents" (exact-cents (- net fee))
-                  "payee" (gethash "payee" record)
-                  "reference" reference)))
-    (bt:with-lock-held (*deploy-lock*)
-      (ensure-directories-exist (revenue-file))
-      (with-open-file (out (revenue-file) :direction :output :if-exists :append
-                                          :if-does-not-exist :create :external-format :utf-8)
-        (yason:encode line out)
-        (terpri out)))
-    line))
-
-(defun revenue-lines ()
-  (let ((file (revenue-file)))
-    (when (probe-file file)
-      (with-open-file (in file :external-format :utf-8)
-        (loop for text = (read-line in nil) while text
-              for line = (ignore-errors (yason:parse text))
-              when (hash-table-p line) collect line)))))
+(defun revenue-lines () (monocle:revenue-lines (lab-house)))
 
 (defun payables (&key tests?)
   "What the books say each author is owed, all time: a list of plists
-(:payee :name :payments :payee-cents), one per deployment.  What has been
-paid out is not kept here: whoever disburses keeps that."
-  (let ((sums nil))
-    (dolist (line (revenue-lines) (sort sums #'string< :key #'(lambda (sum) (getf sum :name))))
-      (when (or tests? (not (gethash "test" line)))
-        (let* ((name (gethash "name" line))
-               (sum (or (find name sums :key #'(lambda (sum) (getf sum :name)) :test #'equal)
-                        (first (push (list :payee (gethash "payee" line) :name name
-                                           :payments 0 :payee-cents 0)
-                                     sums)))))
-          (incf (getf sum :payments))
-          (incf (getf sum :payee-cents) (gethash "payee_cents" line)))))))
-
-(defun line-quarter (line)
-  "The year and quarter (1-4, UTC) of a line of the books, as a list."
-  (multiple-value-bind (s m hour d month year) (decode-universal-time (gethash "time" line) 0)
-    (declare (ignore s m hour d))
-    (list year (1+ (floor (1- month) 3)))))
+(:payee :name :payments :payee-cents), one per deployment."
+  (monocle:payables (lab-house) :tests? tests?))
 
 (defun earnings (name &key tests?)
   "What deployment NAME has taken, quarter by quarter, the latest first: a
 list of plists (:year :quarter :payments :gross-cents :card-cents
-:fee-cents :payee-cents).  The author's share accumulates through a
-quarter and is paid out after it."
-  (let ((sums nil))
-    (dolist (line (revenue-lines)
-                  (sort sums #'> :key #'(lambda (sum) (+ (* 4 (getf sum :year)) (getf sum :quarter)))))
-      (when (and (equal (gethash "name" line) name) (or tests? (not (gethash "test" line))))
-        (destructuring-bind (year quarter) (line-quarter line)
-          (let ((sum (or (find-if #'(lambda (sum) (and (eql (getf sum :year) year) (eql (getf sum :quarter) quarter)))
-                                  sums)
-                         (first (push (list :year year :quarter quarter :payments 0 :gross-cents 0
-                                            :card-cents 0 :fee-cents 0 :payee-cents 0)
-                                      sums)))))
-            (incf (getf sum :payments))
-            (incf (getf sum :gross-cents) (gethash "gross_cents" line))
-            (incf (getf sum :card-cents) (or (gethash "card_cents" line) 0))
-            (incf (getf sum :fee-cents) (gethash "fee_cents" line))
-            (incf (getf sum :payee-cents) (gethash "payee_cents" line))))))))
+:fee-cents :payee-cents)."
+  (monocle:earnings (lab-house) name :tests? tests?))
 
 (defun revenue-report (&key year quarter tests?)
   "The books summed by runtime -- the Lisp and the engine (\"gendl\", or
 \"solid\" for one with the solids kernel) -- for YEAR and QUARTER (1-4,
 UTC) when given: a list of plists (:lisp :engine :payments :gross-cents
 :card-cents :fee-cents :fee-before-card-cents :payee-cents), one per
-runtime.  :fee-cents is the house's revenue from that runtime as kept,
-:fee-before-card-cents the same before its share of the card cost.  Test
-payments are left out unless TESTS?."
-  (let ((sums nil))
-    (dolist (line (revenue-lines) (sort sums #'string< :key #'(lambda (sum) (getf sum :lisp))))
-      (multiple-value-bind (s m hour d month line-year) (decode-universal-time (gethash "time" line) 0)
-        (declare (ignore s m hour d))
-        (when (and (or tests? (not (gethash "test" line)))
-                   (or (null year) (eql year line-year))
-                   (or (null quarter) (eql quarter (1+ (floor (1- month) 3)))))
-          (let* ((lisp (or (gethash "lisp" line) "unknown"))
-                 (engine (or (gethash "engine" line) "unknown"))
-                 (sum (or (find-if #'(lambda (sum) (and (equal (getf sum :lisp) lisp)
-                                                        (equal (getf sum :engine) engine)))
-                                   sums)
-                          (first (push (list :lisp lisp :engine engine :payments 0 :gross-cents 0
-                                             :card-cents 0 :fee-cents 0 :fee-before-card-cents 0
-                                             :payee-cents 0)
-                                       sums)))))
-            (incf (getf sum :payments))
-            (incf (getf sum :gross-cents) (gethash "gross_cents" line))
-            (incf (getf sum :card-cents) (or (gethash "card_cents" line) 0))
-            (incf (getf sum :fee-cents) (gethash "fee_cents" line))
-            ;; a line older than the field: no card cost was booked
-            (incf (getf sum :fee-before-card-cents)
-                  (or (gethash "fee_before_card_cents" line) (gethash "fee_cents" line)))
-            (incf (getf sum :payee-cents) (gethash "payee_cents" line))))))))
+runtime.  Test payments are left out unless TESTS?."
+  (monocle:revenue-report (lab-house) :year year :quarter quarter :tests? tests?))
 
 
 ;;

@@ -135,6 +135,13 @@ thing this check should report instead."
         (lisp-implementation-type) (lisp-implementation-version) *gendl-version*)
 
 (pushnew (namestring *demos-dir*) ql:*local-project-directories* :test #'equalp)
+;;; The prompt lab depends on Monocle, a repository of its own: a stack
+;;; host registers its checkout beside the demos', and so does this job
+;;; (MONOCLE_DIR), unless the image's own Quicklisp tree carries it.
+(let ((monocle (uiop:getenv "MONOCLE_DIR")))
+  (when (and monocle (plusp (length monocle)))
+    (pushnew (namestring (uiop:ensure-directory-pathname monocle))
+             ql:*local-project-directories* :test #'equalp)))
 (ql:register-local-projects)
 
 ;;;

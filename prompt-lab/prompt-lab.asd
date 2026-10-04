@@ -7,7 +7,8 @@
  :author "Genworks International" :license
  "Affero Gnu Public License (http://www.gnu.org/licenses/)" :serial t
  :version "20261003" :depends-on
- (:gwl-graphics :yason :alexandria :babel :demos-common) :components
+ (:gwl-graphics :yason :alexandria :babel :demos-common :monocle)
+ :components
  ((:file "source/package") (:file "source/parameters")
   (:file "source/session") (:file "source/archive")
   (:file "source/raster") (:file "source/tools")

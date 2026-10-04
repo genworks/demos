@@ -47,6 +47,12 @@
 stages:
   - load
 
+# The prompt lab depends on Monocle, which has a repository of its own.
+# Each job fetches its source as an archive (the images carry curl and
+# tar, not git) and names the directory to ci/cold-load.lisp.
+variables:
+  MONOCLE_ARCHIVE: "https://gitlab.common-lisp.net/monocle/monocle/-/archive/master/monocle-master.tar.gz"
+
 cold-load:
   stage: load
   image: genworks/gendl:devo-ccl
@@ -59,8 +65,10 @@ cold-load:
     # system-index.txt beside the .asd files, and the build directory
     # belongs to the runner's helper rather than the image's user.
     - rm -rf /tmp/demos && cp -r "$CI_PROJECT_DIR" /tmp/demos
+    - rm -rf /tmp/monocle && mkdir /tmp/monocle
+    - curl -fsSL "$MONOCLE_ARCHIVE" | tar xz --strip-components=1 -C /tmp/monocle
     - cd /opt/gendl
-    - DEMOS_DIR=/tmp/demos ./gdl/program/gdl-ccl -n -b --load /tmp/demos/ci/cold-load.lisp
+    - MONOCLE_DIR=/tmp/monocle DEMOS_DIR=/tmp/demos ./gdl/program/gdl-ccl -n -b --load /tmp/demos/ci/cold-load.lisp
 
 # Genworks GDL: the rolling betatest image, which is private, so this
 # job runs on the amd64 SHELL runner, whose own Docker login pulls it,
@@ -79,8 +87,10 @@ cold-load-gdl:
   script:
     - docker pull "$GDL_IMAGE"
     - docker rm -f demos-cold-load-gdl >/dev/null 2>&1 || true
+    - rm -rf "$CI_PROJECT_DIR.monocle" && mkdir "$CI_PROJECT_DIR.monocle"
+    - curl -fsSL "$MONOCLE_ARCHIVE" | tar xz --strip-components=1 -C "$CI_PROJECT_DIR.monocle"
     - >
       timeout 1500 docker run --rm --name demos-cold-load-gdl
-      -v "$CI_PROJECT_DIR":/src:ro --entrypoint bash "$GDL_IMAGE"
-      -c 'cp -r /src /tmp/demos && cd /opt/genworks-gdl && DEMOS_DIR=/tmp/demos ./gdl/program/gdl -batch -L /tmp/demos/ci/cold-load.lisp'
+      -v "$CI_PROJECT_DIR":/src:ro -v "$CI_PROJECT_DIR.monocle":/monocle-src:ro --entrypoint bash "$GDL_IMAGE"
+      -c 'cp -r /src /tmp/demos && cp -r /monocle-src /tmp/monocle && cd /opt/genworks-gdl && MONOCLE_DIR=/tmp/monocle DEMOS_DIR=/tmp/demos ./gdl/program/gdl -batch -L /tmp/demos/ci/cold-load.lisp'
       || { status=$?; docker rm -f demos-cold-load-gdl >/dev/null 2>&1 || true; exit $status; }

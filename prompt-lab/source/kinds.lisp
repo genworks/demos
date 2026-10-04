@@ -235,16 +235,13 @@ now, inputs and all.  A format named in file-tolls wants its toll paid."
           (str (or label (format nil "~:@(~a~) file" format))))))))
 
 ;;
-;; Taking a toll.  *toll-provider* says how: :test grants the payment on
-;; the spot and books it marked as a test (deploy.lisp), for a lab with no
-;; payment gateway behind it; nil takes none.  A session's own preview of
-;; its app (no deployment-name) is always granted and never booked.
+;; Taking a toll.  *toll-provider* (parameters.lisp) says how: :test
+;; grants the payment on the spot and books it marked as a test, for a
+;; lab with no payment gateway behind it; nil takes none.  A session's
+;; own preview of its app (no deployment-name) is always granted and
+;; never booked.  The taking is Monocle's (monocle:charge-toll!, whose
+;; take-toll is where a payment provider is written).
 ;;
-
-(defparameter *toll-provider* :test
-  "Keyword or nil. How a deployed app's tolls are taken: :test (granted at
-once, booked as a test payment: no money moves), or nil (no toll can be
-paid).  A real provider is the gate's to add.")
 
 (defun toll-mode-note (app)
   (cond ((null (the-object app deployment-name)) " (preview: no charge)")
@@ -253,17 +250,8 @@ paid).  A real provider is the gate's to add.")
 
 (defun charge-toll! (app toll)
   "Take TOLL from the visitor of APP.  True when it is paid."
-  (let ((name (the-object app deployment-name))
-        (cents (getf toll :cents)))
-    (cond ((null name) t)
-          ((not (and (integerp cents) (plusp cents))) t)
-          ((eq *toll-provider* :test)
-           (ignore-errors
-            (book-revenue! name cents :test? t
-                                      :toll (format nil "~(~a~)" (getf toll :key))
-                                      :reference (format nil "test:~a" (the-object app instance-id))))
-           t)
-          (t nil))))
+  (monocle:charge-toll! (lab-house) (the-object app deployment-name) toll
+                        :reference (the-object app instance-id)))
 
 (defun app-url (session &key owner-key)
   "Where SESSION's web app opens.  A private session's needs its owner's

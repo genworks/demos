@@ -9,6 +9,11 @@
 (in-package :gdl-user)
 
 (gwl:define-package :prompt-lab
+    ;; Monocle keeps the deployments' records, the tolls and the books
+    ;; (deploy.lisp); these of its names are used bare
+    (:import-from :monocle
+                  #:truthy? #:clip-line #:lisp-name
+                  #:deployment-name? #:valid-toll? #:file-prices)
     (:export #:make-session
              #:find-session
              #:delete-session
