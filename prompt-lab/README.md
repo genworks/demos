@@ -118,6 +118,23 @@ Monetize flow: a closed session that ends without a deployment
 **reverts**, and goes into the public archive under the AGPL like any
 other.  `*closed-source?*` nil offers no such choice.
 
+**What the lab makes is not AGPL because the lab is.**  The lab is
+under the AGPL; what it writes for a visitor is the visitor's, under
+whatever licence the code it USES allows -- the tool that wrote it has
+no say, as a compiler has none over what it compiles.  An application
+that uses no Gendl and no other AGPL or GPL code goes out under its
+author's own licence, closed included (hosting one is Monocle's
+business: [clo/monocle](https://gitlab.common-lisp.net/clo/monocle),
+`PROFILE.md`, "Licences").
+
+The models and web apps the lab builds today do use Gendl at run time
+-- a model is a Gendl object, a web app a GWL page -- and Gendl is
+under the AGPL, so a hosted deployment of one must offer its source to
+the people who use it.  That is why the closed choice exists: a closed
+deployment is possible only where the house can license Gendl for
+closed use, and the higher fee is that licence.  A lab whose house
+cannot (`*closed-source?*` nil) offers open source alone.
+
 **Where the money is taken is the author's to decide.**
 
 - A web app has **tollbooths**, which the author asks the agent to put

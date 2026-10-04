@@ -298,6 +298,11 @@ SESSION's balance -- or nil."
 .pl-card{background:var(--pl-panel,#fff);color:var(--pl-ink,#111);border:var(--pl-rule,1px) solid var(--pl-line,#ccc);border-radius:var(--pl-radius,4px);padding:.6rem}
 .pl-card h2{font-size:.85rem;margin:0 0 .4rem;font-family:var(--pl-font-label);font-weight:var(--pl-label-weight,700);text-transform:var(--pl-label-case);letter-spacing:var(--pl-label-tracking)}
 .sluice-tile .pl-card{border:0;border-radius:0}
+.pl-app-host{display:contents}
+#sluice-panes:has(#pl-app-stage){display:flex!important}
+#sluice-panes:has(#pl-app-stage)>div:not(.pl-app-host),#sluice-panes:has(#pl-app-stage)>.sluice-split{display:none!important}
+#pl-app-stage{flex:1 1 auto;display:flex;min-width:0;min-height:0;background:#fff}
+#pl-app-stage iframe{flex:1 1 auto;width:100%;height:100%;border:0;background:#fff}
 #pl-prompt{width:100%;box-sizing:border-box;font:inherit;padding:.4rem;background:var(--pl-panel,#fff);color:var(--pl-ink,#111);border:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd);border-radius:var(--pl-radius,4px)}
 .pl-row{display:flex;gap:.8rem;align-items:center;margin-top:.5rem}
 .pl-build{padding:.35rem 1.2rem;font:inherit;background:var(--pl-accent,#366fc5);color:var(--pl-accent-ink,#fff);border:0;border-radius:var(--pl-radius,4px);cursor:pointer;font-weight:var(--pl-label-weight,700);text-transform:var(--pl-label-case)}
@@ -404,6 +409,11 @@ calls; an edit in progress keeps its text and says the file changed.")
 
 (defparameter *sheet-ui-script*
   "(function(){
+// the web app's stage (app-stage): its section moves into the pane grid,
+// where the stream still finds it by its id
+function plStageApp(){var h=document.querySelector('.pl-app-host'),p=document.getElementById('sluice-panes');
+ if(h&&p&&h.parentNode!==p)p.appendChild(h)}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',plStageApp);else plStageApp();
 // a toast: a line at the foot of the screen for a few seconds, wherever
 // the page stands (a phone's other tab included)
 var timer=null;
@@ -546,6 +556,10 @@ not hold."
                 (list :object (the credits-section) :place :left :tab "Prompt")
                 (list :object (the downloads-section) :place :left :tab "Prompt")
                 (list :object (the log-section) :place :left :tab "Prompt")
+                ;; its section moves into the panes (plStageApp), so it
+                ;; shows with the Model tab whatever this says; "Code" keeps
+                ;; the region under the panes off the phone's Model tab
+                (list :object (the app-stage) :place :under-panes :tab "Code")
                 (list :object (the editor-tile) :place :under-panes :tab "Code")))
    (tabs (list "Prompt" "Model" "Parts" "Code"))
    (head-html (the lab-head-html))
@@ -742,7 +756,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               ;; opens with the first build or upload (deploy.lisp)
                               (when (and *closed-source?* *deployments?*)
                                 (htm (:label :class "pl-pick pl-closed" :style "display:none" :|data-show| "!$opened"
-                                             :data-doc "Closed source: nobody else sees the session, and what you deploy from it does not serve its source.  If you do not deploy it, its source becomes public when the session ends."
+                                             :data-doc "Closed source: nobody else sees the session, and what you deploy from it does not serve its source, under a closed-source licence for the Gendl it runs on, which comes with the higher fee.  If you do not deploy it, its source becomes public when the session ends."
                                              ;; closed-pick: an attribute's name reaches Datastar
                                              ;; in lower case, and it reads the hyphen as closedPick
                                              (:input :type "checkbox" :id "pl-closed" :|data-bind:closed-pick| "")
@@ -846,7 +860,35 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                            "Open the app")
                                        (str (if (the owner?)
                                                 "  -- the page your prompts built.  It opens afresh from the model file each time."
-                                                "  -- a page built by this session's visitor, not by Genworks."))))))))))
+                                                (format nil "  -- a page built by this session's visitor, not by ~a." *brand*)))))))))))
+
+   ;; THE STAGE: a session that builds a web app shows the app itself,
+   ;; live in a frame, where a model's drawing would be -- the tree and
+   ;; inspector stay beside it.  A tile under the panes whose section
+   ;; (pl-app-host) the page's script moves into the pane grid
+   ;; (plStageApp); while it holds the frame, *sheet-css* hides the
+   ;; panes' cells and gives it their room, and the divider to the
+   ;; model file under them works as it does for a drawing.  The stream
+   ;; patches a section by its id wherever it stands.  Keyed to the
+   ;; model's stamp, not the log's revision, so the app reloads when it
+   ;; is rebuilt and not at every line the agent writes.  The frame is
+   ;; the app door's own instance of APP: the inspector beside it looks
+   ;; at the sluice's instance, so an edit there does not reach it.
+   (app-stage
+    :type 'base-html-div
+    :div-class "pl-app-host"
+    :inner-html (progn
+                  (the model-stamp)
+                  (let ((session (the session)))
+                    (with-lhtml-string ()
+                      (when (app-staged? session)
+                        (htm (:div :id "pl-app-stage"
+                                   (:iframe :title "The web app this session built"
+                                            :src (format nil "~a&v=~a"
+                                                         (app-url session
+                                                                  :owner-key (and (session-private? session) (the owner?)
+                                                                                  (the owner-key)))
+                                                         (or (the model-stamp) 0))))))))))
 
    ;; Monetize (deploy.lisp): the owner deploys what the session built
    ;; at an address of its own, on terms of their choosing.  Like the
@@ -880,10 +922,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              (:textarea :rows "2" :maxlength "400" :|data-bind:dblurb| ""))
                                      ;; the source terms were the session's choice as it opened
                                      (:p :class "pl-line" :|data-show| "!$closed"
-                                         (fmt "Open source, under the GNU Affero General Public License: the deployment serves its source.  Of what its users pay, in ~a, ~d% is the monetization fee."
+                                         (fmt "Open source, under the GNU Affero General Public License: it runs on Gendl, which is under that licence, so the deployment serves its source to the people who use it.  Of what its users pay, in ~a, ~d% is the monetization fee."
                                               (units) (house-fee-percent nil)))
                                      (:p :class "pl-line" :|data-show| "$closed"
-                                         (fmt "Closed source, as you chose when the session opened: the deployment does not serve its source.  Of what its users pay, in ~a, ~d% is the monetization fee."
+                                         (fmt "Closed source, as you chose when the session opened: the house licenses the Gendl it runs on for closed use, so the deployment does not serve its source.  Of what its users pay, in ~a, ~d% is the monetization fee."
                                               (units) (house-fee-percent t)))
                                      ;; the author's slider: points of every payment, on top of
                                      ;; the fee, for the community pot (deploy.lisp)
@@ -1212,20 +1254,25 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     ;; sluice hears that itself (refresh-redefined!) and redraws
     ;; A web app without a MODEL (kinds.lisp) opens the sluice on APP
     ;; itself: the page's own tree, its controls and sections.
+    ;; A session that builds a web app opens it on APP, the page, even
+    ;; when it holds a MODEL: the app is on the stage (app-stage), and
+    ;; the tree shows what the page is made of.
     (let* ((session (the session))
-           (symbol (and session (cond ((model-defined? session) (model-symbol session))
+           (symbol (and session (cond ((app-staged? session) (app-symbol session))
+                                      ((model-defined? session) (model-symbol session))
                                       ((app-defined? session) (app-symbol session))))))
       (when (and symbol (not (eq (the root-object-type) symbol)))
         (the (set-slot! :root-object-type symbol))
         ;; hidden lines removed up to *hidden-lines-max-leaves* leaves
         ;; (quadratic in the edges; a pane's View > Hidden lines turns it on for
         ;; a larger model), and the model's leaves drawn
-        (when (and (the root-object)
-                   (<= (or (ignore-errors (length (the root-object leaves))) 0)
-                       *hidden-lines-max-leaves*))
-          (ignore-errors (the viewport (set-slot! :hidden-lines :remove))))
-        (when (the root-object)
-          (ignore-errors (the viewport (draw-leaves! (the root-object))))))))
+        (unless (app-staged? session)
+          (when (and (the root-object)
+                     (<= (or (ignore-errors (length (the root-object leaves))) 0)
+                         *hidden-lines-max-leaves*))
+            (ignore-errors (the viewport (set-slot! :hidden-lines :remove))))
+          (when (the root-object)
+            (ignore-errors (the viewport (draw-leaves! (the root-object)))))))))
 
    (wear-skin
     (signals)

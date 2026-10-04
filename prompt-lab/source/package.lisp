@@ -28,6 +28,9 @@
              #:viewer
              #:web-app
              #:*kinds*
+             #:*brand*
+             #:*session-header*
+             #:*unit*
              #:*deployments?*
              #:*deployment-payments?*
              #:*house-fee-percents*

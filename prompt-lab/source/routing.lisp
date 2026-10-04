@@ -116,7 +116,7 @@ for any call."
            (post-json *messages-url* (the request)
                       :headers (append (list (cons "anthropic-version" "2023-06-01"))
                                        (when key (list (cons "x-api-key" key)))
-                                       (list (cons "X-Prompt-Lab-Session" (session-id session)))
+                                       (list (cons *session-header* (session-id session)))
                                        (when (session-wallet session)
                                          (list (cons *wallet-header* (session-wallet session)))))
                       :seconds *classify-seconds*)

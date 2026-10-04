@@ -149,9 +149,11 @@ is, and the balance door reports both before the first build.")
 (defparameter *unit* '("rivet" . "rivets")
   "Cons of strings, singular and plural. What the page calls the unit
 builds, and a deployed app's tollbooths, are paid in -- bought in packets,
-given free, or drawn from a community pot.  A rivet is Genworks' own
-currency: what a packet buys, and what a rivet is worth when an author is
-paid, may change (monocle:payout-amount).  One name, said in one place:
+given free, or drawn from a community pot.  The unit is the house's own
+currency (Genworks' rivet, common-lisp.net's mite): what a packet buys,
+and what one is worth when an author is paid, may change
+(monocle:payout-amount).  Its plural is also the key a toll's price is
+written under (unit-key).  One name, said in one place:
 the doors' field names (credits, credits_used ...) and the gate's are
 program names and stay as they are.")
 
@@ -159,20 +161,35 @@ program names and stay as they are.")
   "The unit's name for COUNT of them: rivets, or one rivet."
   (if (eql count 1) (car *unit*) (cdr *unit*)))
 
+(defun unit-key ()
+  "The unit as Monocle and a toll's declaration name it: :rivets, :mites
+or :cents."
+  (or (find (cdr *unit*) '(:rivets :mites :cents) :test #'string-equal)
+      (error "prompt-lab:*unit* ~s names no unit Monocle knows" *unit*)))
+
+(defparameter *brand* "Genworks"
+  "String. Whose prompt lab this is, as the agent's brief and the page
+name it: the Genworks prompt lab.")
+
+(defparameter *session-header* "X-Prompt-Lab-Session"
+  "String. The header that names a session to the gate (the gate rule's
+:session-header).")
+
 (defun units-title ()
   "The unit's name as a heading: Rivets."
   (string-capitalize (units)))
 
 (defun unit-text (text)
-  "TEXT with {units} read as the unit's name and {Units} as the same,
-capitalised: how a message or a format control names the unit."
+  "TEXT with {units} read as the unit's name, {Units} as the same
+capitalised and {unit} as one of them: how a message or a format control
+names the unit."
   (flet ((swap (text mark word)
            (loop for at = (search mark text)
                  while at
                  do (setq text (concatenate 'string (subseq text 0 at) word
                                             (subseq text (+ at (length mark)))))
                  finally (return text))))
-    (swap (swap text "{units}" (units)) "{Units}" (units-title))))
+    (swap (swap (swap text "{units}" (units)) "{Units}" (units-title)) "{unit}" (units 1))))
 
 (defparameter *pot-refresh-seconds* 10
   "Integer. How old what the lab knows of the gate's community pot may get
@@ -301,16 +318,16 @@ paid).  A real provider is the gate's to add.")
 
 (defparameter *pot-percent-least* 0
   "Number or nil. The least an author adds of every payment to the lab's
-community pot of rivets, in percentage points on top of the monetization
+community pot, in percentage points on top of the monetization
 fee; the Monetize tile's slider starts here and goes up.  Nil: no slider,
 and nothing goes to the pot.  The fee itself is the house's.")
 
 (defun lab-house ()
   "This lab as Monocle knows it: where its deployments and books are kept,
-the engine and the Lisp they run on, its unit (rivets), the fees, the
+the engine and the Lisp they run on, its unit (*unit*), the fees, the
 community pot's least share and the toll provider, as the parameters
 above stand now."
-  (monocle:make-house :root *deployed-root* :runtime (engine-name) :unit :rivets
+  (monocle:make-house :root *deployed-root* :runtime (engine-name) :unit (unit-key)
                       :fee-percents *house-fee-percents* :pot-percent *pot-percent-least*
                       :provider *toll-provider*))
 

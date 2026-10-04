@@ -197,7 +197,7 @@ with a price, and for a model a download that toll stands on."
          t)))
 
 (defun deployment-file-price (record format)
-  "What deployed model RECORD asks for a download in FORMAT, in rivets;
+  "What deployed model RECORD asks for a download in FORMAT, in the lab's unit;
 nil when that one is free."
   (monocle:record-file-price record format))
 
@@ -445,7 +445,7 @@ it -- and the same for its test payments, apart."
          (record (and *deployments?* (stringp name) (deployment-record name))))
     (cond ((null record) (refuse req ent net.aserve:*response-not-found* "There is no such deployment."))
           ((not (and (stringp key) (equal (gethash "owner" record) key))) (not-yours req ent))
-          ;; the amounts are in the lab's unit and named for it: gross_rivets ...
+          ;; the amounts are in the lab's unit and named for it: gross_rivets, gross_mites ...
           (t (flet ((quarters (sums)
                       (let ((house (lab-house)))
                         (flet ((amount (sum stem) (or (getf sum (monocle:amount-key house stem)) 0))
@@ -470,7 +470,7 @@ it -- and the same for its test payments, apart."
                                   "quarters" (quarters real)
                                   ;; test payments included: no money moved for those
                                   "quarters_with_tests" (quarters all)
-                                  "paid_out" (unit-text "Held in {units}, and paid out after a quarter once the share owed has reached the house's minimum, at that day's rate for a rivet; a smaller sum carries to the next.")))))))))
+                                  "paid_out" (unit-text "Held in {units}, and paid out after a quarter once the share owed has reached the house's minimum, at that day's rate for a {unit}; a smaller sum carries to the next.")))))))))
 
 (defun app-file-door (req ent)
   "GET <prefix>/app-file?iid=<instance>&format=<name>: a web app's model as

@@ -56,7 +56,7 @@ nil.  Compared, never interned: the name comes from a request."
 (defun session-kind (session)
   (or (bt:with-lock-held (*kinds-lock*)
         (gethash (session-package-name session) *session-kinds*))
-      :model))
+      (default-kind)))
 
 (defun set-session-kind! (session kind)
   "Make SESSION one that builds KIND.  A web app's source names GWL's
@@ -141,11 +141,11 @@ sections, and objects when it shows geometry."
 page without geometry."
     objects nil)
    ("List of plists, the app's tollbooths: what a visitor pays for.  Each
-is (:key <keyword> :label <string> :rivets <integer>) with :uses <n>
+is (:key <keyword> :label <string> <unit-key> <integer>) with :uses <n>
 (the payment covers n uses, spent with use-toll!) or :seconds <n> (it
 covers that long), or neither (it covers this visit).  The price is in
-rivets, the lab's own unit (an older :cents is read the same), and may
-be computed from the model."
+the lab's own unit, under its key (:rivets, :mites: unit-key; an older
+:cents is read the same), and may be computed from the model."
     tolls nil)
    ("Plist, download format keyword (:pdf :svg :png :step :iges :stl) to
 the key of the toll its file-link asks for; a format not named is free."
@@ -254,6 +254,11 @@ now, inputs and all.  A format named in file-tolls wants its toll paid."
   "Take TOLL from the visitor of APP.  True when it is paid."
   (monocle:charge-toll! (lab-house) (the-object app deployment-name) toll
                         :reference (the-object app instance-id)))
+
+(defun app-staged? (session)
+  "Whether SESSION's web app takes the lab page's stage, where a model's
+drawing would be: the session builds a web app and has defined APP."
+  (and session (eq (session-kind session) :app) (app-defined? session) t))
 
 (defun app-url (session &key owner-key)
   "Where SESSION's web app opens.  A private session's needs its owner's
@@ -412,8 +417,8 @@ the page says, cut at LIMIT characters."
                                                                             (getf toll :uses) (getf toll :seconds)))
                                                                 tolls)))
                                               (when bad-tolls
-                                                (format nil "ERROR: every toll is (:key <keyword> :label <string> :rivets <integer>), with :uses or :seconds if wanted: ~a."
-                                                        (monocle:toll-fault (first bad-tolls))))
+                                                (format nil "ERROR: every toll is (:key <keyword> :label <string> ~(~s~) <integer>), with :uses or :seconds if wanted: ~a."
+                                                        (unit-key) (monocle:toll-fault (first bad-tolls))))
                                               (when lost-tolls
                                                 (format nil "ERROR: file-tolls names tolls that tolls does not declare: ~{~(~a~)~^, ~}." lost-tolls))
                                               (when broken
@@ -487,7 +492,7 @@ it went into the brief; prove a change to it the same way.")
 
 (defun app-brief ()
   "The opening of the system prompt for a session that builds a web app."
-  (format nil "You are the agent of the Genworks prompt lab, and this session builds a WEB APP.  A visitor describes a small web application in plain words; you build it as a working page in GWL, Gendl's web layer, in their session.  It is served live at an address of its own, which the lab's page links as 'Open the app', and the visitor sees the same source file in an editor.
+  (format nil "You are the agent of the ~a prompt lab, and this session builds a WEB APP.  A visitor describes a small web application in plain words; you build it as a working page in GWL, Gendl's web layer, in their session.  It is served live at an address of its own, which the lab's page links as 'Open the app', and the visitor sees the same source file in an editor.
 
 How to work:
 1. Decide the page: what the visitor enters (form controls), what is computed from it, what is shown, and whether it shows geometry.
@@ -507,8 +512,11 @@ Rules for the page:
 - Html is cl-who: (str <string>) puts a string in, (fmt ..) a formatted one, (esc <string>) one that came from the visitor, and htm goes back to html inside a Lisp form.  A table of results is :table with :thead and :tbody.
 - Style with the classes the recipe uses (they are in the page's stylesheet; other utility classes may not be) and a :style attribute for anything else.
 - The page loads nothing from another site and carries no script of yours unless the request cannot be met without one.
-- Charging, when the visitor asks for it, is done with tollbooths, placed wherever they say.  Declare them in APP's input-slots: (tolls (list (list :key :cad :label \"STEP download\" :rivets 300 :uses 1))) -- with :uses n the payment covers n uses, with :seconds n it covers that long, with neither it covers this visit.  Prices are in rivets, the lab's own unit, which visitors buy in packets, never in money; at today's rate a rivet is a cent, so a visitor who asks for $3 means 300 rivets.  A price may be computed, from the model's size say.  (the (toll-button :cad)) is the booth, a pay button that turns into a paid line: put it in a section.  (the (toll-paid? :cad)) says whether to show what the toll guards, and (the (use-toll! :cad)) spends one use.  (the (file-link :step :label \"STEP file\")) is a link that downloads the first of objects as it stands, inputs and all (:pdf :svg :png anywhere; :step :iges :stl on a solids engine); name the format in (file-tolls (list :step :cad)) and the link wants that toll paid and spends a use of it.  The tollbooths are the app's payment points: the lab takes the payment at them.  Write no payment code of your own.  An app with at least one priced toll can be deployed with the Monetize button; say in your reply where the booths are, what they charge, and that Monetize now opens.
+- Charging, when the visitor asks for it, is done with tollbooths, placed wherever they say.  Declare them in APP's input-slots: (tolls (list (list :key :cad :label \"STEP download\" ~(~s~) 300 :uses 1))) -- with :uses n the payment covers n uses, with :seconds n it covers that long, with neither it covers this visit.  Prices are in ~a, the lab's own unit, which visitors buy in packets, never in money; at today's rate a ~a is a cent, so a visitor who asks for $3 means 300 ~a.  A price may be computed, from the model's size say.  (the (toll-button :cad)) is the booth, a pay button that turns into a paid line: put it in a section.  (the (toll-paid? :cad)) says whether to show what the toll guards, and (the (use-toll! :cad)) spends one use.  (the (file-link :step :label \"STEP file\")) is a link that downloads the first of objects as it stands, inputs and all (:pdf :svg :png anywhere; :step :iges :stl on a solids engine); name the format in (file-tolls (list :step :cad)) and the link wants that toll paid and spends a use of it.  The tollbooths are the app's payment points: the lab takes the payment at them.  Write no payment code of your own.  An app with at least one priced toll can be deployed with the Monetize button; say in your reply where the booths are, what they charge, and that Monetize now opens.
 - Name your own objects and functions with names of your own: a definition named like something Lisp, Gendl or GWL already has (start, publish, header, title ...) is refused.
 - Never include an in-package form."
+          *brand*
           (and (member :model *kinds*) t)
-          *app-recipe*))
+          *app-recipe*
+          ;; the lab's unit, in the charging rule
+          (unit-key) (units) (units 1) (units)))
