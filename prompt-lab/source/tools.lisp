@@ -30,12 +30,22 @@
 ;; Here the sleeper is stopped however the body ends, and it interrupts
 ;; nothing once the body has ended.
 ;;
+;; The timer is Gendl's, glisp:call-with-deadline, where the image has it.
+;; On an image built before Gendl carried it the copy below runs; drop
+;; the copy once every image the lab is served from has Gendl's.
+;;
 
 (define-condition time-up () ((mark :initarg :mark :reader time-up-mark)))
 
 (defun call-with-deadline (seconds function)
   "Call FUNCTION, signalling bt2:timeout in this thread if it has not
 returned within SECONDS."
+  (let ((gendls (find-symbol (symbol-name '#:call-with-deadline) :glisp)))
+    (if (and gendls (fboundp gendls))
+        (funcall gendls seconds function)
+        (own-call-with-deadline seconds function))))
+
+(defun own-call-with-deadline (seconds function)
   (let* ((caller (bt2:current-thread))
          (lock (bt2:make-lock :name "prompt-lab deadline"))
          (state :running)               ; then :fired or :done, under the lock
