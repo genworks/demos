@@ -18,11 +18,65 @@
 ;; built with (make-object 'model) and no arguments.
 ;;
 
+;;
+;; A timer of the lab's own.  bordeaux-threads' with-timeout starts a
+;; thread that sleeps and then interrupts the caller, and stops that
+;; thread only when its body ends NORMALLY: a body left by an error or a
+;; throw leaves the sleeper alive, and it interrupts the calling thread
+;; when its time is up, whatever that thread is doing by then.  The
+;; caller is often one of the web server's workers; on Clozure CL a
+;; worker interrupted while it waits for its next request never takes
+;; another, and the server stops answering when its turn comes round.
+;; Here the sleeper is stopped however the body ends, and it interrupts
+;; nothing once the body has ended.
+;;
+
+(define-condition time-up () ((mark :initarg :mark :reader time-up-mark)))
+
+(defun call-with-deadline (seconds function)
+  "Call FUNCTION, signalling bt2:timeout in this thread if it has not
+returned within SECONDS."
+  (let* ((caller (bt2:current-thread))
+         (lock (bt2:make-lock :name "prompt-lab deadline"))
+         (state :running)               ; then :fired or :done, under the lock
+         (delivered? nil)
+         (mark (list seconds))
+         (sleeper
+           (bt2:make-thread
+            #'(lambda ()
+                (sleep seconds)
+                (bt2:with-lock-held (lock)
+                  (when (eq state :running)
+                    (setq state :fired)
+                    (bt2:interrupt-thread caller
+                                          #'(lambda ()
+                                              (setq delivered? t)
+                                              (signal 'time-up :mark mark))))))
+            :name "prompt-lab deadline")))
+    (unwind-protect
+         (handler-bind ((time-up #'(lambda (condition)
+                                     (when (eq (time-up-mark condition) mark)
+                                       (error 'bt2:timeout :length seconds)))))
+           (funcall function))
+      (let ((fired? (bt2:with-lock-held (lock)
+                      (prog1 (eq state :fired)
+                        (when (eq state :running) (setq state :done))))))
+        (if fired?
+            ;; the interrupt is on its way: let it land here, where it
+            ;; finds no handler, and not on whatever this thread does next
+            (loop repeat 200 until delivered? do (sleep 0.01))
+            (when (bt2:thread-alive-p sleeper)
+              (ignore-errors (bt2:destroy-thread sleeper))))))))
+
+(defmacro with-deadline ((seconds) &body body)
+  "Run BODY, signalling bt2:timeout if it takes longer than SECONDS."
+  `(call-with-deadline ,seconds #'(lambda () ,@body)))
+
 (defmacro with-time-limit ((seconds what) &body body)
   "Run BODY, stopping it after SECONDS with an ordinary error naming WHAT,
 so the tool's own error handling reports it like any other failure."
-  `(handler-case (bt:with-timeout (,seconds) ,@body)
-     (bt:timeout ()
+  `(handler-case (with-deadline (,seconds) ,@body)
+     (bt2:timeout ()
        (error "The ~a took longer than ~a seconds and was stopped." ,what ,seconds))))
 
 (defun clip (string)

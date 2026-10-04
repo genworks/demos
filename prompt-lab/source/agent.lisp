@@ -207,7 +207,7 @@ answered within SECONDS."
       ;; tool call, a page's poll.  So the call runs under a timer of our
       ;; own as well, which does get the thread back there.
       (handler-case
-          (bt:with-timeout ((+ seconds 2))
+          (with-deadline ((+ seconds 2))
             (net.aserve.client:do-http-request url
               :method :post
               :content (babel:string-to-octets body :encoding :utf-8)
@@ -218,7 +218,7 @@ answered within SECONDS."
               :keep-alive nil
               :timeout seconds
               :ssl-args (let ((host (url-host url))) (and host (list :server-name host)))))
-        (bt:timeout ()
+        (bt2:timeout ()
           (error "~a did not answer within ~a seconds." (or (url-host url) url) seconds)))
     (values status
             (cond ((stringp answer) answer)
@@ -304,7 +304,7 @@ then comes unchunked to the close, and every line is handled the moment
 it is complete.  (zacl's client-request-read-sequence fails on a chunked
 answer, and a large read-sequence would wait to fill its buffer.)"
   (handler-case
-      (bt:with-timeout ((+ seconds 2))
+      (with-deadline ((+ seconds 2))
         (let ((creq (net.aserve.client:make-http-client-request
                      url
                      :method :post
@@ -353,7 +353,7 @@ answer, and a large read-sequence would wait to fill its buffer.)"
                                while byte do (vector-push-extend byte line))
                          (values status (babel:octets-to-string line :encoding :utf-8) response-headers)))))
             (ignore-errors (net.aserve.client:client-request-close creq)))))
-    (bt:timeout ()
+    (bt2:timeout ()
       (error "~a did not answer within ~a seconds." (or (url-host url) url) seconds))
     ;; any other failure on the way, said safely (condition-text)
     (error (condition)
