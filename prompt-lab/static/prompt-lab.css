@@ -68,7 +68,9 @@
 
   /* the viewer */
   --pl-viewport-bg: #ffffff;    /* the ground the model is drawn on */
-  --pl-viewport-filter: none;   /* a CSS filter over the line drawing: a dark skin inverts it */
+  --pl-viewport-filter: none;   /* a CSS filter over the line drawing */
+  --pl-part-l-min: 0;           /* how dark a part's own colour may be drawn (OKLCH lightness, 0-1) */
+  --pl-part-l-max: 1;           /* and how light: a dark skin raises the first, so no part sinks into its ground */
   --pl-viewport-image: none;    /* a background-image on that ground: a drawing sheet's grid */
   --pl-viewport-image-size: auto;   /* and its background-size */
 }

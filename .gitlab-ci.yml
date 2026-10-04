@@ -51,7 +51,7 @@ stages:
 # Each job fetches its source as an archive (the images carry curl and
 # tar, not git) and names the directory to ci/cold-load.lisp.
 variables:
-  MONOCLE_ARCHIVE: "https://gitlab.common-lisp.net/monocle/monocle/-/archive/master/monocle-master.tar.gz"
+  MONOCLE_ARCHIVE: "https://gitlab.common-lisp.net/clo/monocle/-/archive/master/monocle-master.tar.gz"
 
 cold-load:
   stage: load
