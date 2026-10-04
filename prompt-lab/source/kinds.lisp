@@ -150,6 +150,10 @@ the lab's own unit, under its key (:rivets, :mites: unit-key; an older
    ("Plist, download format keyword (:pdf :svg :png :step :iges :stl) to
 the key of the toll its file-link asks for; a format not named is free."
     file-tolls nil)
+   ("String or nil. The host the page is served on: the apps' own
+(*app-origin*), so a page a visitor's prompts wrote never runs as the
+lab; nil, any host, where none is set."
+    host (app-origin-host))
    ("String or nil. The deployment this instance serves (deploy.lisp), set
 by its door; nil for the session's own preview, where a toll is paid
 without money and nothing is booked."
@@ -260,11 +264,63 @@ now, inputs and all.  A format named in file-tolls wants its toll paid."
 drawing would be: the session builds a web app and has defined APP."
   (and session (eq (session-kind session) :app) (app-defined? session) t))
 
+;;
+;; The apps' own origin (*app-origin*): a page a visitor's prompts wrote is
+;; served there and nowhere else, so its script never runs as the lab.
+;;
+
+(defun app-origin-host ()
+  "The host of *app-origin*, in lower case, without scheme or port; nil
+when apps are served on the lab's own address."
+  (when (and (stringp *app-origin*) (plusp (length *app-origin*)))
+    (let* ((start (let ((at (search "://" *app-origin*))) (if at (+ at 3) 0)))
+           (end (or (position-if #'(lambda (c) (member c '(#\: #\/))) *app-origin* :start start)
+                    (length *app-origin*))))
+      (string-downcase (subseq *app-origin* start end)))))
+
+(defun app-origin-base ()
+  "*app-origin* without a trailing slash, or the empty string."
+  (if (app-origin-host) (string-right-trim "/" *app-origin*) ""))
+
+(defun request-host (req)
+  "The host the visitor's browser asked for, as the proxies forwarded it,
+in lower case and without its port."
+  (flet ((header (value) (and (stringp value) (plusp (length value)) value)))
+    (let ((host (or (header (net.aserve:header-slot-value req :x-cyclops-forwarded-host))
+                    (header (net.aserve:header-slot-value req :host))
+                    "")))
+      (string-downcase (subseq host 0 (or (position #\: host) (length host)))))))
+
+(defun on-app-origin? (req)
+  "True when REQ may be answered with a web app: it came to the apps' own
+host, or none is set."
+  (let ((host (app-origin-host)))
+    (or (null host) (string= (request-host req) host))))
+
+(defun to-app-origin (req ent)
+  "Answer REQ with a redirect to the same path and query on *app-origin*."
+  (let ((query (net.aserve:request-query req)))
+    (net.aserve:with-http-response (req ent :response net.aserve:*response-found*)
+      (setf (net.aserve:reply-header-slot-value req :location)
+            (format nil "~a~a~@[?~a~]" (app-origin-base)
+                    (net.uri:uri-path (net.aserve:request-uri req))
+                    (and query (net.aserve:query-to-form-urlencoded query))))
+      (net.aserve:with-http-body (req ent)))))
+
+(defun app-doors-host (host)
+  "The host the app doors are published for, given the lab's HOST: the
+lab's and the apps' own, when both are named; else HOST."
+  (let ((app (app-origin-host)))
+    (if (and host app)
+        (remove-duplicates (cons app (if (listp host) host (list host))) :test #'string-equal)
+        host)))
+
 (defun app-url (session &key owner-key)
-  "Where SESSION's web app opens.  A private session's needs its owner's
-key on the address, as the viewer's does."
-  (format nil "~a/app?~:[session~;replay~]=~a~@[&owner=~a~]"
-          *url-prefix* (session-replay? session) (session-id session) owner-key))
+  "Where SESSION's web app opens, on the apps' own origin when there is
+one.  A private session's needs its owner's key on the address, as the
+viewer's does."
+  (format nil "~a~a/app?~:[session~;replay~]=~a~@[&owner=~a~]"
+          (app-origin-base) *url-prefix* (session-replay? session) (session-id session) owner-key))
 
 
 ;;

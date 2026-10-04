@@ -30,6 +30,7 @@
              #:*kinds*
              #:*brand*
              #:*session-header*
+             #:*app-origin*
              #:*unit*
              #:*deployments?*
              #:*deployment-payments?*

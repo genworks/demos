@@ -570,6 +570,9 @@ open deployment's model file."
                              :attachment (format nil "~a.lisp" name))))
           ((and what (plusp (length what)))
            (respond-deployment req ent "Not found." :response net.aserve:*response-not-found*))
+          ;; a deployed web app is served on the apps' own origin only
+          ((and (equal (gethash "kind" record) "app") (not (on-app-origin? req)))
+           (to-app-origin req ent))
           (t
            (let ((deployed (ensure-deployed name)))
              (cond ((null deployed)

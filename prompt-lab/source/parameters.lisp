@@ -171,6 +171,15 @@ or :cents."
   "String. Whose prompt lab this is, as the agent's brief and the page
 name it: the Genworks prompt lab.")
 
+(defparameter *app-origin* nil
+  "String or nil. Where visitors' web apps are served: a scheme and a host
+of their own, \"https://lab-apps.common-lisp.app\", so that a page a
+visitor's prompts wrote never runs as the lab and cannot reach what the
+lab keeps in the browser (owner keys, the wallet).  App pages answer on
+that host alone, and the lab's app doors send a request that arrives
+elsewhere there (kinds.lisp).  Nil: apps on the lab's own address, as on
+a development ship.")
+
 (defparameter *session-header* "X-Prompt-Lab-Session"
   "String. The header that names a session to the gate (the gate rule's
 :session-header).")
