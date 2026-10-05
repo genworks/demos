@@ -185,6 +185,14 @@ a development ship.")
 (project.lisp), \"https://gitlab.common-lisp.net\": its public projects are
 read through its API with no sign-in.  Nil: no projects in this lab.")
 
+(defparameter *gitlab-read-token-file* nil
+  "String or nil. A file holding a read-only GitLab token the lab's reads
+of *gitlab-url* carry (as PRIVATE-TOKEN), for a lab that reaches the forge
+from an address the forge's bot screen does not let through anonymously --
+a development ship.  Read on every call, never logged.  Nil: the reads are
+anonymous, as a lab on the forge's own allowed host makes them.  It must
+read public projects only where visitors' code could reach it.")
+
 (defparameter *git-gate-url* nil
   "String or nil. Where a project session's changes are staged as a push
 (project.lisp): the :git-gate door of a Cyclops, \"http://cyclops/_git\".

@@ -78,17 +78,26 @@ not too long."
 ;; The forge, read.
 ;;
 
+(defun gitlab-read-token ()
+  "The token in *gitlab-read-token-file*, or nil."
+  (when *gitlab-read-token-file*
+    (let ((token (ignore-errors (string-trim '(#\Space #\Tab #\Newline #\Return)
+                                             (uiop:read-file-string *gitlab-read-token-file*)))))
+      (and (stringp token) (plusp (length token)) token))))
+
 (defun get-forge (path &key (seconds 30))
   "GET PATH (\"/api/v4/...\") of *gitlab-url*.  Values: the body as
 octets, and the status.  Signals when the forge cannot be reached."
-  (let ((url (format nil "~a~a" (string-right-trim "/" *gitlab-url*) path)))
+  (let ((url (format nil "~a~a" (string-right-trim "/" *gitlab-url*) path))
+        (token (gitlab-read-token)))
     (multiple-value-bind (answer status)
         (handler-case
             (with-deadline ((+ seconds 2))
               (net.aserve.client:do-http-request url
                 :method :get
                 :accept "*/*"
-                :headers '(("User-Agent" . "prompt-lab/1"))
+                :headers (append '(("User-Agent" . "prompt-lab/1"))
+                                 (when token (list (cons "PRIVATE-TOKEN" token))))
                 :format :binary
                 :keep-alive nil
                 :timeout seconds
