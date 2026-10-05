@@ -323,14 +323,17 @@ approved, held for a person, or failed."
                 (t (hosting-state! request "held" "~a" (gethash "summary" review)))))
         (notify-review! review (format nil "deploy request ~a of ~a at ~a" id project (gethash "sha" request)))))))
 
-(defun decide-held-request! (id release?)
+(defun decide-held-request! (id release? &optional note)
   "A person's word on a held request: RELEASE? approves it, else it is
-rejected.  Nil, or why not."
-  (let ((request (hosting-request id)))
+rejected.  NOTE, a string, is kept in its history and shown to whoever
+asked.  Nil, or why not."
+  (let* ((request (hosting-request id))
+         (note (and (stringp note) (string-right-trim ". " (string-trim '(#\Space #\Tab #\Newline #\Return) note))))
+         (note (and note (plusp (length note)) (subseq note 0 (min 500 (length note))))))
     (cond ((null request) "No such request.")
           ((not (equal (gethash "state" request) "held")) "It is not held.")
-          (release? (hosting-state! request "approved" "Released by a person.") nil)
-          (t (hosting-state! request "rejected" "Rejected by a person.") nil))))
+          (release? (hosting-state! request "approved" "Released by a person~@[: ~a~]." note) nil)
+          (t (hosting-state! request "rejected" "Rejected by a person~@[: ~a~]." note) nil))))
 
 ;;
 ;; The doors.
@@ -459,17 +462,107 @@ person, each with the review's verdict and findings."
                                                                        :test-not #'equal))))))
 
 (defun hosting-decide-door (req ent)
-  "POST <prefix>/api/hosting/decide {id, release}, an admin: a held
-request released (approved, for the worker to deploy) or rejected."
+  "POST <prefix>/api/hosting/decide {id, release, note}, an admin: a held
+request released (approved, for the worker to deploy) or rejected, with
+an optional note for its history."
   (if (not (admin-allowed? req))
       (respond-json req ent (h "error" "Not found.") net.aserve:*response-not-found*)
       (let* ((json (request-json req))
-             (why (if json
-                      (decide-held-request! (gethash "id" json) (eq (gethash "release" json) t))
+             (why (if (hash-table-p json)
+                      (decide-held-request! (gethash "id" json) (eq (gethash "release" json) t)
+                                            (gethash "note" json))
                       "Send {id, release}.")))
         (if why
             (respond-json req ent (h "error" why) net.aserve:*response-bad-request*)
             (respond-json req ent (h "ok" t))))))
+
+;;
+;; The admins' page: what is held, what is named, what happened lately,
+;; with release and reject for a held request and release for a name.
+;; The page holds no data; it asks the admin doors with the admin secret,
+;; which the admin types into it.  Where the doors are refused from
+;; outside (a front's rules), the page is reached the same way.
+;;
+
+(defparameter *hosting-admin-recent* 40
+  "Integer. How many of the latest requests the admins' page lists.")
+
+(defun check-fail-lines (request)
+  (let ((check (gethash "check" request)))
+    (when (hash-table-p check)
+      (remove-if-not #'(lambda (line) (and (stringp line) (> (length line) 4) (string= "FAIL" line :end2 4)))
+                     (coerce (or (gethash "lines" check) #()) 'list)))))
+
+(defun hosting-admin-entry (request &key full?)
+  "REQUEST as the admins' page shows it; FULL? adds the review, the
+check's lines and the history."
+  (let ((entry (h "id" (gethash "id" request) "state" (gethash "state" request)
+                  "state_text" (hosting-state-text (gethash "state" request))
+                  "project" (gethash "project" request) "project_id" (gethash "project_id" request)
+                  "sha" (gethash "sha" request) "web_url" (gethash "web_url" request)
+                  "name" (gethash "name" request) "url" (gethash "url" request)
+                  "requester" (gethash "requester" request)
+                  "made" (gethash "made" request) "changed" (gethash "changed" request)
+                  "reasons" (coerce (remove nil (hosting-request-reasons request)) 'vector))))
+    (when full?
+      (let ((check (gethash "check" request)))
+        (setf (gethash "review" entry) (gethash "review" request)
+              (gethash "fails" entry) (coerce (check-fail-lines request) 'vector)
+              (gethash "check_lines" entry) (or (and (hash-table-p check) (gethash "lines" check)) #())
+              (gethash "history" entry) (coerce (gethash "history" request) 'vector))))
+    entry))
+
+(defun hosting-admin-names (requests)
+  "The names given out, each with its project and, when one of its
+requests is live, the address."
+  (let ((names (hosting-names)) (out nil))
+    (maphash #'(lambda (name project-id)
+                 (let* ((mine (remove-if-not #'(lambda (r) (eql (gethash "project_id" r) project-id)) requests))
+                        (live (find-if #'(lambda (r) (and (equal (gethash "state" r) "live")
+                                                          (equal (gethash "name" r) name)))
+                                       mine :from-end t)))
+                   (push (h "name" name "project_id" project-id
+                            "project" (and mine (gethash "project" (car (last mine))))
+                            "url" (and live (gethash "url" live)))
+                         out)))
+             names)
+    (coerce (sort out #'string< :key #'(lambda (entry) (gethash "name" entry))) 'vector)))
+
+(defun hosting-admin-door (req ent)
+  "GET <prefix>/api/hosting/admin, an admin: {domain, held, recent,
+names} -- the held requests in full, the latest *hosting-admin-recent*
+newest first, and the names given out."
+  (if (not (admin-allowed? req))
+      (respond-json req ent (h "error" "Not found.") net.aserve:*response-not-found*)
+      (let ((requests (hosting-requests)))
+        (respond-json req ent
+                      (h "domain" *hosting-domain*
+                         "held" (map 'vector #'(lambda (r) (hosting-admin-entry r :full? t))
+                                     (remove "held" requests :key #'(lambda (r) (gethash "state" r)) :test-not #'equal))
+                         "recent" (map 'vector #'hosting-admin-entry
+                                       (subseq (reverse requests) 0 (min *hosting-admin-recent* (length requests))))
+                         "names" (hosting-admin-names requests))))))
+
+(defun hosting-release-name-door (req ent)
+  "POST <prefix>/api/hosting/release-name {name}, an admin: NAME may be
+claimed again, by any project.  What runs under it stays up."
+  (if (not (admin-allowed? req))
+      (respond-json req ent (h "error" "Not found.") net.aserve:*response-not-found*)
+      (let* ((json (request-json req))
+             (name (and (hash-table-p json) (gethash "name" json))))
+        (cond ((not (and (stringp name) (nth-value 1 (gethash name (hosting-names)))))
+               (respond-json req ent (h "error" "No such name is given out.") net.aserve:*response-bad-request*))
+              (t (release-name! name)
+                 (respond-json req ent (h "ok" t)))))))
+
+(defun hosting-admin-page-door (req ent)
+  "GET <prefix>/hosting-admin: the admins' page (static/hosting-admin.html).
+It holds no data and works only with the admin secret."
+  (let ((file (merge-pathnames "hosting-admin.html" *static-directory*)))
+    (net.aserve:with-http-response (req ent :content-type "text/html; charset=utf-8")
+      (setf (net.aserve:reply-header-slot-value req :cache-control) "no-store")
+      (net.aserve:with-http-body (req ent :external-format :utf-8)
+        (write-string (uiop:read-file-string file :external-format :utf-8) net.html.generator:*html-stream*)))))
 
 (defun publish-hosting! (&key host)
   (gwl:with-all-servers (server)
@@ -478,4 +571,8 @@ request released (approved, for the worker to deploy) or rejected."
     (net.aserve:publish :path (door-path "hosting/state") :server server :host host :function #'hosting-state-door)
     (net.aserve:publish :path (door-path "hosting/request") :server server :host host :function #'hosting-request-door)
     (net.aserve:publish :path (door-path "hosting/held") :server server :host host :function #'hosting-held-door)
-    (net.aserve:publish :path (door-path "hosting/decide") :server server :host host :function #'hosting-decide-door)))
+    (net.aserve:publish :path (door-path "hosting/decide") :server server :host host :function #'hosting-decide-door)
+    (net.aserve:publish :path (door-path "hosting/admin") :server server :host host :function #'hosting-admin-door)
+    (net.aserve:publish :path (door-path "hosting/release-name") :server server :host host :function #'hosting-release-name-door)
+    (net.aserve:publish :path (format nil "~a/hosting-admin" *url-prefix*) :server server :host host
+                        :function #'hosting-admin-page-door)))

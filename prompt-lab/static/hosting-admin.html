@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Hosting admin</title>
+<style>
+:root {
+  --bg: #fafaf8; --fg: #1d1d1b; --muted: #66665f; --line: #dcdcd4; --card: #ffffff;
+  --accent: #2b5fa8; --ok: #1f7a3a; --bad: #a32a22; --warn: #8a5a00; --code: #f1f1ec;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161614; --fg: #e8e8e2; --muted: #a0a097; --line: #34342f; --card: #1f1f1c;
+    --accent: #7aa7e8; --ok: #6cc486; --bad: #ef8a80; --warn: #e2b55a; --code: #26261f;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+       font: 15px/1.5 system-ui, sans-serif; }
+main { max-width: 60rem; margin: 0 auto; padding: 1.5rem 16px 4rem; }
+h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
+p.lead, .muted { color: var(--muted); }
+a { color: var(--accent); }
+code, pre { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .85em; }
+pre { background: var(--code); padding: .5rem; overflow-x: auto; white-space: pre-wrap; word-break: break-word; margin: .25rem 0; }
+form.key { display: flex; gap: .5rem; flex-wrap: wrap; margin: 1rem 0; }
+input[type=password], input[type=text] { font: inherit; padding: .35rem .5rem; border: 1px solid var(--line);
+  border-radius: 4px; background: var(--card); color: var(--fg); min-width: 0; flex: 1 1 14rem; }
+button { font: inherit; padding: .35rem .8rem; border-radius: 4px; border: 1px solid var(--line);
+  background: var(--card); color: var(--fg); cursor: pointer; }
+button.release { border-color: var(--ok); color: var(--ok); }
+button.reject { border-color: var(--bad); color: var(--bad); }
+button:disabled { opacity: .5; cursor: default; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: .8rem 1rem; margin: .75rem 0; }
+.card h3 { font-size: 1rem; margin: 0 0 .25rem; overflow-wrap: anywhere; }
+.verdict { font-weight: 600; text-transform: uppercase; font-size: .8rem; letter-spacing: .03em; }
+.verdict.flag { color: var(--warn); } .verdict.fail { color: var(--bad); } .verdict.pass { color: var(--ok); }
+.actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .6rem; }
+.actions input { flex: 1 1 14rem; }
+ul.findings { margin: .25rem 0; padding-left: 1.2rem; }
+.table { width: 100%; overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; }
+td.state-live { color: var(--ok); } td.state-held { color: var(--warn); }
+td.state-failed, td.state-rejected, td.state-error { color: var(--bad); }
+#status { min-height: 1.5em; }
+#status.error { color: var(--bad); }
+details summary { cursor: pointer; color: var(--muted); }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Hosting admin</h1>
+  <p class="lead">Requests held for a person, the names given out, and what happened lately.</p>
+
+  <form class="key" id="key-form">
+    <input type="password" id="secret" placeholder="The admin secret" autocomplete="off" aria-label="The admin secret">
+    <button type="submit">Open</button>
+    <button type="button" id="forget">Forget</button>
+    <button type="button" id="refresh">Refresh</button>
+  </form>
+  <p id="status"></p>
+
+  <div id="content" class="hidden">
+    <h2>Held for a person</h2>
+    <div id="held"></div>
+
+    <h2>Names</h2>
+    <p class="muted">Releasing a name lets any project claim it next.  An app already up under it stays up.</p>
+    <div class="table"><table id="names"><thead><tr><th>Name</th><th>Project</th><th>Live at</th><th></th></tr></thead><tbody></tbody></table></div>
+
+    <h2>Lately</h2>
+    <div class="table"><table id="recent"><thead><tr><th>When</th><th>Project</th><th>Commit</th><th>Name</th><th>State</th><th>Asked by</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</main>
+<script>
+(function () {
+  "use strict";
+  var KEY = "hosting-admin-secret";
+  var prefix = location.pathname.replace(/\/hosting-admin\/?$/, "");
+  var api = prefix + "/api/hosting/";
+  var domain = "";
+
+  function stored() { try { return sessionStorage.getItem(KEY) || ""; } catch (e) { return ""; } }
+  function store(v) { try { if (v) sessionStorage.setItem(KEY, v); else sessionStorage.removeItem(KEY); } catch (e) {} }
+  function el(tag, attrs, children) {
+    var n = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) {
+      if (k === "text") n.textContent = attrs[k];
+      else if (k === "class") n.className = attrs[k];
+      else n.setAttribute(k, attrs[k]);
+    });
+    (children || []).forEach(function (c) { if (c) n.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+    return n;
+  }
+  function link(href, text) {
+    return /^https?:\/\//.test(href || "") ? el("a", { href: href, text: text, rel: "noopener" }) : document.createTextNode(text || "");
+  }
+  function when(seconds) {
+    if (!seconds) return "";
+    var d = new Date(seconds * 1000);
+    return d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
+  }
+  function status(text, error) {
+    var s = document.getElementById("status");
+    s.textContent = text || ""; s.className = error ? "error" : "";
+  }
+  function call(door, body) {
+    var opts = { headers: { "X-Hosting-Admin-Secret": stored() } };
+    if (body) { opts.method = "POST"; opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+    return fetch(api + door, opts).then(function (r) {
+      return r.text().then(function (t) {
+        var j = null; try { j = JSON.parse(t); } catch (e) {}
+        if (r.status === 404 || r.status === 403)
+          throw new Error("Refused (" + r.status + "): the secret is wrong, the admin doors are shut on this lab, or they are not reachable from where this page was opened.");
+        if (!r.ok) throw new Error((j && j.error) || ("HTTP " + r.status));
+        return j;
+      });
+    });
+  }
+  function commitLink(r) {
+    var short = (r.sha || "").slice(0, 8);
+    return r.web_url ? link(r.web_url.replace(/\/$/, "") + "/-/commit/" + r.sha, short) : el("code", { text: short });
+  }
+
+  function renderHeld(list) {
+    var box = document.getElementById("held");
+    box.textContent = "";
+    if (!list.length) { box.appendChild(el("p", { class: "muted", text: "Nothing is held." })); return; }
+    list.forEach(function (r) {
+      var review = r.review || {};
+      var verdict = (review.verdict || "flag").toLowerCase();
+      var card = el("div", { class: "card" }, [
+        el("h3", null, [link(r.web_url, r.project), " at ", commitLink(r),
+                        r.name ? " as " + r.name + "." + domain : ""]),
+        el("div", { class: "muted", text: "Request " + r.id + ", asked by " + (r.requester || "?") + ", " + when(r.made) + "." }),
+        el("p", null, [el("span", { class: "verdict " + verdict, text: verdict }), " ", review.summary || ""])
+      ]);
+      if (review.findings && review.findings.length) {
+        var ul = el("ul", { class: "findings" });
+        review.findings.forEach(function (f) { ul.appendChild(el("li", null, [el("code", { text: f.where || "" }), " ", f.detail || ""])); });
+        card.appendChild(ul);
+      }
+      if (r.fails && r.fails.length) card.appendChild(el("pre", { text: r.fails.join("\n") }));
+      if (r.check_lines && r.check_lines.length)
+        card.appendChild(el("details", null, [el("summary", { text: "The check's lines (" + r.check_lines.length + ")" }),
+                                              el("pre", { text: r.check_lines.join("\n") })]));
+      if (r.history && r.history.length)
+        card.appendChild(el("details", null, [el("summary", { text: "History" }),
+          el("pre", { text: r.history.map(function (h) { return when(h.time) + "  " + h.state + (h.note ? "  " + h.note : ""); }).join("\n") })]));
+      var note = el("input", { type: "text", placeholder: "A note for its history (optional)", "aria-label": "Note" });
+      var release = el("button", { type: "button", class: "release", text: "Release" });
+      var reject = el("button", { type: "button", class: "reject", text: "Reject" });
+      function decide(yes) {
+        var what = (yes ? "Release " : "Reject ") + r.project + " at " + (r.sha || "").slice(0, 8) +
+                   (yes ? "? The apps host will deploy it." : "? It will not be hosted.");
+        if (!confirm(what)) return;
+        release.disabled = reject.disabled = true;
+        call("decide", { id: r.id, release: yes, note: note.value }).then(function () {
+          status((yes ? "Released " : "Rejected ") + r.id + ".");
+          load();
+        }, function (e) { status(e.message, true); release.disabled = reject.disabled = false; });
+      }
+      release.addEventListener("click", function () { decide(true); });
+      reject.addEventListener("click", function () { decide(false); });
+      card.appendChild(el("div", { class: "actions" }, [note, release, reject]));
+      box.appendChild(card);
+    });
+  }
+
+  function renderNames(list) {
+    var body = document.querySelector("#names tbody");
+    body.textContent = "";
+    if (!list.length) { body.appendChild(el("tr", null, [el("td", { colspan: "4", class: "muted", text: "No names given out." })])); return; }
+    list.forEach(function (n) {
+      var button = el("button", { type: "button", text: "Release name" });
+      button.addEventListener("click", function () {
+        if (!confirm("Release " + n.name + "." + domain + "? Any project may claim it next; what runs there now stays up.")) return;
+        button.disabled = true;
+        call("release-name", { name: n.name }).then(function () { status("Released the name " + n.name + "."); load(); },
+          function (e) { status(e.message, true); button.disabled = false; });
+      });
+      body.appendChild(el("tr", null, [
+        el("td", null, [el("code", { text: n.name })]),
+        el("td", { text: (n.project || "?") + " (" + n.project_id + ")" }),
+        el("td", null, [n.url ? link(n.url, n.url) : el("span", { class: "muted", text: "not live" })]),
+        el("td", null, [button])
+      ]));
+    });
+  }
+
+  function renderRecent(list) {
+    var body = document.querySelector("#recent tbody");
+    body.textContent = "";
+    if (!list.length) { body.appendChild(el("tr", null, [el("td", { colspan: "6", class: "muted", text: "No requests yet." })])); return; }
+    list.forEach(function (r) {
+      var state = el("td", { class: "state-" + r.state, title: (r.reasons || []).join("\n"), text: r.state_text || r.state });
+      body.appendChild(el("tr", null, [
+        el("td", { text: when(r.changed || r.made) }),
+        el("td", null, [link(r.web_url, r.project)]),
+        el("td", null, [commitLink(r)]),
+        el("td", null, [r.url ? link(r.url, r.name) : document.createTextNode(r.name || "")]),
+        state,
+        el("td", { text: r.requester || "" })
+      ]));
+    });
+  }
+
+  function load() {
+    if (!stored()) { status("Type the admin secret to open."); return; }
+    status("Loading...");
+    call("admin").then(function (j) {
+      domain = j.domain || "";
+      renderHeld(j.held || []); renderNames(j.names || []); renderRecent(j.recent || []);
+      document.getElementById("content").className = "";
+      status("As of " + when(Date.now() / 1000) + ".");
+    }, function (e) {
+      document.getElementById("content").className = "hidden";
+      status(e.message, true);
+    });
+  }
+
+  document.getElementById("key-form").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var input = document.getElementById("secret");
+    if (input.value) store(input.value.trim());
+    input.value = "";
+    load();
+  });
+  document.getElementById("forget").addEventListener("click", function () {
+    store(""); document.getElementById("content").className = "hidden"; status("Forgotten.");
+  });
+  document.getElementById("refresh").addEventListener("click", load);
+  load();
+})();
+</script>
+</body>
+</html>

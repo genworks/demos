@@ -230,19 +230,29 @@ table, or nil and why."
 
 (defun notify-review! (review where)
   "Tell the admins of a flag or a fail of REVIEW (from WHERE: a session,
-a deploy request), when there is a topic to tell."
+a deploy request), when there is a topic to tell.  A topic that refuses
+the word, or cannot be reached, is said on the Lisp's error output (the
+container's log) rather than passed over: an ntfy server that wants a
+token answers 403 to a post without one.  Answers the HTTP status, or
+nil."
   (when (and *review-notify-url* (not (equal (gethash "verdict" review) "pass")))
-    (ignore-errors
-     (net.aserve.client:do-http-request *review-notify-url*
-       :method :post
-       :content (babel:string-to-octets
-                 (format nil "~a: ~a -- ~a (~a)"
-                         (string-upcase (gethash "verdict" review))
-                         (gethash "project" review) (gethash "summary" review) where)
-                 :encoding :utf-8)
-       :content-type "text/plain; charset=utf-8"
-       :headers (list (cons "Title" (format nil "~a deploy review" *brand*)))
-       :timeout 10))))
+    (handler-case
+        (let ((status (nth-value 1 (net.aserve.client:do-http-request *review-notify-url*
+                                     :method :post
+                                     :content (babel:string-to-octets
+                                               (format nil "~a: ~a -- ~a (~a)"
+                                                       (string-upcase (gethash "verdict" review))
+                                                       (gethash "project" review) (gethash "summary" review) where)
+                                               :encoding :utf-8)
+                                     :content-type "text/plain; charset=utf-8"
+                                     :headers (list (cons "Title" (format nil "~a deploy review" *brand*)))
+                                     :timeout 10))))
+          (unless (and (integerp status) (<= 200 status 299))
+            (format *error-output* "~&prompt-lab review notice: the topic answered ~a (~a)~%" status where))
+          status)
+      (error (condition)
+        (format *error-output* "~&prompt-lab review notice: ~a (~a)~%" condition where)
+        nil))))
 
 (defun review-files (files pages &key session (session-id (and session (session-id session))))
   "The review of FILES (a list of (path . text)) and PAGES (a list of
