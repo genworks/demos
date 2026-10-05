@@ -1092,6 +1092,9 @@ page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet)."
                                   :server server :host (app-doors-host host)
                                   :destination (namestring *demos-css-directory*))
     (publish-gwl-app (format nil "~a/viewer" *url-prefix*) 'viewer :server server :host host))
+  ;; hosting a project on the apps host (hosting.lisp): the worker's doors
+  ;; answer only with *hosting-secret*
+  (publish-hosting! :host host)
   (register-session-recovery!)
   (start-reaper!)
   (start-thumbnailer!)

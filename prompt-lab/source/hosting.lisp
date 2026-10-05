@@ -1,0 +1,332 @@
+;; Copyright © 2026 Genworks International
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Affero General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.  Distributed WITHOUT
+;; ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+(in-package :prompt-lab)
+
+;;
+;; Hosting a project: from a GitLab project to <name>.<*hosting-domain*>,
+;; served by an apps host (Monocle's house: its kit, its gate, its
+;; books).  What goes out is the project's default branch at a pinned
+;; commit, never a session's working files, so what runs is what anyone
+;; can read.
+;;
+;; A REQUEST is one try at hosting one commit, kept as a JSON file under
+;; *hosting-root*.  Its states:
+;;
+;;   queued      waiting for the apps host's worker
+;;   checking    the worker builds and asks it (Monocle's house/check)
+;;   reviewing   the check passed; the model reads it (review.lisp)
+;;   approved    the review passed, or a person released it
+;;   held        the review flagged it; a person releases or rejects it
+;;   deploying   the worker puts it on the apps host
+;;   live        it answers at its address
+;;   failed      the check or the review failed it
+;;   rejected    a person rejected it after a flag
+;;   error       the worker could not put it up
+;;
+;; THE APPS HOST ASKS; the lab never calls it.  Its worker polls
+;; <prefix>/api/hosting/next with the shared secret (*hosting-secret*)
+;; and reports at <prefix>/api/hosting/report.  Without a secret both
+;; doors answer 404.
+;;
+;; A NAME is first come: the first project to pass the check under the
+;; name its monetize.sexp gives keeps it, and only that project may be
+;; hosted under it again.
+;;
+
+(defparameter *hosting-secret* nil
+  "String or nil. The secret the apps host's worker sends in
+X-Hosting-Secret.  Nil shuts the worker's doors.")
+
+(defparameter *hosting-root*
+  (namestring (merge-pathnames "prompt-lab-hosting/"
+                               (uiop:pathname-parent-directory-pathname (pathname *workspace-root*))))
+  "String. Where the requests (requests/<id>.json), the pages the check
+kept (pages/<id>/) and the names (names.json) are kept.")
+
+(defparameter *hosting-domain* "common-lisp.app"
+  "String. The domain an application is hosted under, as <name>.<domain>.")
+
+(defparameter *hosting-claim-seconds* 1800
+  "Integer. A request the worker took and has not reported on for this
+long is offered again.")
+
+(defvar *hosting-lock* (bt:make-lock "prompt-lab hosting"))
+
+;;
+;; The records.
+;;
+
+(defun hosting-path (control &rest arguments)
+  (merge-pathnames (apply #'format nil control arguments) (uiop:ensure-directory-pathname *hosting-root*)))
+
+(defun read-json-file (file)
+  (ignore-errors
+   (with-open-file (in file :external-format :utf-8)
+     (yason:parse in))))
+
+(defun write-json-file (file object)
+  "Write OBJECT to FILE whole: to a file beside it, then renamed over it."
+  (ensure-directories-exist file)
+  (let ((temporary (make-pathname :type "tmp" :defaults file)))
+    (with-open-file (out temporary :direction :output :if-exists :supersede :external-format :utf-8)
+      (yason:encode object out))
+    (uiop:rename-file-overwriting-target temporary file)))
+
+(defun hosting-id? (id)
+  (and (stringp id) (= (length id) 12) (every #'(lambda (c) (digit-char-p c 16)) id)))
+
+(defun hosting-request (id)
+  (and (hosting-id? id) (read-json-file (hosting-path "requests/~a.json" id))))
+
+(defun save-hosting-request! (request)
+  (write-json-file (hosting-path "requests/~a.json" (gethash "id" request)) request)
+  request)
+
+(defun hosting-requests ()
+  "Every request, the oldest first."
+  (sort (remove nil (mapcar #'read-json-file (directory (hosting-path "requests/*.json"))))
+        #'< :key #'(lambda (request) (or (gethash "made" request) 0))))
+
+(defun hosting-state! (request state &optional control &rest arguments)
+  "Move REQUEST to STATE, noting why in its history, and save it."
+  (setf (gethash "state" request) state
+        (gethash "changed" request) (epoch-seconds (get-universal-time))
+        (gethash "history" request)
+        (append (gethash "history" request)
+                (list (h "time" (epoch-seconds (get-universal-time)) "state" state
+                         "note" (and control (apply #'format nil control arguments))))))
+  (save-hosting-request! request))
+
+(defun new-hosting-request! (&key project-id project sha web-url session requester)
+  "Queue PROJECT (its path on the forge, its id there) at commit SHA for
+hosting.  REQUESTER is who asked (their name on the forge); SESSION the
+lab session it was asked from, if any.  Answers the request."
+  (bt:with-lock-held (*hosting-lock*)
+    (let ((request (h "id" (subseq (new-owner-key) 0 12)
+                      "project" project "project_id" project-id "sha" sha
+                      "web_url" web-url
+                      "clone_url" (format nil "~a/~a.git" (string-right-trim "/" *gitlab-url*) project)
+                      "session" session "requester" requester
+                      "made" (epoch-seconds (get-universal-time)))))
+      (hosting-state! request "queued" "Asked by ~a." (or requester "the lab")))))
+
+;;
+;; Names.
+;;
+
+(defun hosting-names ()
+  (or (read-json-file (hosting-path "names.json")) (make-hash-table :test #'equal)))
+
+(defun claim-name! (name project-id)
+  "Give NAME to the project PROJECT-ID if nobody has it.  True when the
+project has it now; nil when another project does."
+  (bt:with-lock-held (*hosting-lock*)
+    (let* ((names (hosting-names))
+           (owner (gethash name names)))
+      (cond ((null owner)
+             (setf (gethash name names) project-id)
+             (write-json-file (hosting-path "names.json") names)
+             t)
+            ((eql owner project-id) t)))))
+
+(defun release-name! (name)
+  "An admin's: let NAME be claimed again."
+  (bt:with-lock-held (*hosting-lock*)
+    (let ((names (hosting-names)))
+      (remhash name names)
+      (write-json-file (hosting-path "names.json") names))))
+
+;;
+;; The worker's side.
+;;
+
+(defun next-for-worker ()
+  "Take the oldest request with work for the apps host: one to check, or
+one approved to deploy (or one taken too long ago and not reported on).
+Answers it with the action for the worker, or nil."
+  (bt:with-lock-held (*hosting-lock*)
+    (let ((now (epoch-seconds (get-universal-time))))
+      (dolist (request (hosting-requests))
+        (let* ((state (gethash "state" request))
+               (stale? (> (- now (or (gethash "changed" request) now)) *hosting-claim-seconds*))
+               (action (cond ((or (equal state "queued") (and stale? (equal state "checking"))) "check")
+                             ((or (equal state "approved") (and stale? (equal state "deploying"))) "deploy"))))
+          (when action
+            (hosting-state! request (if (equal action "check") "checking" "deploying")
+                            "Taken by the apps host to ~a." action)
+            (return (h "id" (gethash "id" request) "action" action
+                       "project" (gethash "project" request)
+                       "sha" (gethash "sha" request)
+                       "clone_url" (gethash "clone_url" request)
+                       "web_url" (gethash "web_url" request)
+                       "name" (gethash "name" request)
+                       "requester" (gethash "requester" request)
+                       ;; the image the check built and tagged
+                       "image" (let ((check (gethash "check" request)))
+                                 (and (hash-table-p check) (gethash "image" check)))))))))))
+
+(defun keep-pages! (id pages)
+  "Keep the pages the check fetched (a list of {path, body}) for the
+review.  Answers them as (path . body)."
+  (let ((kept (loop for page in pages
+                    for path = (and (hash-table-p page) (gethash "path" page))
+                    for body = (and (hash-table-p page) (gethash "body" page))
+                    when (and (stringp path) (stringp body))
+                      collect (cons path body))))
+    (write-json-file (hosting-path "pages/~a.json" id)
+                     (map 'vector #'(lambda (page) (h "path" (car page) "body" (cdr page))) kept))
+    kept))
+
+(defun hosting-report! (id json)
+  "The worker's report on request ID.  Answers nil, or why it is refused."
+  (let ((request (hosting-request id))
+        (action (gethash "action" json))
+        (ok? (eq (gethash "ok" json) t))
+        (lines (gethash "lines" json)))
+    (cond
+      ((null request) "No such request.")
+      ((equal action "check")
+       (unless (equal (gethash "state" request) "checking")
+         (return-from hosting-report! "Not being checked."))
+       (setf (gethash "check" request) (h "ok" (if ok? t 'yason:false) "lines" lines
+                                          "image" (gethash "image" json)))
+       (let ((name (gethash "name" json)))
+         (cond
+           ((not ok?) (hosting-state! request "failed" "The house's check failed."))
+           ((not (monocle:deployment-name? name))
+            (hosting-state! request "failed" "The check named no application."))
+           ((not (claim-name! name (gethash "project_id" request)))
+            (setf (gethash "name" request) name)
+            (hosting-state! request "failed" "~a.~a belongs to another project." name *hosting-domain*))
+           (t
+            (setf (gethash "name" request) name)
+            (hosting-state! request "reviewing" "The check passed.")
+            (let ((pages (keep-pages! id (gethash "pages" json))))
+              (bt:make-thread #'(lambda () (review-hosting-request! id pages))
+                              :name (format nil "prompt-lab review ~a" id))))))
+       nil)
+      ((equal action "deploy")
+       (unless (equal (gethash "state" request) "deploying")
+         (return-from hosting-report! "Not being deployed."))
+       (if ok?
+           (progn (setf (gethash "url" request)
+                        (format nil "https://~a.~a/" (gethash "name" request) *hosting-domain*))
+                  (hosting-state! request "live" "Up at ~a." (gethash "url" request)))
+           (progn (setf (gethash "deploy" request) (h "lines" lines))
+                  (hosting-state! request "error" "The apps host could not put it up.")))
+       nil)
+      (t "Report a check or a deploy."))))
+
+;;
+;; The review, between the check and the deploy: the files at the
+;; commit, read from the forge, and the pages the check kept.
+;;
+
+(defun project-texts-at (project-id sha)
+  "The project's text files at commit SHA that fit *project-limits*, as
+(path . text), read from the forge."
+  (let ((files nil) (bytes 0))
+    (loop for (path . blob) in (project-tree project-id sha)
+          while (< (length files) (project-limit :files))
+          do (when (safe-project-path-p path)
+               (multiple-value-bind (octets status)
+                   (ignore-errors (get-forge (format nil "/api/v4/projects/~d/repository/blobs/~a/raw" project-id blob)))
+                 (let ((text (and (eql status 200)
+                                  (<= (length octets) (project-limit :file-bytes))
+                                  (<= (+ bytes (length octets)) (project-limit :bytes))
+                                  (text-from-octets octets))))
+                   (when text
+                     (incf bytes (length octets))
+                     (push (cons path text) files))))))
+    (nreverse files)))
+
+(defun review-hosting-request! (id pages)
+  "Review request ID's commit with the check's PAGES and move it on:
+approved, held for a person, or failed."
+  (let ((request (hosting-request id)))
+    (when (and request (equal (gethash "state" request) "reviewing"))
+      (let* ((project (gethash "project" request))
+             (session (let ((lab-session (gethash "session" request)))
+                        (and (stringp lab-session) (ignore-errors (find-session lab-session)))))
+             (review (cond ((not (take-review! project))
+                            (held-for-a-person (format nil "~a has had its ~d reviews today" project *reviews-per-day*)))
+                           (t (handler-case
+                                  (review-files (project-texts-at (gethash "project_id" request) (gethash "sha" request))
+                                                pages :session session :session-id (format nil "hosting-~a" id))
+                                (error (condition) (held-for-a-person (condition-text condition))))))))
+        (setf (gethash "project" review) project
+              (gethash "review" request) review)
+        (let ((verdict (gethash "verdict" review)))
+          (cond ((equal verdict "pass") (hosting-state! request "approved" "The review passed."))
+                ((equal verdict "fail") (hosting-state! request "failed" "The review failed it: ~a" (gethash "summary" review)))
+                (t (hosting-state! request "held" "Held for a person: ~a" (gethash "summary" review)))))
+        (notify-review! review (format nil "deploy request ~a of ~a at ~a" id project (gethash "sha" request)))))))
+
+(defun decide-held-request! (id release?)
+  "A person's word on a held request: RELEASE? approves it, else it is
+rejected.  Nil, or why not."
+  (let ((request (hosting-request id)))
+    (cond ((null request) "No such request.")
+          ((not (equal (gethash "state" request) "held")) "It is not held.")
+          (release? (hosting-state! request "approved" "Released by a person.") nil)
+          (t (hosting-state! request "rejected" "Rejected by a person.") nil))))
+
+;;
+;; The doors.
+;;
+
+(defun worker-allowed? (req)
+  (let ((given (net.aserve:header-slot-value req :x-hosting-secret)))
+    (and (stringp *hosting-secret*) (plusp (length *hosting-secret*)) (stringp given)
+         (= (length given) (length *hosting-secret*))
+         ;; every character compared, whatever the first difference
+         (zerop (loop for a across given for b across *hosting-secret*
+                      sum (logxor (char-code a) (char-code b)))))))
+
+(defun hosting-next-door (req ent)
+  "GET <prefix>/api/hosting/next, the apps host's worker: the next piece
+of work, or 204."
+  (if (not (worker-allowed? req))
+      (respond-json req ent (h "error" "Not found.") net.aserve:*response-not-found*)
+      (let ((work (next-for-worker)))
+        (if work
+            (respond-json req ent work)
+            (net.aserve:with-http-response (req ent :response net.aserve:*response-no-content*)
+              (net.aserve:with-http-body (req ent)))))))
+
+(defun hosting-report-door (req ent)
+  "POST <prefix>/api/hosting/report {id, action, ok, lines, name, image,
+pages}, the apps host's worker."
+  (if (not (worker-allowed? req))
+      (respond-json req ent (h "error" "Not found.") net.aserve:*response-not-found*)
+      (let* ((json (request-json req))
+             (why (if json (hosting-report! (gethash "id" json) json) "Send a JSON object.")))
+        (if why
+            (respond-json req ent (h "error" why) net.aserve:*response-bad-request*)
+            (respond-json req ent (h "ok" t))))))
+
+(defun hosting-state-door (req ent)
+  "GET <prefix>/api/hosting/state?id=<id>: where a request stands, for
+whoever has its id -- the history, the check's lines, the review's
+verdict, the address once it is up."
+  (let ((request (hosting-request (query-value req "id"))))
+    (if (null request)
+        (respond-json req ent (h "error" "No such request.") net.aserve:*response-not-found*)
+        (respond-json req ent (h "id" (gethash "id" request) "state" (gethash "state" request)
+                                 "project" (gethash "project" request) "sha" (gethash "sha" request)
+                                 "name" (gethash "name" request) "url" (gethash "url" request)
+                                 "history" (gethash "history" request)
+                                 "check" (gethash "check" request)
+                                 "review" (gethash "review" request))))))
+
+(defun publish-hosting! (&key host)
+  (gwl:with-all-servers (server)
+    (net.aserve:publish :path (door-path "hosting/next") :server server :host host :function #'hosting-next-door)
+    (net.aserve:publish :path (door-path "hosting/report") :server server :host host :function #'hosting-report-door)
+    (net.aserve:publish :path (door-path "hosting/state") :server server :host host :function #'hosting-state-door)))

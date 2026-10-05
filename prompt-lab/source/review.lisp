@@ -121,16 +121,20 @@ so that nothing in it can end the project's part of the message."
             while at
             do (setq text (concatenate 'string (subseq text 0 (1+ at)) " " (subseq text (1+ at))))))))
 
-(defun review-material (session pages)
-  "The text the review reads: every file of SESSION's project, then PAGES
+(defun session-project-texts (session)
+  "SESSION's project files as the review reads them: (path . text)."
+  (mapcar #'(lambda (path) (cons path (project-file-text session path)))
+          (project-paths (project-directory session))))
+
+(defun review-material (files pages)
+  "The text the review reads: FILES, a list of (path . text), then PAGES
 -- a list of (path . body), as the house's check fetched them.  Second
 value: true when it is past *review-max-characters*."
-  (let* ((dir (project-directory session))
-         (text (with-output-to-string (out)
+  (let* ((text (with-output-to-string (out)
                  (format out "<project>~%")
-                 (dolist (path (project-paths dir))
-                   (format out "<file path=~s>~%~a~%</file>~%"
-                           (review-quote path) (review-quote (project-file-text session path))))
+                 (loop for (path . file-text) in files
+                       do (format out "<file path=~s>~%~a~%</file>~%"
+                                  (review-quote path) (review-quote file-text)))
                  (loop for (path . body) in pages
                        do (format out "<page path=~s>~%~a~%</page>~%"
                                   (review-quote path)
@@ -169,25 +173,27 @@ takes them: a list of (path . body).  Nil when there are none."
              "messages" (list (h "role" "user"
                                  "content" (format nil "~a~%Review the application above and give your verdict." material))))))
 
-(defun review-answer (session material)
-  "Ask the model.  Values: the verdict as a hash table, or nil and why."
+(defun review-answer (session material &key (session-id (and session (session-id session))))
+  "Ask the model, charged to SESSION when there is one (else to the gate
+under SESSION-ID alone, so the pot pays).  Values: the verdict as a hash
+table, or nil and why."
   (let ((key (api-key)))
     (handler-case
         (multiple-value-bind (status text headers)
             (post-json *messages-url* (review-request material)
                        :headers (append (list (cons "anthropic-version" "2023-06-01"))
                                         (when key (list (cons "x-api-key" key)))
-                                        (list (cons *session-header* (session-id session)))
-                                        (when (session-wallet session)
+                                        (list (cons *session-header* session-id))
+                                        (when (and session (session-wallet session))
                                           (list (cons *wallet-header* (session-wallet session)))))
                        :seconds *review-seconds*)
-          (note-gate-answer session headers)
+          (when session (note-gate-answer session headers))
           (let ((json (ignore-errors (yason:parse text))))
             (cond ((not (eql status 200))
                    (values nil (format nil "the reviewer was not reached (~a)" status)))
                   ((not (hash-table-p json)) (values nil "the reviewer's answer did not read"))
                   (t
-                   (add-usage session (gethash "usage" json))
+                   (when session (add-usage session (gethash "usage" json)))
                    (if (equal (gethash "stop_reason" json) "refusal")
                        (let ((details (gethash "stop_details" json)))
                          (values nil (format nil "the reviewer declined to read the project~@[ (~a)~]"
@@ -222,20 +228,39 @@ takes them: a list of (path . body).  Nil when there are none."
 (defun held-for-a-person (why)
   (h "verdict" "flag" "summary" (format nil "Held for a person: ~a." why) "findings" nil))
 
-(defun notify-review! (session review)
-  "Tell the admins of a flag or a fail, when there is a topic to tell."
+(defun notify-review! (review where)
+  "Tell the admins of a flag or a fail of REVIEW (from WHERE: a session,
+a deploy request), when there is a topic to tell."
   (when (and *review-notify-url* (not (equal (gethash "verdict" review) "pass")))
     (ignore-errors
      (net.aserve.client:do-http-request *review-notify-url*
        :method :post
        :content (babel:string-to-octets
-                 (format nil "~a: ~a -- ~a (session ~a)"
+                 (format nil "~a: ~a -- ~a (~a)"
                          (string-upcase (gethash "verdict" review))
-                         (gethash "project" review) (gethash "summary" review) (session-id session))
+                         (gethash "project" review) (gethash "summary" review) where)
                  :encoding :utf-8)
        :content-type "text/plain; charset=utf-8"
        :headers (list (cons "Title" (format nil "~a deploy review" *brand*)))
        :timeout 10))))
+
+(defun review-files (files pages &key session (session-id (and session (session-id session))))
+  "The review of FILES (a list of (path . text)) and PAGES (a list of
+(path . body)): a hash table with verdict, summary, findings and time.
+Charged to SESSION when there is one, else to the gate under SESSION-ID.
+Anything that keeps the model from answering -- material past
+*review-max-characters*, a refusal, a failed call -- is a flag held for
+a person, never a pass.  Counts nothing toward *reviews-per-day*: the
+caller does that."
+  (multiple-value-bind (material too-long?) (review-material files pages)
+    (let ((review (if too-long?
+                      (held-for-a-person
+                       (format nil "the project and its pages are more than ~:d characters to read"
+                               *review-max-characters*))
+                      (multiple-value-bind (verdict why) (review-answer session material :session-id session-id)
+                        (or verdict (held-for-a-person why))))))
+      (setf (gethash "time" review) (get-universal-time))
+      review)))
 
 (defun review-project! (session &key pages)
   "Review SESSION's project before it deploys, with PAGES (a list of
@@ -251,19 +276,12 @@ reason when no review may be had today."
       ((not (take-review! project))
        (values nil (format nil "~a has had its ~d reviews today; try again tomorrow." project *reviews-per-day*)))
       (t
-       (multiple-value-bind (material too-long?) (review-material session pages)
-         (let ((review (if too-long?
-                           (held-for-a-person
-                            (format nil "the project and its pages are more than ~:d characters to read"
-                                    *review-max-characters*))
-                           (multiple-value-bind (verdict why) (review-answer session material)
-                             (or verdict (held-for-a-person why))))))
-           (setf (gethash "project" review) project
-                 (gethash "time" review) (get-universal-time))
-           (ensure-directories-exist (review-file session))
-           (with-open-file (out (review-file session) :direction :output :if-exists :supersede
-                                                      :external-format :utf-8)
-             (yason:encode review out))
-           (log-event session :note "Deploy review: ~a -- ~a" (gethash "verdict" review) (gethash "summary" review))
-           (notify-review! session review)
-           review))))))
+       (let ((review (review-files (session-project-texts session) pages :session session)))
+         (setf (gethash "project" review) project)
+         (ensure-directories-exist (review-file session))
+         (with-open-file (out (review-file session) :direction :output :if-exists :supersede
+                                                    :external-format :utf-8)
+           (yason:encode review out))
+         (log-event session :note "Deploy review: ~a -- ~a" (gethash "verdict" review) (gethash "summary" review))
+         (notify-review! review (format nil "session ~a" (session-id session)))
+         review)))))
