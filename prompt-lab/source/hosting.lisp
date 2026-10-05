@@ -38,18 +38,23 @@
 ;; name its monetize.sexp gives keeps it, and only that project may be
 ;; hosted under it again.
 ;;
+;; What a deployment sets (the secret, the root, the domain) is DEFVAR,
+;; so that loading this file again into a running lab keeps it; the
+;; tuning (*hosting-claim-seconds*) is DEFPARAMETER, which a reload
+;; brings back to the file's value.
+;;
 
-(defparameter *hosting-secret* nil
+(defvar *hosting-secret* nil
   "String or nil. The secret the apps host's worker sends in
 X-Hosting-Secret.  Nil shuts the worker's doors.")
 
-(defparameter *hosting-root*
+(defvar *hosting-root*
   (namestring (merge-pathnames "prompt-lab-hosting/"
                                (uiop:pathname-parent-directory-pathname (pathname *workspace-root*))))
   "String. Where the requests (requests/<id>.json), the pages the check
 kept (pages/<id>/) and the names (names.json) are kept.")
 
-(defparameter *hosting-domain* "common-lisp.app"
+(defvar *hosting-domain* "common-lisp.app"
   "String. The domain an application is hosted under, as <name>.<domain>.")
 
 (defparameter *hosting-claim-seconds* 1800
@@ -325,8 +330,61 @@ verdict, the address once it is up."
                                  "check" (gethash "check" request)
                                  "review" (gethash "review" request))))))
 
+(defvar *session-hostings* (make-hash-table :test #'equal)
+  "Session id -> (approve-url . time) of its last staged hosting.")
+
+(defun stage-deploy! (session)
+  "Ask the gate to host SESSION's project: the gate keeps the request for
+the visitor's consent, signed in with the forge, and on it hands this lab
+the request at the default branch's commit (hosting/request).  Values:
+the address of the gate's page where the visitor approves, and nil; or
+nil and the reason."
+  (let ((record (and session (project-record session))))
+    (cond ((not (pushes-offered?)) (values nil "This lab hosts nothing."))
+          ((null record) (values nil "This session holds no project."))
+          ((project-changes session)
+           (values nil "The project has changes not on GitLab yet: push them and merge the request first; what is hosted is the default branch."))
+          (t
+           (multiple-value-bind (status text)
+               (handler-case (post-json (format nil "~a/stage-deploy" (string-right-trim "/" *git-gate-url*))
+                                        (encode (h "session" (session-id session) "project_id" (gethash "id" record))))
+                 (error (e) (return-from stage-deploy! (values nil (condition-text e)))))
+             (let* ((answer (ignore-errors (yason:parse text)))
+                    (staged (and (eql status 200) (hash-table-p answer) (gethash "push" answer))))
+               (if (not (stringp staged))
+                   (values nil (format nil "The gate would not take the request (~a)~@[: ~a~]."
+                                       status (and (hash-table-p answer) (gethash "message" answer))))
+                   (let ((url (format nil "~a/approve?push=~a" *git-approve-base* staged)))
+                     (setf (gethash (session-id session) *session-hostings*) (cons url (get-universal-time)))
+                     (log-event session :note "Asked to host ~a: approve it on GitLab." (gethash "path" record))
+                     (values url nil)))))))))
+
+(defun hosting-request-door (req ent)
+  "POST <prefix>/api/hosting/request {project_id, project, sha, web_url,
+session, requester}, from the gate once a Maintainer of the project has
+approved it: the request queued.  Answers {id}."
+  (if (not (worker-allowed? req))
+      (respond-json req ent (h "error" "Not found.") net.aserve:*response-not-found*)
+      (let* ((json (request-json req))
+             (project-id (and json (gethash "project_id" json)))
+             (project (and json (gethash "project" json)))
+             (sha (and json (gethash "sha" json))))
+        (if (not (and (integerp project-id) (stringp project) (project-path-from project)
+                      (stringp sha) (= (length sha) 40) (every #'(lambda (c) (digit-char-p c 16)) sha)))
+            (respond-json req ent (h "error" "project_id, project and a commit's sha.") net.aserve:*response-bad-request*)
+            (let ((request (new-hosting-request! :project-id project-id :project project :sha sha
+                                                 :web-url (gethash "web_url" json)
+                                                 :session (gethash "session" json)
+                                                 :requester (gethash "requester" json))))
+              (let ((session (let ((id (gethash "session" json))) (and (stringp id) (ignore-errors (find-session id))))))
+                (when session
+                  (log-event session :note "~a asked to host ~a at ~a: request ~a."
+                             (or (gethash "requester" json) "A maintainer") project (subseq sha 0 8) (gethash "id" request))))
+              (respond-json req ent (h "id" (gethash "id" request))))))))
+
 (defun publish-hosting! (&key host)
   (gwl:with-all-servers (server)
     (net.aserve:publish :path (door-path "hosting/next") :server server :host host :function #'hosting-next-door)
     (net.aserve:publish :path (door-path "hosting/report") :server server :host host :function #'hosting-report-door)
-    (net.aserve:publish :path (door-path "hosting/state") :server server :host host :function #'hosting-state-door)))
+    (net.aserve:publish :path (door-path "hosting/state") :server server :host host :function #'hosting-state-door)
+    (net.aserve:publish :path (door-path "hosting/request") :server server :host host :function #'hosting-request-door)))

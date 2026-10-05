@@ -51,7 +51,7 @@ project past it is flagged for a person rather than read in part.")
 (defparameter *review-page-characters* 40000
   "Integer. The most of one fetched page the review reads.")
 
-(defparameter *review-notify-url* nil
+(defvar *review-notify-url* nil
   "String or nil. An ntfy topic address told of every flag and fail.")
 
 (defparameter *review-system*
