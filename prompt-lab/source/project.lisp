@@ -292,6 +292,22 @@ the reason when it does not read."
           (values (read in nil nil) nil)))
     (error (e) (values nil (condition-text e)))))
 
+(defparameter *image-sexp-fields*
+  '(:name :base :arches :quicklisp-dist :systems :packages :core? :toplevel :ports :stack :local-systems)
+  "The fields of an image.sexp, as common-lisp.net's image kits read one.")
+
+(defvar *image-example* nil)
+
+(defun image-example ()
+  "Monocle's example image.sexp (examples/hello-toll), from the monocle
+system this lab loads: what an image.sexp looks like."
+  (or *image-example*
+      (setq *image-example*
+            (or (ignore-errors (uiop:read-file-string
+                                (asdf:system-relative-pathname :monocle "examples/hello-toll/image.sexp")
+                                :external-format :utf-8))
+                "(Monocle's example image.sexp is not on this host.)"))))
+
 (defun profile-findings (session)
   "What stands between the project and the Monocle profile, as reading
 can tell: a list of (ok? text), one per rule."
@@ -308,10 +324,25 @@ can tell: a list of (ok? text), one per rule."
             (cond ((not (and (consp form) (eq (first form) :image)))
                    (note nil "image.sexp does not read as (:image ...)~@[: ~a~]." why))
                   (t
-                   (let ((plist (rest form)))
-                     (if (stringp (getf plist :toplevel))
-                         (note t "image.sexp names its start function, ~a." (getf plist :toplevel))
-                         (note nil "image.sexp names no :toplevel, the function that starts the application."))
+                   (let* ((plist (rest form))
+                          (toplevel (getf plist :toplevel))
+                          (unknown (loop for (key nil) on plist by #'cddr
+                                         unless (member key *image-sexp-fields*) collect key)))
+                     (when unknown
+                       (note nil "image.sexp has field~p the image kits do not know: ~{~s~^ ~}." (length unknown) unknown))
+                     (unless (stringp (getf plist :name))
+                       (note nil "image.sexp names no :name."))
+                     (unless (consp (getf plist :base))
+                       (note nil "image.sexp names no :base, the image it is built on (as in the kits' example)."))
+                     (unless (and (consp (getf plist :systems)) (every #'stringp (getf plist :systems)))
+                       (note nil "image.sexp's :systems should list the Quicklisp systems it loads, as strings."))
+                     (cond ((not (stringp toplevel))
+                            (note nil "image.sexp names no :toplevel, the function that starts the application."))
+                           ((or (find #\( toplevel) (find #\Space toplevel) (not (find #\: toplevel)))
+                            (note nil "image.sexp's :toplevel is ~s: it names a function as package:name, with no parentheses." toplevel))
+                           (t (note t "image.sexp names its start function, ~a." toplevel)))
+                     (unless (getf plist :local-systems)
+                       (note nil "image.sexp names no :local-systems: the project's own systems, whose .asd files are in it."))
                      (dolist (name (getf plist :local-systems))
                        (if (find-if #'(lambda (p) (string-equal (file-namestring p) (format nil "~a.asd" name))) paths)
                            (note t "~a.asd is in the project (:local-systems)." name)
@@ -462,6 +493,12 @@ How to work:
 3. check_profile after your changes, and mend what it reports.
 4. Finish with a short reply: what you changed and why, file by file, and that Push offers the changes as a merge request on GitLab, which the visitor approves there.  Nothing reaches GitLab until they do.
 
+image.sexp is common-lisp.net's custom-image spec: the house builds the image from it, field by field, and refuses a field it does not know.  Monocle's example, for a Hunchentoot application whose own system is hello-toll:
+
+~a
+- :systems lists the Quicklisp systems the image loads (strings); :local-systems the project's own systems, each with its .asd in the project; :toplevel names the start function as package:name, never a form; :ports the port it listens on when PORT is unset.
+- Copy :base, :arches and :quicklisp-dist from the example unless the visitor asks otherwise, and keep :packages nil, :core? nil and :stack nil.
+
 Rules:
 - Never write a credential, a token or a key into a file.
 - The project keeps its author's licence; monetize.sexp's :license states it.  Do not change a licence unless the visitor asks.
@@ -472,4 +509,5 @@ The Monocle profile:
 
 ~a"
             *brand* (gethash "path" record) *gitlab-url* (gethash "branch" record)
+            (image-example)
             (monocle-profile))))
