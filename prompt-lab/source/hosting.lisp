@@ -319,7 +319,8 @@ approved, held for a person, or failed."
         (let ((verdict (gethash "verdict" review)))
           (cond ((equal verdict "pass") (hosting-state! request "approved" "The review passed."))
                 ((equal verdict "fail") (hosting-state! request "failed" "The review failed it: ~a" (gethash "summary" review)))
-                (t (hosting-state! request "held" "Held for a person: ~a" (gethash "summary" review)))))
+                ;; a held review's summary says so already
+                (t (hosting-state! request "held" "~a" (gethash "summary" review)))))
         (notify-review! review (format nil "deploy request ~a of ~a at ~a" id project (gethash "sha" request)))))))
 
 (defun decide-held-request! (id release?)

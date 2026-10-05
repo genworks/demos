@@ -361,6 +361,7 @@ SESSION's balance -- or nil."
 .pl-kinds{margin:0 0 .45rem;gap:.7rem;flex-wrap:wrap;font-size:.9em}.pl-kinds .pl-line{margin:0}
 .pl-pick{display:inline-flex;gap:.3rem;align-items:center;cursor:pointer}.pl-pick input{accent-color:var(--pl-accent,#366fc5);margin:0}
 .pl-open-app{font-weight:600;color:var(--pl-link,#1550a8)}
+.pl-project a{color:var(--pl-link,#1550a8);text-decoration:underline}
 .pl-monetize .pl-open-app{font-weight:400;font-size:.85em;overflow-wrap:anywhere}
 .pl-deploy{margin-top:.5rem;font-size:.9em}.pl-deploy label{display:block;margin:.45rem 0 0;color:var(--pl-ink-dim,#555)}
 .pl-deploy label.pl-pick{display:flex;color:var(--pl-ink,#111)}
