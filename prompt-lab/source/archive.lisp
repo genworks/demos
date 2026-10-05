@@ -115,6 +115,10 @@ Never signals."
            (format out "### Tool: write_model~%~%```lisp~%~a~%```~%~%" source))
           ((and (equal name "evaluate") (stringp expression))
            (format out "### Tool: evaluate~%~%```lisp~%~a~%```~%~%" expression))
+          ;; a project's file (project.lisp), as written
+          ((and (equal name "write_project_file") (hash-table-p input) (stringp (gethash "content" input)))
+           (format out "### Tool: write_project_file ~a~%~%```~%~a~%```~%~%"
+                   (gethash "path" input) (gethash "content" input)))
           (t (format out "### Tool: ~a~%~%~a~%~%" name
                      (if (and (hash-table-p input) (plusp (hash-table-count input)))
                          (encode input)

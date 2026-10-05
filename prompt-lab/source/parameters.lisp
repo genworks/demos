@@ -180,6 +180,27 @@ that host alone, and the lab's app doors send a request that arrives
 elsewhere there (kinds.lisp).  Nil: apps on the lab's own address, as on
 a development ship.")
 
+(defparameter *gitlab-url* nil
+  "String or nil. The GitLab a visitor's own project may be opened from
+(project.lisp), \"https://gitlab.common-lisp.net\": its public projects are
+read through its API with no sign-in.  Nil: no projects in this lab.")
+
+(defparameter *git-gate-url* nil
+  "String or nil. Where a project session's changes are staged as a push
+(project.lisp): the :git-gate door of a Cyclops, \"http://cyclops/_git\".
+The lab holds no GitLab credential: the visitor approves the push on the
+gate's own page, signed in with GitLab there.  Nil: no pushes.")
+
+(defparameter *git-approve-base* "/_git"
+  "String. Where the visitor's browser finds the gate's pages: the gate's
+rule path on the lab's own name.")
+
+(defparameter *project-limits*
+  '(:files 400 :file-bytes 200000 :bytes 4000000)
+  "Plist. What one project session may hold: how many files, the largest
+file, all of them together.  An import takes the text files that fit and
+says what it left out.")
+
 (defparameter *session-header* "X-Prompt-Lab-Session"
   "String. The header that names a session to the gate (the gate rule's
 :session-header).")

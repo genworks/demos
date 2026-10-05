@@ -299,6 +299,10 @@ SESSION's balance -- or nil."
 .pl-card h2{font-size:.85rem;margin:0 0 .4rem;font-family:var(--pl-font-label);font-weight:var(--pl-label-weight,700);text-transform:var(--pl-label-case);letter-spacing:var(--pl-label-tracking)}
 .sluice-tile .pl-card{border:0;border-radius:0}
 .pl-app-host{display:contents}
+#pl-app-stage .pl-project-stage{flex:1 1 auto;overflow:auto;padding:1rem 1.5rem;color:#111;font-size:.9rem}
+#pl-app-stage .pl-project-stage pre{white-space:pre-wrap;background:#f6f6f4;padding:.6rem;border:1px solid #ddd}
+#pl-app-stage .pl-project-stage ul{padding-left:1.2rem;columns:2}
+.pl-dim{color:var(--pl-ink-dimmer,#888)}
 #sluice-panes:has(#pl-app-stage){display:flex!important}
 #sluice-panes:has(#pl-app-stage)>div:not(.pl-app-host),#sluice-panes:has(#pl-app-stage)>.sluice-split{display:none!important}
 #pl-app-stage{flex:1 1 auto;display:flex;min-width:0;min-height:0;background:#fff}
@@ -549,6 +553,8 @@ not hold."
    (title (lab-title))
    (audience :public)
    (tiles (list (list :object (the prompt-tile) :place :left :tab "Prompt")
+                ;; a visitor's own project, from GitLab (project.lisp)
+                (list :object (the project-tile) :place :left :tab "Prompt")
                 (list :object (the app-section) :place :left :tab "Prompt")
                 (list :object (the monetize-tile) :place :left :tab "Prompt")
                 (list :object (the files-section) :place :left :tab "Prompt")
@@ -569,7 +575,7 @@ not hold."
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
    (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :wear-skin :upload :adopt
-                           :deploy :undeploy))
+                           :deploy :undeploy :open-project :push-project))
 
    ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
    ;; sibling, on this site) whose files this lab is offered (routing.lisp)
@@ -691,7 +697,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', dpot: 0, kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{gitproject: '', pushurl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', dpot: 0, kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+            ;; the gate's page for the session's last staged push (project.lisp)
+            (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; whether what the session built charges for anything yet: the
             ;; Monetize button is greyed until it does (deploy.lisp)
             (json-boolean (let ((session (the session)))
@@ -839,6 +847,60 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                         (:p :class "pl-notice" :|data-show| "$notice" :|data-text| "$notice")
                         (:p :class "pl-error" :|data-show| "$error" :|data-text| "$error"))))
 
+   ;; A visitor's own project, from GitLab (project.lisp): the form that
+   ;; opens one in a fresh session, and, in a project session, what has
+   ;; changed, how it stands against the profile, and the push -- staged at
+   ;; the git gate and approved by the visitor on the gate's own page
+   ;; ($pushurl), signed in with GitLab there.
+   (project-tile
+    :type 'base-html-div
+    :inner-html (progn
+                  (the revision)
+                  (let ((session (the session)))
+                    (with-lhtml-string ()
+                      (when (projects-offered?)
+                        (cond
+                          ((project-session? session)
+                           (let ((record (project-record session))
+                                 (changes (project-changes session))
+                                 (findings (profile-findings session)))
+                             (htm (:div :class "pl-card pl-project"
+                                        (:h2 "GitLab project")
+                                        (:p :class "pl-line"
+                                            (:a :href (gethash "web_url" record) :target "_blank" :rel "noopener"
+                                                (esc (gethash "path" record)))
+                                            (fmt " -- ~d file~:p" (length (project-paths (project-directory session)))))
+                                        (:p :class "pl-line"
+                                            (fmt "The profile: ~:[~d thing~:p to do~;met, as far as reading can tell~*~]."
+                                                 (every #'first findings) (count nil findings :key #'first)))
+                                        (if changes
+                                            (htm (:p :class "pl-line" (fmt "Changed: ~{~a~^, ~}" changes)))
+                                            (htm (:p :class "pl-line pl-dim" "Nothing changed yet.")))
+                                        (when (and (pushes-offered?) changes)
+                                          (htm (:div :class "pl-row" :style "display:none" :|data-show| "$editable"
+                                                     (:button :type "button" :class "pl-build"
+                                                              :|data-attr:disabled| "$busy"
+                                                              :|data-on:click| (the (datastar-action :push-project
+                                                                                                     :options "{filterSignals: {include: /^(owner)$/}}"))
+                                                              "Push changes"))))
+                                        (:p :class "pl-line" :style "display:none" :|data-show| "$pushurl"
+                                            (:a :target "_blank" :rel "noopener" :|data-attr:href| "$pushurl"
+                                                "Approve the push on GitLab")
+                                            " -- you sign in with GitLab there, and nothing is pushed until you press its button.")))))
+                          ((not (and session (or (model-defined? session) (app-defined? session))))
+                           (htm (:div :class "pl-card pl-project" :style "display:none" :|data-show| "!$opened || $editable"
+                                      (:h2 "Your GitLab project")
+                                      (:p :class "pl-line"
+                                          (fmt "Open your own project from ~a and have the agent work on it -- to bring it into the profile a house hosts by, say.  The changes go back as a merge request you approve." *gitlab-url*))
+                                      (:div :class "pl-row"
+                                            (:input :type "text" :placeholder "group/project" :|data-bind:gitproject| ""
+                                                    :style "flex:1;min-width:0")
+                                            (:button :type "button" :class "pl-build"
+                                                     :|data-attr:disabled| "$busy || !$gitproject"
+                                                     :|data-on:click| (the (datastar-action :open-project
+                                                                                            :options "{filterSignals: {include: /^(gitproject|owner|turnstile|wallet)$/}}"))
+                                                     "Open")))))))))))
+
    ;; The session's web app (kinds.lisp), once there is one: a page of
    ;; its own, opened beside the lab by whoever may see the session.
    ;; Nothing shows until then.
@@ -881,6 +943,20 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                   (the model-stamp)
                   (let ((session (the session)))
                     (with-lhtml-string ()
+                      ;; a project session: the project on the stage, as it
+                      ;; stands against the profile and file by file
+                      (when (project-session? session)
+                        (the revision)
+                        (let ((changes (project-changes session)))
+                          (htm (:div :id "pl-app-stage"
+                                     (:div :class "pl-project-stage"
+                                           (:h2 (esc (gethash "path" (project-record session))))
+                                           (:pre (esc (profile-text session)))
+                                           (:ul (dolist (file (project-files session))
+                                                  (htm (:li (:code (esc (car file)))
+                                                            (fmt " (~:d)" (cdr file))
+                                                            (when (member (car file) changes :test #'string=)
+                                                              (htm (:b " changed"))))))))))))
                       (when (app-staged? session)
                         (htm (:div :id "pl-app-stage"
                                    (:iframe :title "The web app this session built"
@@ -1466,6 +1542,55 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                          s))))
                       (the (tell-error! reason)))))
             (the spent-token!)))))
+
+   (open-project
+    (signals)
+    ;; a visitor's own project, read from GitLab into a fresh session (or
+    ;; read again into the project session it is): project.lisp
+    (let ((address (client-address *datastar-request*))
+          (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token)))
+          (session (the session)))
+      (cond ((not (projects-offered?)) (the (tell-error! "This lab opens no projects.")))
+            ((the archive-id) (the (tell-error! "An archived session opens no project.")))
+            ((and session (not (the owner?)))
+             (the (tell-error! "This session is someone else's; start your own to open a project.")))
+            ((and session (not (project-session? session))
+                  (or (model-defined? session) (app-defined? session)))
+             (the (tell-error! "This session has built something already: open the project in a new session.")))
+            ((and session (session-busy? session))
+             (the (tell-error! "The agent is at work; open the project when it is done.")))
+            ((not (verify-turnstile token address))
+             (the (tell-error! "Complete the human check first.")))
+            ((the (own-session! address (gethash "wallet" signals)))
+             (multiple-value-bind (opened reason) (import-project! (the session) (gethash "gitproject" signals))
+               (if opened
+                   (sheet-send! self (datastar-signals-event
+                                      (with-output-to-string (s)
+                                        (yason:encode (h "error" "" "gitproject" "" "pushurl" ""
+                                                         "notice" (format nil "Opened ~a: ~d file~:p.  Ask the agent for what it needs."
+                                                                          (getf opened :path) (getf opened :files)))
+                                                      s))))
+                   (the (tell-error! reason))))
+             (the spent-token!)))))
+
+   (push-project
+    (signals)
+    ;; the project's changes staged at the git gate; the visitor approves
+    ;; the push on the gate's page ($pushurl), signed in with GitLab there
+    (let ((session (and signals (the session))))
+      (cond ((not (and session (the owner?)))
+             (the (tell-error! "Only the session's owner may push its changes.")))
+            ((session-busy? session)
+             (the (tell-error! "The agent is at work; push when it is done.")))
+            (t
+             (multiple-value-bind (url reason) (stage-push! session)
+               (if url
+                   (sheet-send! self (datastar-signals-event
+                                      (with-output-to-string (s)
+                                        (yason:encode (h "error" "" "pushurl" url
+                                                         "notice" "The push is ready: approve it on GitLab, through the link under Push.")
+                                                      s))))
+                   (the (tell-error! reason))))))))
 
    (undeploy
     (signals)

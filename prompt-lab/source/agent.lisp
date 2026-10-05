@@ -84,9 +84,11 @@ lists for yason."
 (defun system-text (&optional session)
   "The system prompt for SESSION by what it builds (kinds.lisp): a geometry
 model, the default and what no session at all gets, or a web app."
-  (if (and session (eq (session-kind session) :app))
-      (app-system-text)
-      (model-system-text)))
+  (case (and session (session-kind session))
+    (:app (app-system-text))
+    ;; the visitor's own project (project.lisp)
+    (:project (project-system-text session))
+    (t (model-system-text))))
 
 (defun app-system-text ()
   (format nil "~a
@@ -584,7 +586,9 @@ come along, ahead of the prompt's text, as references (uploads.lisp)."
 started; nil when the session was busy.  KIND, a keyword, is what the
 session builds from this prompt on (kinds.lisp)."
   (when (claim! session)
-    (when (and kind (not (eq kind (session-kind session))))
+    ;; a project session stays one: the page's switch is for the others
+    (when (and kind (not (eq kind (session-kind session)))
+               (not (eq (session-kind session) :project)))
       (handler-case
           (progn (set-session-kind! session kind)
                  (log-event session :note "This session now builds ~a."

@@ -25,12 +25,22 @@ page shows no switch.")
 
 (defparameter *kind-labels*
   '(:model "Geometry model"
-    :app "Web app")
+    :app "Web app"
+    :project "Your project")
   "Plist, kind -> what the page's switch calls it.")
 
 (defun default-kind () (or (first *kinds*) :model))
 
 (defun kind-name (kind) (string-downcase (symbol-name kind)))
+
+(defun recorded-kind (name)
+  "The kind a record names (\"app\", \"project\", \"model\"), whether or not
+this lab offers it now; :model for anything else.  A :project session is
+one that opened a visitor's project (project.lisp): never offered on the
+page's switch, so not in *kinds*."
+  (cond ((equal name "app") :app)
+        ((equal name "project") :project)
+        (t :model)))
 
 (defun kind-label (kind) (or (getf *kind-labels* kind) (kind-name kind)))
 

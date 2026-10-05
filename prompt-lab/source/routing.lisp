@@ -232,7 +232,9 @@ plist -- :engine the one wanted, :reason for the visitor, :url the
 sibling lab's address for them -- and the session's log says so."
   (when (and *route-prompts?* (car *sibling-lab*)
              (zerop (prompts-used session))
-             (not (model-defined? session)))
+             (not (model-defined? session))
+             ;; a visitor's own project is worked on where it was opened
+             (not (eq (session-kind session) :project)))
     (let* ((said (prompt-engine prompt))
            (kept (and (null said) (session-routing session)))
            (classifier (and (null said) (null kept)
