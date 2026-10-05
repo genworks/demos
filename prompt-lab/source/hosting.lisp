@@ -98,15 +98,64 @@ long is offered again.")
   (sort (remove nil (mapcar #'read-json-file (directory (hosting-path "requests/*.json"))))
         #'< :key #'(lambda (request) (or (gethash "made" request) 0))))
 
+(defun session-hosting-request (session-id)
+  "The latest request asked from the lab session SESSION-ID, or nil."
+  (find session-id (reverse (hosting-requests)) :key #'(lambda (request) (gethash "session" request)) :test #'equal))
+
+(defparameter *hosting-state-texts*
+  '(("queued" . "waiting for the apps host")
+    ("checking" . "being built and checked")
+    ("reviewing" . "being read")
+    ("approved" . "passed, going up")
+    ("held" . "held for a person to look at")
+    ("deploying" . "going up")
+    ("live" . "live")
+    ("failed" . "not hosted")
+    ("rejected" . "not hosted: rejected by a person")
+    ("error" . "could not be put up"))
+  "What the page calls each state of a request.")
+
+(defun hosting-state-text (state)
+  (or (cdr (assoc state *hosting-state-texts* :test #'equal)) state))
+
+(defun hosting-request-reasons (request)
+  "The lines that say why REQUEST did not go up, or is held: the check's
+FAIL lines, the review's summary and findings, the apps host's last
+words.  Nil for a request that is on its way or up."
+  (let ((state (gethash "state" request))
+        (check (gethash "check" request))
+        (review (gethash "review" request)))
+    (when (member state '("failed" "held" "rejected" "error") :test #'equal)
+      (append
+       (when (hash-table-p check)
+         (remove-if-not #'(lambda (line) (and (stringp line) (> (length line) 4) (string= "FAIL" line :end2 4)))
+                        (coerce (or (gethash "lines" check) #()) 'list)))
+       (when (hash-table-p review)
+         (cons (gethash "summary" review)
+               (map 'list #'(lambda (finding)
+                              (format nil "~a: ~a" (gethash "where" finding) (gethash "detail" finding)))
+                    (or (gethash "findings" review) #()))))
+       (let ((last (car (last (gethash "history" request)))))
+         (when (and (equal state "error") (hash-table-p last))
+           (list (gethash "note" last))))))))
+
 (defun hosting-state! (request state &optional control &rest arguments)
-  "Move REQUEST to STATE, noting why in its history, and save it."
-  (setf (gethash "state" request) state
-        (gethash "changed" request) (epoch-seconds (get-universal-time))
-        (gethash "history" request)
-        (append (gethash "history" request)
-                (list (h "time" (epoch-seconds (get-universal-time)) "state" state
-                         "note" (and control (apply #'format nil control arguments))))))
-  (save-hosting-request! request))
+  "Move REQUEST to STATE, noting why in its history, and save it.  The
+lab session it was asked from hears of it in its log, so its page shows
+the step as it happens."
+  (let ((note (and control (apply #'format nil control arguments))))
+    (setf (gethash "state" request) state
+          (gethash "changed" request) (epoch-seconds (get-universal-time))
+          (gethash "history" request)
+          (append (gethash "history" request)
+                  (list (h "time" (epoch-seconds (get-universal-time)) "state" state "note" note))))
+    (save-hosting-request! request)
+    (let* ((id (gethash "session" request))
+           (session (and (stringp id) (ignore-errors (find-session id)))))
+      (when session
+        (ignore-errors
+         (log-event session :note "Hosting ~a: ~a~@[ -- ~a~]" (gethash "project" request) state note))))
+    request))
 
 (defun new-hosting-request! (&key project-id project sha web-url session requester)
   "Queue PROJECT (its path on the forge, its id there) at commit SHA for
@@ -382,9 +431,50 @@ approved it: the request queued.  Answers {id}."
                              (or (gethash "requester" json) "A maintainer") project (subseq sha 0 8) (gethash "id" request))))
               (respond-json req ent (h "id" (gethash "id" request))))))))
 
+(defvar *hosting-admin-secret* nil
+  "String or nil. The secret an admin of the lab sends in
+X-Hosting-Admin-Secret to see and decide held requests.  Nil shuts
+those doors.")
+
+(defun admin-allowed? (req)
+  (let ((given (net.aserve:header-slot-value req :x-hosting-admin-secret)))
+    (and (stringp *hosting-admin-secret*) (plusp (length *hosting-admin-secret*)) (stringp given)
+         (= (length given) (length *hosting-admin-secret*))
+         (zerop (loop for a across given for b across *hosting-admin-secret*
+                      sum (logxor (char-code a) (char-code b)))))))
+
+(defun hosting-held-door (req ent)
+  "GET <prefix>/api/hosting/held, an admin: the requests held for a
+person, each with the review's verdict and findings."
+  (if (not (admin-allowed? req))
+      (respond-json req ent (h "error" "Not found.") net.aserve:*response-not-found*)
+      (respond-json req ent
+                    (h "held" (map 'vector #'(lambda (request)
+                                                 (h "id" (gethash "id" request) "project" (gethash "project" request)
+                                                    "sha" (gethash "sha" request) "name" (gethash "name" request)
+                                                    "requester" (gethash "requester" request)
+                                                    "review" (gethash "review" request)))
+                                     (remove "held" (hosting-requests) :key #'(lambda (r) (gethash "state" r))
+                                                                       :test-not #'equal))))))
+
+(defun hosting-decide-door (req ent)
+  "POST <prefix>/api/hosting/decide {id, release}, an admin: a held
+request released (approved, for the worker to deploy) or rejected."
+  (if (not (admin-allowed? req))
+      (respond-json req ent (h "error" "Not found.") net.aserve:*response-not-found*)
+      (let* ((json (request-json req))
+             (why (if json
+                      (decide-held-request! (gethash "id" json) (eq (gethash "release" json) t))
+                      "Send {id, release}.")))
+        (if why
+            (respond-json req ent (h "error" why) net.aserve:*response-bad-request*)
+            (respond-json req ent (h "ok" t))))))
+
 (defun publish-hosting! (&key host)
   (gwl:with-all-servers (server)
     (net.aserve:publish :path (door-path "hosting/next") :server server :host host :function #'hosting-next-door)
     (net.aserve:publish :path (door-path "hosting/report") :server server :host host :function #'hosting-report-door)
     (net.aserve:publish :path (door-path "hosting/state") :server server :host host :function #'hosting-state-door)
-    (net.aserve:publish :path (door-path "hosting/request") :server server :host host :function #'hosting-request-door)))
+    (net.aserve:publish :path (door-path "hosting/request") :server server :host host :function #'hosting-request-door)
+    (net.aserve:publish :path (door-path "hosting/held") :server server :host host :function #'hosting-held-door)
+    (net.aserve:publish :path (door-path "hosting/decide") :server server :host host :function #'hosting-decide-door)))

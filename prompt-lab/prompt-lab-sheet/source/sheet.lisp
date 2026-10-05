@@ -577,7 +577,7 @@ not hold."
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
    (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :wear-skin :upload :adopt
-                           :deploy :undeploy :open-project :push-project))
+                           :deploy :undeploy :open-project :push-project :deploy-project))
 
    ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
    ;; sibling, on this site) whose files this lab is offered (routing.lisp)
@@ -699,9 +699,11 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{gitproject: '', pushurl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', dpot: 0, kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', dpot: 0, kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
+            ;; and of its last staged hosting (hosting.lisp)
+            (js-string-literal (or (and (the session) (car (gethash (session-id (the session)) *session-hostings*))) ""))
             ;; whether what the session built charges for anything yet: the
             ;; Monetize button is greyed until it does (deploy.lisp)
             (json-boolean (let ((session (the session)))
@@ -888,12 +890,42 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                         (:p :class "pl-line" :style "display:none" :|data-show| "$pushurl"
                                             (:a :target "_blank" :rel "noopener" :|data-attr:href| "$pushurl"
                                                 "Approve the push on GitLab")
-                                            " -- you sign in with GitLab there, and nothing is pushed until you press its button.")))))
+                                            " -- you sign in with GitLab there, and nothing is pushed until you press its button.")
+                                        ;; hosting (hosting.lisp): the default branch as it is on
+                                        ;; GitLab, so only a project with nothing left to push
+                                        (when (and (pushes-offered?) (not changes) (notevery #'first findings))
+                                          (htm (:p :class "pl-line pl-dim"
+                                                   (fmt "Deploy to ~a opens once the profile is met on GitLab: have the agent bring it in, push, and merge." *hosting-domain*))))
+                                        (when (and (pushes-offered?) (not changes) (every #'first findings))
+                                          (htm (:div :class "pl-row" :style "display:none" :|data-show| "$editable"
+                                                     (:button :type "button" :class "pl-build"
+                                                              :data-doc (format nil "Host the project's default branch, as it is on GitLab, at its own name under ~a: the house builds and checks it, reads it, and puts it up if both pass.  A Maintainer of the project approves it on GitLab." *hosting-domain*)
+                                                              :|data-attr:disabled| "$busy"
+                                                              :|data-on:click| (the (datastar-action :deploy-project
+                                                                                                     :options "{filterSignals: {include: /^(owner)$/}}"))
+                                                              (fmt "Deploy to ~a" *hosting-domain*)))))
+                                        (:p :class "pl-line" :style "display:none" :|data-show| "$hosturl"
+                                            (:a :target "_blank" :rel "noopener" :|data-attr:href| "$hosturl"
+                                                "Approve hosting on GitLab")
+                                            " -- a Maintainer of the project signs in with GitLab there; nothing is sent until the button is pressed.")
+                                        (let ((request (session-hosting-request (session-id session))))
+                                          (when request
+                                            (htm (:div :class "pl-hosting"
+                                                       (:p :class "pl-line"
+                                                           (fmt "Hosting ~a at ~a: " (gethash "project" request)
+                                                                (subseq (gethash "sha" request) 0 8))
+                                                           (:b (esc (hosting-state-text (gethash "state" request)))))
+                                                       (when (gethash "url" request)
+                                                         (htm (:p :class "pl-line"
+                                                                  (:a :href (gethash "url" request) :target "_blank" :rel "noopener"
+                                                                      (esc (gethash "url" request))))))
+                                                       (dolist (line (hosting-request-reasons request))
+                                                         (htm (:p :class "pl-line pl-dim" (esc line))))))))))))
                           ((not (and session (or (model-defined? session) (app-defined? session))))
                            (htm (:div :class "pl-card pl-project" :style "display:none" :|data-show| "!$opened || $editable"
                                       (:h2 "Your GitLab project")
                                       (:p :class "pl-line"
-                                          (fmt "Open your own project from ~a and have the agent work on it -- to bring it into the profile a house hosts by, say.  The changes go back as a merge request you approve." *gitlab-url*))
+                                          (fmt "Open your own project from ~a.  Ready as it is?  Deploy it to ~a once it passes the house's checks.  If not, have the agent bring it into the profile first; the changes go back as a merge request you approve." *gitlab-url* *hosting-domain*))
                                       (:div :class "pl-row"
                                             (:input :type "text" :placeholder "group/project" :|data-bind:gitproject| ""
                                                     :style "flex:1;min-width:0")
@@ -1604,6 +1636,25 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                       (with-output-to-string (s)
                                         (yason:encode (h "error" "" "pushurl" url
                                                          "notice" "The push is ready: approve it on GitLab, through the link under Push.")
+                                                      s))))
+                   (the (tell-error! reason))))))))
+
+   (deploy-project
+    (signals)
+    ;; hosting the project's default branch (hosting.lisp): staged at the
+    ;; git gate, approved there by a Maintainer of the project ($hosturl)
+    (let ((session (and signals (the session))))
+      (cond ((not (and session (the owner?)))
+             (the (tell-error! "Only the session's owner may ask to host its project.")))
+            ((session-busy? session)
+             (the (tell-error! "The agent is at work; ask when it is done.")))
+            (t
+             (multiple-value-bind (url reason) (stage-deploy! session)
+               (if url
+                   (sheet-send! self (datastar-signals-event
+                                      (with-output-to-string (s)
+                                        (yason:encode (h "error" "" "hosturl" url
+                                                         "notice" "Ready: approve hosting on GitLab, through the link under Deploy.")
                                                       s))))
                    (the (tell-error! reason))))))))
 
