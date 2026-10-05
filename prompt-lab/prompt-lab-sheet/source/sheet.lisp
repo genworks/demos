@@ -303,8 +303,10 @@ SESSION's balance -- or nil."
 #pl-app-stage .pl-project-stage pre{white-space:pre-wrap;background:#f6f6f4;padding:.6rem;border:1px solid #ddd}
 #pl-app-stage .pl-project-stage ul{padding-left:1.2rem;columns:2}
 .pl-dim{color:var(--pl-ink-dimmer,#888)}
-#sluice-panes:has(#pl-app-stage){display:flex!important}
-#sluice-panes:has(#pl-app-stage)>div:not(.pl-app-host),#sluice-panes:has(#pl-app-stage)>.sluice-split{display:none!important}
+#sluice-panes:has(#pl-app-stage:not([style*=none])){display:flex!important}
+#sluice-panes:has(#pl-app-stage:not([style*=none]))>div:not(.pl-app-host),#sluice-panes:has(#pl-app-stage:not([style*=none]))>.sluice-split{display:none!important}
+#pl-app-stage .pl-app-empty{flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem;color:#555;text-align:center;border:2px dashed #ddd;margin:1rem}
+#pl-app-stage .pl-app-empty h2{font-size:1.1rem;margin:0 0 .5rem;color:#111}
 #pl-app-stage{flex:1 1 auto;display:flex;min-width:0;min-height:0;background:#fff}
 #pl-app-stage iframe{flex:1 1 auto;width:100%;height:100%;border:0;background:#fff}
 #pl-prompt{width:100%;box-sizing:border-box;font:inherit;padding:.4rem;background:var(--pl-panel,#fff);color:var(--pl-ink,#111);border:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd);border-radius:var(--pl-radius,4px)}
@@ -957,6 +959,19 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                             (fmt " (~:d)" (cdr file))
                                                             (when (member (car file) changes :test #'string=)
                                                               (htm (:b " changed"))))))))))))
+                      ;; a web app not built yet: an empty frame where it
+                      ;; will be, not the sluice's welcome.  Before the
+                      ;; session opens, the switch decides (Datastar hides
+                      ;; it with an inline display:none, which *sheet-css*
+                      ;; reads to give the panes back for a model).
+                      (when (and (not (app-staged? session))
+                                 (not (and session (project-session? session)))
+                                 (or (null session) (eq (session-kind session) :app)))
+                        (htm (:div :id "pl-app-stage"
+                                   :|data-show| (if session "true" "$kind == 'app'")
+                                   (:div :class "pl-app-empty"
+                                         (:h2 "Your web app")
+                                         (:p "It shows here, live, once the agent has built it.  Describe it on the left and press Build.")))))
                       (when (app-staged? session)
                         (htm (:div :id "pl-app-stage"
                                    (:iframe :title "The web app this session built"
