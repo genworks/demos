@@ -17,7 +17,7 @@
 ;;;; and any WARNING signalled while a system loads fails the job.  A
 ;;;; warm development image, where the packages already exist, cannot
 ;;;; catch these; this is the check the 2026-09-11 demos-common outage
-;;;; wanted: a system without source/file-ordering.isc loads its files
+;;;; wanted: a system without source/file-ordering.sexp loads its files
 ;;;; alphabetically, and one that sorts ahead of package.lisp breaks.
 ;;;;
 ;;;; Then a SMOKE RUN through what loaded: each demo is published on
