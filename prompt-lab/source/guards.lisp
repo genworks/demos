@@ -365,7 +365,10 @@ button{margin-top:1rem;width:100%;font-size:1rem;padding:.6rem;border:0;border-r
 (defun unlock-door (req ent)
   "POST <prefix>/api/unlock: the password (form field password) sets the
 cookie and sends the visitor on to next (the prefix by default); a wrong
-one shows the form again.  An open lab just sends the visitor on."
+one shows the form again.  GET <prefix>/api/unlock?next=<path> shows the
+form, for a door elsewhere on the host that admits by the same cookie
+(the proxy's :unlock rule in front of the workshop's console).  An open
+lab just sends the visitor on."
   (let* ((query (net.aserve:request-query req))
          (password (cdr (assoc "password" query :test #'string=)))
          (next (safe-next (cdr (assoc "next" query :test #'string=)))))
@@ -378,4 +381,6 @@ one shows the form again.  An open lab just sends the visitor on."
                                                  :expires (+ (get-universal-time) (* 30 24 3600))))
              (setf (net.aserve:reply-header-slot-value req :location) next)
              (net.aserve:with-http-body (req ent))))
-          (t (unlock-page req ent :wrong t :next next)))))
+          ;; a visit with no password (another door sending the visitor
+          ;; here with ?next=) gets the form; a wrong one, the form again
+          (t (unlock-page req ent :wrong (and password t) :next next)))))
