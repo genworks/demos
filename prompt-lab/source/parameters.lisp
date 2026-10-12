@@ -74,6 +74,22 @@ unplaced at a common origin.")
   "String. Where the page lives: the page at the prefix itself, its doors
 under <prefix>/api/, the viewer at <prefix>/viewer.")
 
+(defparameter *password* nil
+  "String or nil. THE LOCK (2026-10-12): with a password set the lab is
+private -- the page paths show an unlock form, the doors under
+<prefix>/api/ answer 403 -- until the visitor posts it to
+<prefix>/api/unlock and carries the cookie that earns (guards.lisp).
+One password, no username.  Nil leaves the lab open.  Set here by the
+room's init, or read from *password-file* when the lab is published.")
+
+(defparameter *password-file* (namestring (merge-pathnames "prompt-lab-password"
+                                                           (uiop:pathname-parent-directory-pathname
+                                                            (pathname *workspace-root*))))
+  "String or nil. A file holding the password on its first line, beside
+the workspace root: /state/prompt-lab-password on the public workshop,
+/projects/.state/prompt-lab-password on a dev ship.  Read by
+load-password! when *password* is nil; absent, the lab is open.")
+
 (defparameter *console-base* nil
   "String or nil. URL prefix of the host's browser terminal (ttyd behind the
 reverse proxy): \"/console\" on the public workshop, \"/ttyd\" on a dev

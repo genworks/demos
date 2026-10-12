@@ -1031,7 +1031,10 @@ prompt, model, reload, topup, confirm, privacy; sessions, archive,
 archived, replay; upload, file; agent), the tools' door for an external agent at
 <prefix>/mcp, a session's web app at <prefix>/app, and the viewer at
 <prefix>/viewer, on every server.  The
-page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet)."
+page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet).
+With a password set (guards.lisp, THE LOCK) every door of the lab's own
+is behind it -- gated -- and <prefix>/api/unlock is the way in."
+  (load-password!)
   (gwl:with-all-servers (server)
     ;; THE PAGE IS THE SHEET (prompt-lab-sheet, publish-lab-sheet!): it
     ;; answers at the prefix.  The classic page was retired on 2026-10-02;
@@ -1049,38 +1052,41 @@ page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet)."
                         :server server :host host :function #'manifest-door)
     (net.aserve:publish :path (format nil "~a/worker" *url-prefix*)
                         :server server :host host :function #'worker-door)
-    (net.aserve:publish :path (door-path "config") :server server :host host :function #'config-door)
-    (net.aserve:publish :path (door-path "session") :server server :host host :function #'session-door)
-    (net.aserve:publish :path (door-path "state") :server server :host host :function #'state-door)
-    (net.aserve:publish :path (door-path "prompt") :server server :host host :function #'prompt-door)
-    (net.aserve:publish :path (door-path "model") :server server :host host :function #'model-door)
-    (net.aserve:publish :path (door-path "reload") :server server :host host :function #'reload-door)
-    (net.aserve:publish :path (door-path "topup") :server server :host host :function #'topup-door)
-    (net.aserve:publish :path (door-path "confirm") :server server :host host :function #'confirm-door)
-    (net.aserve:publish :path (door-path "privacy") :server server :host host :function #'privacy-door)
+    ;; the way in, when the lab is locked (guards.lisp)
+    (net.aserve:publish :path (door-path "unlock") :server server :host host :function #'unlock-door)
+    (net.aserve:publish :path (door-path "config") :server server :host host :function (gated #'config-door))
+    (net.aserve:publish :path (door-path "session") :server server :host host :function (gated #'session-door))
+    (net.aserve:publish :path (door-path "state") :server server :host host :function (gated #'state-door))
+    (net.aserve:publish :path (door-path "prompt") :server server :host host :function (gated #'prompt-door))
+    (net.aserve:publish :path (door-path "model") :server server :host host :function (gated #'model-door))
+    (net.aserve:publish :path (door-path "reload") :server server :host host :function (gated #'reload-door))
+    (net.aserve:publish :path (door-path "topup") :server server :host host :function (gated #'topup-door))
+    (net.aserve:publish :path (door-path "confirm") :server server :host host :function (gated #'confirm-door))
+    (net.aserve:publish :path (door-path "privacy") :server server :host host :function (gated #'privacy-door))
     ;; browsing other sessions (browse.lisp)
-    (net.aserve:publish :path (door-path "sessions") :server server :host host :function #'sessions-door)
-    (net.aserve:publish :path (door-path "archive") :server server :host host :function #'archive-door)
-    (net.aserve:publish :path (door-path "archived") :server server :host host :function #'archived-door)
-    (net.aserve:publish :path (door-path "replay") :server server :host host :function #'replay-door)
+    (net.aserve:publish :path (door-path "sessions") :server server :host host :function (gated #'sessions-door))
+    (net.aserve:publish :path (door-path "archive") :server server :host host :function (gated #'archive-door))
+    (net.aserve:publish :path (door-path "archived") :server server :host host :function (gated #'archived-door))
+    (net.aserve:publish :path (door-path "replay") :server server :host host :function (gated #'replay-door))
     ;; the archive's thumbnails (thumbs.lisp)
-    (net.aserve:publish :path (door-path "thumb") :server server :host host :function #'thumb-door)
+    (net.aserve:publish :path (door-path "thumb") :server server :host host :function (gated #'thumb-door))
     ;; the model as files (export.lisp)
-    (net.aserve:publish :path (door-path "download") :server server :host host :function #'download-door)
+    (net.aserve:publish :path (door-path "download") :server server :host host :function (gated #'download-door))
     ;; the visitor's files (uploads.lisp)
-    (net.aserve:publish :path (door-path "upload") :server server :host host :function #'upload-door)
-    (net.aserve:publish :path (door-path "file") :server server :host host :function #'file-door)
+    (net.aserve:publish :path (door-path "upload") :server server :host host :function (gated #'upload-door))
+    (net.aserve:publish :path (door-path "file") :server server :host host :function (gated #'file-door))
     ;; an agent that runs elsewhere (external.lisp); shut unless *external-agent?*
-    (net.aserve:publish :path (door-path "agent") :server server :host host :function #'agent-door)
+    (net.aserve:publish :path (door-path "agent") :server server :host host :function (gated #'agent-door))
     (net.aserve:publish :path (format nil "~a/mcp" *url-prefix*)
-                        :server server :host host :function #'mcp-door)
+                        :server server :host host :function (gated #'mcp-door))
     ;; Monetize: what a session built, deployed for others to use (deploy.lisp)
-    (net.aserve:publish :path (door-path "deploy") :server server :host host :function #'deploy-door)
-    (net.aserve:publish :path (door-path "undeploy") :server server :host host :function #'undeploy-door)
-    (net.aserve:publish :path (door-path "deployments") :server server :host host :function #'deployments-door)
-    (net.aserve:publish :path (door-path "earnings") :server server :host host :function #'earnings-door)
+    (net.aserve:publish :path (door-path "deploy") :server server :host host :function (gated #'deploy-door))
+    (net.aserve:publish :path (door-path "undeploy") :server server :host host :function (gated #'undeploy-door))
+    (net.aserve:publish :path (door-path "deployments") :server server :host host :function (gated #'deployments-door))
+    (net.aserve:publish :path (door-path "earnings") :server server :host host :function (gated #'earnings-door))
     ;; the doors a web app is reached by answer on the apps' own host as
-    ;; well as the lab's (app-doors-host, kinds.lisp)
+    ;; well as the lab's (app-doors-host, kinds.lisp); not behind the lock:
+    ;; a deployed app is for others
     (net.aserve:publish-prefix :prefix (format nil "~a/d/" *url-prefix*)
                                :server server :host (app-doors-host host) :function #'deployed-door)
     (net.aserve:publish :path (format nil "~a/app-file" *url-prefix*)
@@ -1090,8 +1096,8 @@ page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet)."
                         :server server :host (app-doors-host host) :function #'app-door)
     (net.aserve:publish-directory :prefix (format nil "~a/app-static/demo/css/" *url-prefix*)
                                   :server server :host (app-doors-host host)
-                                  :destination (namestring *demos-css-directory*))
-    (publish-gwl-app (format nil "~a/viewer" *url-prefix*) 'viewer :server server :host host))
+                                  :destination (namestring *demos-css-directory*)))
+  (publish-gated-gwl-app (format nil "~a/viewer" *url-prefix*) 'viewer :host host)
   ;; hosting a project on the apps host (hosting.lisp): the worker's doors
   ;; answer only with *hosting-secret*
   (publish-hosting! :host host)

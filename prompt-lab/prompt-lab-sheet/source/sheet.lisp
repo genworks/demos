@@ -1923,10 +1923,12 @@ link to it (a session or an archive entry in its query) comes to the sheet."
 address before it took the prefix; its listings at <prefix>/sheet-list;
 the manifest (app.lisp) also at <prefix>/sheet-manifest.webmanifest, which
 installed apps may still name; and <prefix>/classic, the retired classic
-page's address, sending to the sheet.  Call after publish-prompt-lab!."
-  (gwl::publish-gwl-app *url-prefix* 'lab-sheet :host host)
-  (gwl::publish-gwl-app (concatenate 'string *url-prefix* "/sheet") 'lab-sheet :host host)
-  (gwl::publish-gwl-app (format nil "~a/sheet-list" *url-prefix*) 'lab-listing :host host)
+page's address, sending to the sheet.  Call after publish-prompt-lab!.
+With a password set (guards.lisp, THE LOCK) the pages show the unlock
+form until the visitor has given it."
+  (publish-gated-gwl-app *url-prefix* 'lab-sheet :host host)
+  (publish-gated-gwl-app (concatenate 'string *url-prefix* "/sheet") 'lab-sheet :host host)
+  (publish-gated-gwl-app (format nil "~a/sheet-list" *url-prefix*) 'lab-listing :host host)
   (gwl:with-all-servers (server)
     (net.aserve:publish :path (format nil "~a/classic" *url-prefix*) :server server :host host
                         :function #'classic-door)

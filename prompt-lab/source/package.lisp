@@ -45,6 +45,8 @@
              #:publish-prompt-lab!
              #:*workspace-root*
              #:*url-prefix*
+             #:*password*
+             #:*password-file*
              #:*console-base*
              #:*external-agent?*
              #:*max-prompts-per-session*
