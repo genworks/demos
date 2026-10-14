@@ -358,12 +358,17 @@ already deployed stays on disk and is not served.")
 name: <root>/<engine>/<name>/ holds deployment.json and model.lisp; the
 books are <root>/revenue.jsonl.")
 
-(defparameter *house-fee-percents* '(:open 10 :closed 15)
-  "Plist. The house's share of what a deployment's users pay, its
-monetization fee, in percent, by the deployment's source terms: open (the
-GNU Affero General Public License) or closed.  Written into each
-deployment's record when it is deployed: a later change here does not
-reach back.")
+(defparameter *house-fee-percents*
+  '(:gendl (:open 10 :closed 15)
+    :solid (:open 15 :closed 20))
+  "Plist, engine -> plist. The house's share of what a deployment's users
+pay, its monetization fee, in percent, by the engine the lab runs on
+(*engine*) and then by the deployment's source terms: open (the GNU
+Affero General Public License) or closed.  The closed rate is the open
+rate plus the standalone royalty for closed use of the engine; the solids
+engine's rates are five points above the free engine's, for what its
+hosting costs and what it runs on.  Written into each deployment's
+record when it is deployed: a later change here does not reach back.")
 
 (defparameter *toll-provider* :test
   "Keyword or nil. How a deployed app's tolls are taken: :test (granted at
@@ -376,13 +381,19 @@ community pot, in percentage points on top of the monetization
 fee; the Monetize tile's slider starts here and goes up.  Nil: no slider,
 and nothing goes to the pot.  The fee itself is the house's.")
 
+(defun house-fee-percents ()
+  "The fee rates for this lab's engine: the :open and :closed plist from
+*house-fee-percents*, the free engine's when the engine has none."
+  (or (getf *house-fee-percents* *engine*)
+      (getf *house-fee-percents* :gendl)))
+
 (defun lab-house ()
   "This lab as Monocle knows it: where its deployments and books are kept,
-the engine and the Lisp they run on, its unit (*unit*), the fees, the
-community pot's least share and the toll provider, as the parameters
-above stand now."
+the engine and the Lisp they run on, its unit (*unit*), the fees for its
+engine, the community pot's least share and the toll provider, as the
+parameters above stand now."
   (monocle:make-house :root *deployed-root* :runtime (engine-name) :unit (unit-key)
-                      :fee-percents *house-fee-percents* :pot-percent *pot-percent-least*
+                      :fee-percents (house-fee-percents) :pot-percent *pot-percent-least*
                       :provider *toll-provider*))
 
 (defun house-fee-percent (closed?) (monocle:fee-percent (lab-house) closed?))
