@@ -704,14 +704,20 @@ loaded) its page too."
                               (when (gdl:the-object page (toll-paid? :pass)) (error "the toll was paid before it was paid"))
                               (gdl:the-object page (pay-toll! :pass))
                               (unless (gdl:the-object page (toll-paid? :pass)) (error "the toll was not paid after it was"))
-                              ;; the card cost comes off the top, then the fee (open
-                              ;; source: a tenth) and the pot's 20 points, in rivets
-                              (let ((line (uiop:symbol-call :prompt-lab :book-revenue! name 1000
-                                                            :card-cents 60 :test? t)))
-                                (unless (and (= (gethash "fee_rivets" line) 94)
-                                             (= (gethash "pot_rivets" line) 188)
-                                             (= (gethash "payee_rivets" line) 658)
-                                             (= (gethash "fee_before_card_rivets" line) 100))
+                              ;; the card cost comes off the top, then the fee (the
+                              ;; open rate for this engine: a tenth on the free one,
+                              ;; three twentieths on solids) and the pot's 20 points,
+                              ;; in rivets
+                              (let* ((percent (uiop:symbol-call :prompt-lab :house-fee-percent nil))
+                                     (net 940)
+                                     (fee (/ (* net percent) 100))
+                                     (pot (/ (* net 20) 100))
+                                     (line (uiop:symbol-call :prompt-lab :book-revenue! name 1000
+                                                             :card-cents 60 :test? t)))
+                                (unless (and (= (gethash "fee_rivets" line) fee)
+                                             (= (gethash "pot_rivets" line) pot)
+                                             (= (gethash "payee_rivets" line) (- net fee pot))
+                                             (= (gethash "fee_before_card_rivets" line) (/ (* 1000 percent) 100)))
                                   (error "the card cost, the fee and the pot's share did not split as they should")))
                               (unless (eql 403 (nth-value 1 (http :get (format nil "~a?name=~a" (door "earnings") name))))
                                 (error "a stranger read a deployment's earnings"))

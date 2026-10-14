@@ -169,8 +169,7 @@ isometric, the cut list, notes and the title block."
                         (list "UNITS" "INCHES")
                         (list "DATE" (the date))
                         (list "SHEET" "1 OF 1")
-                        (list "HIDDEN LINES" (string-upcase (string (the hidden-lines))))))
-           (columns '(0 46 130 196 232 256)))
+                        (list "HIDDEN LINES" (string-upcase (string (the hidden-lines)))))))
       (append
        ;; title block: the title, a summary line, then a 3 x 2 grid of fields
        (list (list pl (+ b (* 3 row) 54) (list (the title)) 20 "Helvetica-Bold")
