@@ -700,16 +700,16 @@ loaded) its page too."
                             (let* ((deployed (uiop:symbol-call :prompt-lab :ensure-deployed name))
                                    (page (gdl:make-object (uiop:symbol-call :prompt-lab :app-symbol deployed)
                                                           :deployment-name name))
-                                   (before (length (uiop:symbol-call :prompt-lab :revenue-lines))))
+                                   (before (length (uiop:symbol-call :prompt-lab :revenue-lines)))
+                                   ;; the open fee rate on this engine: a tenth on the free
+                                   ;; one, three twentieths on solids
+                                   (percent (uiop:symbol-call :prompt-lab :house-fee-percent nil)))
                               (when (gdl:the-object page (toll-paid? :pass)) (error "the toll was paid before it was paid"))
                               (gdl:the-object page (pay-toll! :pass))
                               (unless (gdl:the-object page (toll-paid? :pass)) (error "the toll was not paid after it was"))
-                              ;; the card cost comes off the top, then the fee (the
-                              ;; open rate for this engine: a tenth on the free one,
-                              ;; three twentieths on solids) and the pot's 20 points,
-                              ;; in rivets
-                              (let* ((percent (uiop:symbol-call :prompt-lab :house-fee-percent nil))
-                                     (net 940)
+                              ;; the card cost comes off the top, then the fee and
+                              ;; the pot's 20 points, in rivets
+                              (let* ((net 940)
                                      (fee (/ (* net percent) 100))
                                      (pot (/ (* net 20) 100))
                                      (line (uiop:symbol-call :prompt-lab :book-revenue! name 1000
@@ -730,7 +730,11 @@ loaded) its page too."
                                      (eql (gethash "pot_rivets" line) 40)
                                      (eq (gethash "test" line) t)
                                      (eql (gethash "payments" quarter) 2)
-                                     (= (gethash "yours_rivets" quarter) (+ 140 658))
+                                     ;; the author's take: the 200-rivet pass and the
+                                     ;; 1000-rivet line, each less its fee and pot
+                                     (= (gethash "yours_rivets" quarter)
+                                        (+ (- 200 (/ (* 200 percent) 100) 40)
+                                           (- 940 (/ (* 940 percent) 100) 188)))
                                      (equal (gethash "unit" earned) "rivets")
                                      (zerop (length (gethash "quarters" earned)))
                                      (null (uiop:symbol-call :prompt-lab :revenue-report))))))
