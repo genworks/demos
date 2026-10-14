@@ -1,0 +1,160 @@
+;;;; -*- Mode: Lisp; Package: picnic-table -*-
+
+;; Copyright © 2026 Genworks International
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Affero General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.  Distributed WITHOUT
+;; ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+;;;;
+;;;; Web UI on the shared demo chrome (demos-common:demo-ui-mixin): the
+;;;; parameter form, the live 3D view, the shop drawing -- a preview of
+;;;; the sheet and its PDF, SVG and DXF downloads -- and the cut list.
+;;;; The drawing links name the parameters in their query, so a
+;;;; download is built fresh by the stateless drawing door
+;;;; (publish.lisp) and any link can be bookmarked or shared.
+
+(in-package :picnic-table)
+
+(define-object picnic-table-ui (demos-common:demo-ui-mixin
+                                session-control-mixin base-html-page)
+
+  :documentation
+  (:description "Interactive picnic table page: parameter form, live
+viewport, downloadable shop drawings and the cut list."
+   :author "Genworks International")
+
+  :input-slots
+  ((title "Picnic Table Shop Drawings")
+   (demo-slug "picnic-table")
+   (objects (list (the model)))
+   (view-projection-key :picnic-view)
+   (view-projection-vector (unitize-vector (make-vector 1 -1.6 0.9))))
+
+  :computed-slots
+  ((source-pane-objects '(picnic-table leg brace drawing-sheet ortho-view
+                          picnic-table-ui demos-common:demo-ui-mixin))
+   (source-pane-functions '(inches parse-drawing-query drawing-query-string
+                            write-drawing respond-with-drawing))
+
+   (parameter-values (mapcar (lambda (control) (the-object control value))
+                             (list-elements (the parameter-controls))))
+
+   (body
+    (with-lhtml-string ()
+      (:div :class "max-w-7xl mx-auto p-8"
+        (str (the (page-intro "Picnic Table Shop Drawings"
+                              "A parametric A-frame picnic table in Gendl. Set the sizes, then download a dimensioned shop drawing of exactly that table.")))
+        (str (the (card :title "Parameters"
+                        :content (with-lhtml-string ()
+                                   (:div :class "p-6" (str (the control-form)))))))
+        (str (the (card :title "3D View"
+                        :content (with-lhtml-string ()
+                                   (:div :class "p-6 relative" :style "height: 520px;"
+                                     (str (the viewport-area div)))))))
+        (str (the drawing-section div))
+        (str (the cut-list-section div))
+        (str (the (card :title "Source Code"
+                        :subtitle "The complete Gendl source for this demo, reconstituted live from the definitions serving this page."
+                        :content (the source-code-panes)))))))
+
+   (control-form
+    (with-form-string (:class "grid grid-cols-2 md:grid-cols-4 gap-6")
+      (dolist (control (list-elements (the parameter-controls)))
+        (str (the (param-field (third (the-object control spec)) control))))
+      (str (the (param-field "Hidden lines in the drawing" (the hidden-lines-control))))))
+
+   ;; Ajax-refreshable: the links and the preview follow every change.
+   (drawing-card
+    (the (card :title "Shop Drawing"
+               :subtitle (format nil "One ANSI B sheet (17 x 11 in): top, front and right views at 1:~d with dimensions, an isometric, the cut list and a title block."
+                                 (the sheet scale-denominator))
+               :content
+               (with-lhtml-string ()
+                 (:div :class "p-6"
+                   (:div :class "mb-4 flex flex-wrap items-center gap-4"
+                     (dolist (format '(("pdf" "Download PDF") ("svg" "Download SVG") ("dxf" "Download DXF")))
+                       (htm (:a :href (the (drawing-url (first format) :download? t))
+                                :class "inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+                                (str (second format)))))
+                     (:a :href (the (drawing-url "pdf")) :target "_blank" :rel "noopener"
+                         :class "text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                         "Open the PDF in a new tab &rarr;"))
+                   (:a :href (the (drawing-url "pdf")) :target "_blank" :rel "noopener"
+                       (:img :src (the (drawing-url "svg"))
+                             :alt "Shop drawing of the picnic table as configured above"
+                             :style "width:100%;height:auto;border:1px solid #e5e7eb;border-radius:0.375rem;background:#fff")))))))
+
+   (cut-list-card
+    (the (card :title "Cut List"
+               :subtitle (format nil "~a long x ~a deep x ~a high; legs splay ~a, braces rise ~a."
+                                 (inches (the model table-length)) (inches (the model overall-depth))
+                                 (inches (the model top-height))
+                                 (degrees (the model leg-angle)) (degrees (the model brace-angle)))
+               :content
+               (with-lhtml-string ()
+                 (:div :class "overflow-x-auto"
+                   (:table :class "min-w-full divide-y divide-gray-200"
+                     (:thead :class "bg-gray-50"
+                       (:tr (dolist (heading '("Part" "Qty" "Stock" "Length" "Cuts"))
+                              (htm (:th :class "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                                        (str heading))))))
+                     (:tbody :class "divide-y divide-gray-100"
+                       (dolist (row (the model cut-list))
+                         (htm (:tr :class "hover:bg-gray-50"
+                                (dolist (cell row)
+                                  (htm (:td :class "px-6 py-3 text-sm text-gray-900 tabular-nums"
+                                            (str cell)))))))))))))))
+
+  :functions
+  ((parameter-value
+    (key)
+    (nth (position key *parameters* :key #'first) (the parameter-values)))
+
+   ;; The stateless drawing door's address for this table, in FORMAT.
+   (drawing-url
+    (format &key download?)
+    (format nil "~a/demo/picnic-table/drawing.~a?~a~:[~;&download=1~]"
+            demos-common:*url-prefix* format
+            (drawing-query-string (the parameter-values) (the hidden-lines-control value))
+            download?)))
+
+  :objects
+  ((parameter-controls :type 'number-form-control
+                       :sequence (:size (length *parameters*))
+                       :spec (nth (the-child index) *parameters*)
+                       :pseudo-inputs (spec)
+                       :default (fourth (the-child spec))
+                       :min (fifth (the-child spec))
+                       :max (sixth (the-child spec))
+                       :step (seventh (the-child spec))
+                       :domain :number
+                       :ajax-submit-on-change? t)
+
+   (hidden-lines-control :type 'menu-form-control
+                         :default :remove
+                         :size 1
+                         :ajax-submit-on-change? t
+                         :choice-plist '(:remove "Removed" :dashed "Dashed" :draw "All lines (wireframe)"))
+
+   (model :type 'picnic-table
+          :table-length (the (parameter-value :table-length))
+          :top-height (the (parameter-value :top-height))
+          :seat-height (the (parameter-value :seat-height))
+          :overall-depth (the (parameter-value :overall-depth))
+          :foot-spread (the (parameter-value :foot-spread))
+          :end-overhang (the (parameter-value :end-overhang))
+          :top-boards-count (round (the (parameter-value :top-boards-count)))
+          :seat-boards-count (round (the (parameter-value :seat-boards-count))))
+
+   (drawing-section :type 'base-html-div
+                    :inner-html (the drawing-card))
+
+   (cut-list-section :type 'base-html-div
+                     :inner-html (the cut-list-card)))
+
+  :hidden-objects
+  ;; Only asked for its scale; the downloads build their own sheet.
+  ((sheet :type 'drawing-sheet :model (the model))))

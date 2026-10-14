@@ -1,0 +1,221 @@
+;;;; -*- Mode: Lisp; Package: picnic-table -*-
+
+;; Copyright © 2026 Genworks International
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Affero General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.  Distributed WITHOUT
+;; ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+;;;;
+;;;; A classic A-frame picnic table in dimensional lumber, inches.
+;;;; The table runs along X (its width), across Y (its length is the
+;;;; overall depth, seat edge to seat edge), and stands on the ground
+;;;; at the bottom of its own box.  Two end frames, each a top cleat,
+;;;; a seat support and two splayed legs with level cuts top and
+;;;; bottom; a center cleat under the top, and two braces from the
+;;;; seat supports up to it with plumb cuts.  Every board is a
+;;;; lumber-mixin part, so lumber:bill-of-materials is the cut list.
+
+(in-package :picnic-table)
+
+(defun inches (x)
+  "X inches as a shop dimension to the nearest 1/16: 28.5 -> 28 1/2\"."
+  (multiple-value-bind (whole fraction) (floor (/ (round (* x 16)) 16))
+    (cond ((zerop fraction) (format nil "~d\"" whole))
+          ((zerop whole) (format nil "~a\"" fraction))
+          (t (format nil "~d ~a\"" whole fraction)))))
+
+(defun degrees (x) (format nil "~,1f deg" x))
+
+
+(define-object picnic-table (base-object)
+
+  :documentation
+  (:description "Parametric A-frame picnic table with attached benches,
+built from 2x6 top and seat boards, 2x4 cleats and braces, and 2x6
+legs and seat supports."
+   :author "Genworks International")
+
+  :input-slots
+  (("Number. Length of the top and seat boards, end to end."
+    table-length 72)
+   ("Number. Ground to the top surface of the table top."
+    top-height 30)
+   ("Number. Ground to the top surface of the seats."
+    seat-height 17.5)
+   ("Number. Length of the seat supports: the table's overall depth."
+    overall-depth 60)
+   ("Number. Spread of the legs at the ground, centerline to centerline."
+    foot-spread 48)
+   ("Number. How far the top runs past each end frame."
+    end-overhang 12)
+   ("Integer. Number of 2x6 boards in the top."
+    top-boards-count 5)
+   ("Integer. Number of 2x6 boards in each seat."
+    seat-boards-count 2)
+   ("Number. Gap between neighboring top or seat boards."
+    board-gap 1/4)
+   ("Boolean. Wood colors on the parts; nil draws them in the lens's
+default (black), as a shop drawing wants."
+    colored? t)
+   (display-controls (when (the colored?) (list :color :wood-medium))))
+
+  :computed-slots
+  ((width (the table-length))
+   (length (the overall-depth))
+   (height (the top-height))
+   (center (make-point 0 0 (half (the top-height))))
+
+   (board-width (second (lumber:nominal-section "2x6")))
+   (thickness (first (lumber:nominal-section "2x6")))
+   (pitch (+ (the board-width) (the board-gap)))
+   (top-width (- (* (the top-boards-count) (the pitch)) (the board-gap)))
+   (seat-width (- (* (the seat-boards-count) (the pitch)) (the board-gap)))
+   (end-x (- (half (the table-length)) (the end-overhang)))
+   (cleat-length (- (the top-width) 2))
+   (underside-of-top (- (the top-height) (the thickness)))
+
+   (along-x (alignment :rear (the (face-normal-vector :right))
+                       :top (the (face-normal-vector :top))))
+   (on-edge-along-y (alignment :rear (the (face-normal-vector :rear))
+                               :top (the (face-normal-vector :right))))
+
+   ("Number. Leg splay from vertical, degrees."
+    leg-angle (the (legs 0) splay-degrees))
+   ("Number. Brace slope from horizontal, degrees."
+    brace-angle (the (braces 0) slope-degrees))
+
+   (bill-of-materials (lumber:bill-of-materials self))
+
+   ("List of rows (part qty stock length cuts), strings: the cut list
+by part, as the drawing and the page show it."
+    cut-list
+    (flet ((row (part qty stock length cuts)
+             (list part (format nil "~d" qty) stock (inches length) cuts)))
+      (list (row "Top board" (the top-boards-count) "2x6" (the table-length) "square")
+            (row "Seat board" (* 2 (the seat-boards-count)) "2x6" (the table-length) "square")
+            (row "Seat support" 2 "2x6" (the overall-depth) "square")
+            (row "Leg" 4 "2x6" (the (legs 0) length)
+                 (format nil "~a level, both ends" (degrees (the leg-angle))))
+            (row "End cleat" 2 "2x4" (the cleat-length) "square")
+            (row "Center cleat" 1 "2x4" (the cleat-length) "square")
+            (row "Brace" 2 "2x4" (the (braces 0) length)
+                 (format nil "~a plumb, both ends" (degrees (the brace-angle))))))))
+
+  :objects
+  ((top-boards :type 'lumber:lumber
+               :sequence (:size (the top-boards-count))
+               :nominal "2x6"
+               :length (the table-length)
+               :orientation (the along-x)
+               :center (make-point 0 (- (* (the-child index) (the pitch))
+                                        (half (- (the top-width) (the board-width))))
+                                   (- (the top-height) (half (the thickness))))
+               :display-controls (when (the colored?) (list :color :wood-light)))
+
+   (seat-boards :type 'lumber:lumber
+                :sequence (:size (* 2 (the seat-boards-count)))
+                :nominal "2x6"
+                :length (the table-length)
+                :orientation (the along-x)
+                :center (let* ((side (if (< (the-child index) (the seat-boards-count)) -1 1))
+                               (j (mod (the-child index) (the seat-boards-count)))
+                               (outer (- (half (the overall-depth)) 1)))
+                          (make-point 0 (* side (- outer (half (the board-width)) (* j (the pitch))))
+                                      (- (the seat-height) (half (the thickness)))))
+                :display-controls (when (the colored?) (list :color :wood-light)))
+
+   (cleats :type 'lumber:lumber
+           :sequence (:size 3)
+           :nominal "2x4"
+           :length (the cleat-length)
+           :orientation (the on-edge-along-y)
+           :center (make-point (* (1- (the-child index)) (the end-x)) 0
+                               (- (the underside-of-top) (half (the-child width)))))
+
+   (seat-supports :type 'lumber:lumber
+                  :sequence (:size 2)
+                  :nominal "2x6"
+                  :length (the overall-depth)
+                  :orientation (the on-edge-along-y)
+                  :center (make-point (if (zerop (the-child index)) (- (the end-x)) (the end-x)) 0
+                                      (- (the seat-height) (the thickness)
+                                         (half (the-child width)))))
+
+   (legs :type 'leg
+         :sequence (:size 4)
+         :nominal "2x6"
+         :x (* (if (< (the-child index) 2) -1 1) (- (the end-x) 3/2))
+         :side (if (evenp (the-child index)) -1 1)
+         :top-y (- (half (the cleat-length)) 3)
+         :bottom-y (half (the foot-spread))
+         :top-z (the underside-of-top))
+
+   (braces :type 'brace
+           :sequence (:size 2)
+           :nominal "2x4"
+           :x-sign (if (zerop (the-child index)) -1 1)
+           :low-x (- (the end-x) 3/4)
+           :low-z (get-z (the (seat-supports 0) center))
+           :high-x 3/4
+           :high-z (- (get-z (the (cleats 1) center)) 1/2))))
+
+
+(define-object leg (lumber:angle-cut-lumber)
+
+  :documentation
+  (:description "One splayed leg of an end frame: a 2x6 standing in the
+frame's plane, its centerline from (bottom-y, ground) up to (top-y,
+top-z), with level cuts at both ends."
+   :author "Genworks International")
+
+  :input-slots
+  (x side top-y bottom-y top-z)
+
+  :computed-slots
+  ((rise (the top-z))
+   (run (- (the bottom-y) (the top-y)))
+   (splay (atan (the run) (the rise)))
+   (splay-degrees (* 180 (/ (the splay) pi)))
+   ;; Long point to long point: the centerline plus the level cut's
+   ;; offset across the board's width at each end.
+   (length (+ (/ (the rise) (cos (the splay)))
+              (* (the width) (tan (the splay)))))
+   (front-angle-degrees (- (* (the side) (the splay-degrees))))
+   (rear-angle-degrees (- (the front-angle-degrees)))
+   (center (make-point (the x)
+                       (* (the side) (half (+ (the top-y) (the bottom-y))))
+                       (half (the top-z))))
+   (orientation (alignment :rear (unitize-vector
+                                  (make-vector 0 (* (the side) (- (the run))) (the rise)))
+                           :top (make-vector 1 0 0)))))
+
+
+(define-object brace (lumber:angle-cut-lumber)
+
+  :documentation
+  (:description "A diagonal brace from a seat support up to the center
+cleat, a 2x4 standing in the table's center plane, with plumb cuts at
+both ends."
+   :author "Genworks International")
+
+  :input-slots
+  (x-sign low-x low-z high-x high-z)
+
+  :computed-slots
+  ((run (- (the low-x) (the high-x)))
+   (rise (- (the high-z) (the low-z)))
+   (slope (atan (the rise) (the run)))
+   (slope-degrees (* 180 (/ (the slope) pi)))
+   (length (+ (/ (the run) (cos (the slope)))
+              (* (the width) (tan (the slope)))))
+   (front-angle-degrees (- (* (the x-sign) (the slope-degrees))))
+   (rear-angle-degrees (- (the front-angle-degrees)))
+   (center (make-point (* (the x-sign) (half (+ (the low-x) (the high-x))))
+                       0
+                       (half (+ (the low-z) (the high-z)))))
+   (orientation (alignment :rear (unitize-vector
+                                  (make-vector (* (the x-sign) (- (the run))) 0 (the rise)))
+                           :top (make-vector 0 1 0)))))

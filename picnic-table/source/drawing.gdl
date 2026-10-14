@@ -1,0 +1,368 @@
+;;;; -*- Mode: Lisp; Package: picnic-table -*-
+
+;; Copyright © 2026 Genworks International
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Affero General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.  Distributed WITHOUT
+;; ANY WARRANTY; see <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+;;;;
+;;;; The shop drawing: one ANSI B sheet (17 x 11 in, landscape, in
+;;;; points) laid out third-angle -- the top view over the front view,
+;;;; the right view beside it, all three at one standard scale, the
+;;;; largest that fits -- with an isometric, a cut list, notes and a
+;;;; title block.  Dimensions are annotation objects of their view,
+;;;; placed with the view's own view-point function, so they follow
+;;;; the model through any change of its inputs.  write-drawing sends
+;;;; the sheet through the pdf, svg or dxf lens.
+
+(in-package :picnic-table)
+
+(defparameter *scale-denominators* '(4 6 8 10 12 16 20 24 32 48 64 96)
+  "Standard architectural scales offered for the orthographic views, as
+1:n, largest first.")
+
+(define-object drawing-sheet (base-drawing)
+
+  :documentation
+  (:description "Shop drawing of a picnic-table on one ANSI B sheet:
+top, front and right views at a common scale with dimensions, an
+isometric, the cut list, notes and the title block."
+   :author "Genworks International")
+
+  :input-slots
+  (model
+   ("Keyword, :remove, :dashed or :draw. Hidden-line treatment of every view."
+    hidden-lines :remove)
+   (page-width 1224) (page-length 792)
+   (title "PICNIC TABLE")
+   (drawing-number "PT-001")
+   (date (multiple-value-bind (s m h day month year) (get-decoded-time)
+           (declare (ignore s m h))
+           (format nil "~d-~2,'0d-~2,'0d" year month day)))
+   (margin 24)
+   (dim-room 60)
+   (bottom-room 96)
+   (view-gap 84)
+   (panel-width 330)
+   (character-size 8))
+
+  :computed-slots
+  ((width (the page-width))
+   (length (the page-length))
+
+   (inner-left (+ (- (half (the page-width))) (the margin)))
+   (inner-right (- (half (the page-width)) (the margin)))
+   (inner-bottom (+ (- (half (the page-length))) (the margin)))
+   (inner-top (- (half (the page-length)) (the margin)))
+   (panel-left (- (the inner-right) (the panel-width)))
+
+   (extent-x (the model table-length))
+   (extent-y (the model overall-depth))
+   (extent-z (the model top-height))
+
+   ;; The largest standard scale at which the three orthographic
+   ;; views, their dimensions and the gaps between them fit beside
+   ;; the panel.
+   (scale-denominator
+    (or (find-if (lambda (n)
+                   (let ((s (/ 72 n)))
+                     (and (<= (+ (the dim-room) (* s (the extent-x)) (the view-gap)
+                                 (* s (the extent-y)) (the view-gap))
+                              (- (the panel-left) (the inner-left)))
+                          (<= (+ (the bottom-room) (* s (the extent-z)) (the view-gap)
+                                 (* s (the extent-y)) (the dim-room))
+                              (- (the inner-top) (the inner-bottom))))))
+                 *scale-denominators*)
+        (car (last *scale-denominators*))))
+   (scale (/ 72 (the scale-denominator)))
+
+   (model-center (the model center))
+
+   (front-x (+ (the inner-left) (the dim-room) (* (the scale) (half (the extent-x)))))
+   (front-y (+ (the inner-bottom) (the bottom-room) (* (the scale) (half (the extent-z)))
+               ;; spread the vertical slack evenly above and below
+               (half (- (the inner-top) (the inner-bottom)
+                        (+ (the bottom-room) (* (the scale) (the extent-z)) (the view-gap)
+                           (* (the scale) (the extent-y)) (the dim-room))))))
+   (top-y (+ (the front-y) (* (the scale) (half (+ (the extent-z) (the extent-y))))
+             (the view-gap)))
+   (right-x (+ (the front-x) (* (the scale) (half (+ (the extent-x) (the extent-y))))
+               (the view-gap)))
+
+   ;; The isometric takes the room above the right view, beside the top view.
+   (iso-left (+ (the front-x) (* (the scale) (half (the extent-x))) (half (the view-gap))))
+   (iso-bottom (+ (the front-y) (* (the scale) (half (the extent-z))) (half (the view-gap))))
+
+   ;; Model points the dimensions measure between.
+   (xmin (- (half (the extent-x)))) (xmax (half (the extent-x)))
+   (ymin (- (half (the extent-y)))) (ymax (half (the extent-y)))
+   (frame-x (+ (the model end-x) 3/4))
+   (leg-feet (let ((points (remove-if-not (lambda (p) (< (abs (get-z p)) 1d-6))
+                                          (append (the model (legs 0) vertex-list)
+                                                  (the model (legs 1) vertex-list)))))
+               (list (reduce #'min (mapcar #'get-y points))
+                     (reduce #'max (mapcar #'get-y points)))))
+
+   ;; Each dimension: its view, :horizontal or :vertical, two model
+   ;; points, the offset of its line from the first point in points,
+   ;; and which side it stands on.
+   (dimension-specs
+    (let* ((m (the model)) (top (the extent-z)) (seat (the model seat-height))
+           (tw (half (the model top-width))) (fx (the frame-x))
+           (xmin (the xmin)) (xmax (the xmax)) (ymin (the ymin)) (ymax (the ymax))
+           (seat-inner (- ymax 1 (the model seat-width))))
+      (declare (ignorable m))
+      `(;; front view: overall length above, the frame chain below,
+        ;; the two heights at either side
+        (:view :front :type :horizontal :from (,xmin ,ymin ,top) :to (,xmax ,ymin ,top) :offset 22)
+        (:view :front :type :horizontal :from (,xmin ,ymin ,(- seat 1.5)) :to (,(- fx) ,ymin 0)
+         :offset 22 :flip t :text ,(inches (- xmax fx)))
+        (:view :front :type :horizontal :from (,(- fx) ,ymin 0) :to (,fx ,ymin 0) :offset 22 :flip t)
+        (:view :front :type :horizontal :from (,fx ,ymin 0) :to (,xmax ,ymin ,(- seat 1.5))
+         :offset 22 :flip t :text ,(inches (- xmax fx)))
+        (:view :front :type :vertical :from (,xmin ,ymin 0) :to (,xmin ,ymin ,top) :offset 22 :flip t)
+        (:view :front :type :vertical :from (,xmax ,ymin 0) :to (,xmax ,ymin ,seat) :offset 22)
+        ;; top view: overall depth at the left; top and seat widths at the right
+        (:view :top :type :vertical :from (,xmin ,ymin ,top) :to (,xmin ,ymax ,top) :offset 22 :flip t)
+        (:view :top :type :vertical :from (,xmax ,(- tw) ,top) :to (,xmax ,tw ,top) :offset 22)
+        (:view :top :type :vertical :from (,xmax ,seat-inner ,seat) :to (,xmax ,(- ymax 1) ,seat) :offset 22)
+        ;; right view: top width above, foot spread below, the
+        ;; seat supports' length across the seats
+        (:view :right :type :horizontal :from (,xmax ,(- tw) ,top) :to (,xmax ,tw ,top) :offset 22)
+        (:view :right :type :horizontal :from (,xmax ,(first (the leg-feet)) 0)
+         :to (,xmax ,(second (the leg-feet)) 0) :offset 22 :flip t)
+        (:view :right :type :horizontal :from (,xmax ,ymin ,(- seat 7)) :to (,xmax ,ymax ,(- seat 7))
+         :offset ,(+ 50 (* (the scale) (- seat 7))) :flip t))))
+
+   (notes
+    (list "1. Dimensions in inches. Lumber is nominal; actual 2x4 = 1 1/2 x 3 1/2,"
+          "   2x6 = 1 1/2 x 5 1/2. Lengths are long point to long point."
+          (format nil "2. ~a gaps between top and seat boards." (inches (the model board-gap)))
+          (format nil "3. Legs splay ~a from vertical; braces rise ~a."
+                  (degrees (the model leg-angle)) (degrees (the model brace-angle)))
+          "4. Fasteners not shown. Size bolts and screws for the lumber used."))
+
+   (sheet-lines
+    (let* ((l (the inner-left)) (r (the inner-right)) (b (the inner-bottom)) (tp (the inner-top))
+           (pl (the panel-left)) (tb-top (+ b 142)) (row 22))
+      (append
+       ;; border
+       (list (list l b r b) (list r b r tp) (list r tp l tp) (list l tp l b)
+             ;; panel and title block frame
+             (list pl b pl tp) (list pl tb-top r tb-top))
+       ;; title block rows
+       (loop for k from 1 to 3 collect (list pl (+ b (* k row)) r (+ b (* k row))))
+       (list (list (+ pl 110) b (+ pl 110) (+ b (* 3 row)))
+             (list (+ pl 220) b (+ pl 220) (+ b (* 3 row))))
+       ;; cut list header rule
+       (list (list pl (- tp 40) r (- tp 40))))))
+
+   ;; Text on the sheet, as (x y strings size &optional font).
+   (sheet-texts
+    (let* ((b (the inner-bottom)) (tp (the inner-top)) (pl (+ (the panel-left) 6))
+           (cs (the character-size)) (row 22)
+           (cells (list (list "DWG NO" (the drawing-number))
+                        (list "SCALE" (format nil "1:~d" (the scale-denominator)))
+                        (list "UNITS" "INCHES")
+                        (list "DATE" (the date))
+                        (list "SHEET" "1 OF 1")
+                        (list "HIDDEN LINES" (string-upcase (string (the hidden-lines))))))
+           (columns '(0 46 130 196 232 256)))
+      (append
+       ;; title block: the title, a summary line, then a 3 x 2 grid of fields
+       (list (list pl (+ b (* 3 row) 54) (list (the title)) 20 "Helvetica-Bold")
+             (list pl (+ b (* 3 row) 38)
+                   (list (format nil "A-frame with attached benches, ~a long x ~a deep x ~a high"
+                                 (inches (the extent-x)) (inches (the extent-y)) (inches (the extent-z))))
+                   cs)
+             (list pl (+ b (* 3 row) 24)
+                   (list (format nil "~d top boards, ~d per seat, seat height ~a"
+                                 (the model top-boards-count) (the model seat-boards-count)
+                                 (inches (the model seat-height))))
+                   cs)
+             (list pl (+ b (* 3 row) 8) (list "Generated with Gendl from the parametric model") (- cs 1)))
+       (loop for (label value) in cells
+             for k from 0
+             collect (list (+ pl (* 110 (mod k 3))) (+ b (* row (- 2 (floor k 3))) 14) (list label) 6)
+             collect (list (+ pl (* 110 (mod k 3))) (+ b (* row (- 2 (floor k 3))) 4) (list value) cs
+                           "Helvetica-Bold"))
+       (list (list pl (+ b 4) (list "GENWORKS INTERNATIONAL") 6)
+             (list (+ pl 110) (+ b 4) (list "genworks.com") 6))
+       ;; cut list
+       (list (list pl (- tp 18) (list "CUT LIST") 12 "Helvetica-Bold"))
+       (loop for heading in '("PART" "QTY" "STOCK" "LENGTH" "CUTS")
+             for x in '(0 72 98 132 182)
+             collect (list (+ pl x) (- tp 36) (list heading) 6 "Helvetica-Bold"))
+       (loop for line in (the model cut-list)
+             for k from 0
+             append (loop for cell in line
+                          for x in '(0 72 98 132 182)
+                          collect (list (+ pl x) (- tp 54 (* k 14)) (list cell) (if (= x 182) 6.5 cs))))
+       ;; notes, under the cut list
+       (list (list pl (- tp 170) (list "NOTES") 12 "Helvetica-Bold"))
+       (loop for line in (the notes)
+             for k from 0
+             collect (list pl (- tp 188 (* k 11)) (list line) 6.5))
+       ;; view captions
+       (flet ((caption (x y name scale?)
+                (list (- x 60) y
+                      (list name (if scale? (format nil "SCALE 1:~d" (the scale-denominator)) "NOT TO SCALE"))
+                      7 "Helvetica-Bold")))
+         (list (caption (the front-x) (- (the front-y) (* (the scale) (half (the extent-z))) 82)
+                        "FRONT VIEW" t)
+               (caption (the front-x) (+ (the top-y) (* (the scale) (half (the extent-y))) 44)
+                        "TOP VIEW" t)
+               (caption (the right-x) (- (the front-y) (* (the scale) (half (the extent-z))) 82)
+                        "RIGHT VIEW" t)
+               (caption (half (+ (the iso-left) (the panel-left))) (- (the inner-top) 14)
+                        "ISOMETRIC" nil)))
+       ;; the drawing number down in the corner of the border
+       (list (list (+ (the inner-left) 4) (+ (the inner-bottom) 4) (list (the drawing-number)) 6))))))
+
+  :objects
+  ((top-view :type 'ortho-view
+             :projection-vector (getf *standard-views* :top)
+             :center (make-point (the front-x) (the top-y) 0)
+             :annotation-objects (the (dimensions-for :top)))
+
+   (front-view :type 'ortho-view
+               :projection-vector (getf *standard-views* :front)
+               :center (make-point (the front-x) (the front-y) 0)
+               :annotation-objects (the (dimensions-for :front)))
+
+   (right-view :type 'ortho-view
+               :projection-vector (getf *standard-views* :right)
+               :center (make-point (the right-x) (the front-y) 0)
+               :annotation-objects (the (dimensions-for :right)))
+
+   (iso-view :type 'base-view
+             :projection-vector (getf *standard-views* :trimetric)
+             :object-roots (list (the model))
+             :hidden-lines (the hidden-lines)
+             :width (- (the panel-left) (the iso-left) 12)
+             :length (- (the inner-top) (the iso-bottom) 24)
+             :left-margin 10 :front-margin 10
+             :center (make-point (half (+ (the iso-left) (the panel-left)))
+                                 (half (+ (the iso-bottom) (the inner-top) -24)) 0))
+
+   ;; Border, title block, cut list and notes: a view of nothing but
+   ;; annotations, centered on the sheet at scale 1.
+   (sheet-view :type 'base-view
+               :view-scale 1
+               :view-center (make-point 0 0 0)
+               :center (make-point 0 0 0)
+               :annotation-objects (append (list-elements (the sheet-line-objects))
+                                           (list-elements (the sheet-text-objects)))))
+
+  :hidden-objects
+  ((horizontal-dimensions :type 'horizontal-dimension
+                          :sequence (:size (length (the (specs-of-type :horizontal))))
+                          :spec (nth (the-child index) (the (specs-of-type :horizontal)))
+                          :pass-down (character-size)
+                          :pseudo-inputs (spec)
+                          :start-point (the (dimension-point (the-child spec) :from))
+                          :end-point (the (dimension-point (the-child spec) :to))
+                          :dim-text (the (dimension-text (the-child spec)))
+                          :flip-leaders? (getf (the-child spec) :flip)
+                          :witness-line-length (getf (the-child spec) :offset)
+                          :witness-line-gap 3 :witness-line-ext 4
+                          :arrowhead-width 2.5 :arrowhead-length 8)
+
+   (vertical-dimensions :type 'vertical-dimension
+                        :sequence (:size (length (the (specs-of-type :vertical))))
+                        :spec (nth (the-child index) (the (specs-of-type :vertical)))
+                        :pass-down (character-size)
+                        :pseudo-inputs (spec)
+                        :start-point (the (dimension-point (the-child spec) :from))
+                        :end-point (the (dimension-point (the-child spec) :to))
+                        :dim-text (the (dimension-text (the-child spec)))
+                        :flip-leaders? (getf (the-child spec) :flip)
+                        :witness-line-length (getf (the-child spec) :offset)
+                        :witness-line-gap 3 :witness-line-ext 4
+                        :arrowhead-width 2.5 :arrowhead-length 8)
+
+   (sheet-line-objects :type 'line
+                       :sequence (:size (length (the sheet-lines)))
+                       :start (let ((l (nth (the-child index) (the sheet-lines))))
+                                (make-point (first l) (second l) 0))
+                       :end (let ((l (nth (the-child index) (the sheet-lines))))
+                              (make-point (third l) (fourth l) 0)))
+
+   (sheet-text-objects :type 'general-note
+                       :sequence (:size (length (the sheet-texts)))
+                       :spec (nth (the-child index) (the sheet-texts))
+                       :pseudo-inputs (spec)
+                       :start (make-point (first (the-child spec)) (second (the-child spec)) 0)
+                       :strings (third (the-child spec))
+                       :character-size (fourth (the-child spec))
+                       :font (or (fifth (the-child spec)) "Helvetica")))
+
+  :functions
+  ((specs-of-type
+    (type)
+    (remove type (the dimension-specs) :key (lambda (spec) (getf spec :type)) :test-not #'eql))
+
+   ;; The model point named by KEY (:from or :to) of SPEC, in the
+   ;; coordinates of the spec's view.
+   (dimension-point
+    (spec key)
+    (let ((view (ecase (getf spec :view)
+                  (:top (the top-view)) (:front (the front-view)) (:right (the right-view)))))
+      (destructuring-bind (x y z) (getf spec key)
+        (the-object view (view-point (make-point x y z))))))
+
+   ;; The spec's own text, or the model distance it measures: along the
+   ;; model axis that runs across (:horizontal) or up (:vertical) its view.
+   (dimension-text
+    (spec)
+    (or (getf spec :text)
+        (let ((axis (ecase (getf spec :view)
+                      (:front (if (eql (getf spec :type) :horizontal) 0 2))
+                      (:top (if (eql (getf spec :type) :horizontal) 0 1))
+                      (:right (if (eql (getf spec :type) :horizontal) 1 2)))))
+          (inches (abs (- (nth axis (getf spec :to)) (nth axis (getf spec :from))))))))
+
+   (dimensions-for
+    (view-key)
+    (append (loop for dimension in (list-elements (the horizontal-dimensions))
+                  when (eql (getf (the-object dimension spec) :view) view-key) collect dimension)
+            (loop for dimension in (list-elements (the vertical-dimensions))
+                  when (eql (getf (the-object dimension spec) :view) view-key) collect dimension)))))
+
+
+(define-object ortho-view (base-view)
+
+  :documentation
+  (:description "One orthographic view of the drawing-sheet's model at
+the sheet's common scale, centered on the model's center so that the
+views line up across the sheet."
+   :author "Genworks International")
+
+  :computed-slots
+  ((object-roots (list (the parent model)))
+   (hidden-lines (the parent hidden-lines))
+   (view-scale (the parent scale))
+   (view-center (the parent model-center))
+   ;; The view box only bounds what the lenses draw; leave room for
+   ;; the dimensions standing outside the geometry.
+   (width (+ (* (the view-scale) (max (the parent extent-x) (the parent extent-y))) 240))
+   (length (+ (* (the view-scale) (max (the parent extent-y) (the parent extent-z))) 240))))
+
+
+(defun write-drawing (model &key (format :pdf) (hidden-lines :remove) stream file)
+  "Write the drawing-sheet of MODEL in FORMAT (:pdf, :svg or :dxf) to
+FILE or STREAM."
+  (let ((sheet (make-object 'drawing-sheet :model model :hidden-lines hidden-lines)))
+    (ecase format
+      (:pdf (with-format (pdf (or file stream) :page-width (the-object sheet page-width)
+                              :page-length (the-object sheet page-length))
+              (write-the-object sheet cad-output)))
+      (:svg (with-format (svg (or file stream) :page-width (the-object sheet page-width)
+                              :page-length (the-object sheet page-length)
+                              :background-color :white)
+              (write-the-object sheet cad-output)))
+      (:dxf (with-format (dxf (or file stream))
+              (write-the-object sheet cad-output))))))
