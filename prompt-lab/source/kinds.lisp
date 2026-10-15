@@ -167,7 +167,10 @@ lab; nil, any host, where none is set."
    ("String or nil. The deployment this instance serves (deploy.lisp), set
 by its door; nil for the session's own preview, where a toll is paid
 without money and nothing is booked."
-    deployment-name nil))
+    deployment-name nil)
+   ;; the page is the author's: no icon of the house's on it (gwl's
+   ;; default is the engine's); an empty data address asks for none
+   (favicon-path "data:,"))
 
   :computed-slots
   (;; what this visitor has paid: toll key -> (:at <time> [:uses n] [:until time])
@@ -175,10 +178,14 @@ without money and nothing is booked."
 
    ;; the demos' stylesheet from under the lab's own prefix (published
    ;; there by publish-prompt-lab!): the address the mixin would name is
-   ;; published for the demos' own virtual hosts
+   ;; published for the demos' own virtual hosts; and, for an open
+   ;; deployment, the offer of its source at the foot of the page, as
+   ;; its licence asks (source-offer-script)
    (additional-header-content
-    (let ((demos-common:*url-prefix* (format nil "~a/app-static" *url-prefix*)))
-      (call-next-method))))
+    (string-append
+     (let ((demos-common:*url-prefix* (format nil "~a/app-static" *url-prefix*)))
+       (call-next-method))
+     (or (and (the deployment-name) (source-offer-script (the deployment-name))) ""))))
 
   :functions
   (;; Tollbooths.  The app says what is paid for (tolls) and where the
@@ -253,10 +260,12 @@ line saying it is paid.  Put it in a section, so it redraws when paid."
                            (:button :type "submit"
                                     :class "inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
                                     (fmt "~a -- ~a" (toll-money toll) (getf toll :label))))))
+              ;; the price is money here too: an app's users never see the
+              ;; lab's own unit
               (t (htm (:button :type "button"
                                :class "inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
                                :onclick (the (gdl-ajax-call :function-key :pay-toll! :arguments (list key)))
-                               (fmt "~:d ~a -- ~a~a" (monocle:toll-price toll) (units (monocle:toll-price toll))
+                               (fmt "~a -- ~a~a" (toll-money toll)
                                     (getf toll :label)
                                     (toll-mode-note self)))))))))
 
@@ -284,10 +293,26 @@ now, inputs and all.  A format named in file-tolls wants its toll paid."
         ((eq *toll-provider* :test) " (test payment: no charge)")
         (t "")))
 
+(defun money-text (cents &optional (currency *toll-currency*))
+  "CENTS as money in CURRENCY: $3.00 for dollars, 3.00 EUR for another."
+  (if (string-equal currency "usd")
+      (format nil "$~,2f" (/ cents 100))
+      (format nil "~,2f ~:@(~a~)" (/ cents 100) currency)))
+
 (defun toll-money (toll)
-  "TOLL's price as money, what a card is charged: the price in the lab's
-unit at *unit-cents*, in dollars."
-  (format nil "$~,2f" (/ (* (monocle:toll-price toll) *unit-cents*) 100)))
+  "TOLL's price as money, what its payer is charged: the price (cents, or
+the lab's unit at *unit-cents*) in *toll-currency*."
+  (money-text (* (monocle:toll-price toll) *unit-cents*)))
+
+(defun source-offer-script (name)
+  "For an open deployment NAME, a script that puts the offer of its source
+at the foot of the page -- the GNU Affero General Public License asks
+that the people who use it be offered it; the page itself is the
+author's.  Nil for a closed deployment, or none."
+  (let ((record (deployment-record name)))
+    (when (and record (not (truthy? (gethash "closed" record))))
+      (format nil "<script>document.addEventListener('DOMContentLoaded',function(){var p=document.createElement('p');p.style.cssText='margin:2rem 0 1rem;text-align:center;font-size:.8rem;color:#6b7280';p.innerHTML='<a href=\"~a/source\" style=\"color:inherit;text-decoration:underline\">Source</a>, under the GNU Affero General Public License.';document.body.appendChild(p)});</script>"
+              (deployment-url name)))))
 
 (defun charge-toll! (app toll)
   "Take TOLL from the visitor of APP.  True when it is paid."
@@ -501,15 +526,14 @@ the page says, cut at LIMIT characters."
                                               (when (and tolls (not bad-tolls))
                                                 (format nil "Tollbooths: ~{~a~^; ~}."
                                                         (mapcar #'(lambda (toll)
-                                                                    (format nil "~(~a~) \"~a\" ~:d ~a~@[, ~a uses~]~@[, ~a s~]"
+                                                                    (format nil "~(~a~) \"~a\" ~a~@[, ~a uses~]~@[, ~a s~]"
                                                                             (getf toll :key) (getf toll :label)
-                                                                            (monocle:toll-price toll)
-                                                                            (units (monocle:toll-price toll))
+                                                                            (toll-money toll)
                                                                             (getf toll :uses) (getf toll :seconds)))
                                                                 tolls)))
                                               (when bad-tolls
-                                                (format nil "ERROR: every toll is (:key <keyword> :label <string> ~(~s~) <integer>), with :uses or :seconds if wanted: ~a."
-                                                        (unit-key) (monocle:toll-fault (first bad-tolls))))
+                                                (format nil "ERROR: every toll is (:key <keyword> :label <string> :cents <integer>), with :uses or :seconds if wanted: ~a."
+                                                        (monocle:toll-fault (first bad-tolls))))
                                               (when lost-tolls
                                                 (format nil "ERROR: file-tolls names tolls that tolls does not declare: ~{~(~a~)~^, ~}." lost-tolls))
                                               (when broken
@@ -603,11 +627,11 @@ Rules for the page:
 - Html is cl-who: (str <string>) puts a string in, (fmt ..) a formatted one, (esc <string>) one that came from the visitor, and htm goes back to html inside a Lisp form.  A table of results is :table with :thead and :tbody.
 - Style with the classes the recipe uses (they are in the page's stylesheet; other utility classes may not be) and a :style attribute for anything else.
 - The page loads nothing from another site and carries no script of yours unless the request cannot be met without one.
-- Charging, when the visitor asks for it, is done with tollbooths, placed wherever they say.  Declare them in APP's input-slots: (tolls (list (list :key :cad :label \"STEP download\" ~(~s~) 300 :uses 1))) -- with :uses n the payment covers n uses, with :seconds n it covers that long, with neither it covers this visit.  Prices are in ~a, the lab's own unit, which visitors buy in packets, never in money; at today's rate a ~a is a cent, so a visitor who asks for $3 means 300 ~a.  A price may be computed, from the model's size say.  (the (toll-button :cad)) is the booth, a pay button that turns into a paid line: put it in a section.  (the (toll-paid? :cad)) says whether to show what the toll guards, and (the (use-toll! :cad)) spends one use.  (the (file-link :step :label \"STEP file\")) is a link that downloads the first of objects as it stands, inputs and all (:pdf :svg :png anywhere; :step :iges :stl on a solids engine); name the format in (file-tolls (list :step :cad)) and the link wants that toll paid and spends a use of it.  The tollbooths are the app's payment points: the lab takes the payment at them.  Write no payment code of your own.  An app with at least one priced toll can be deployed with the Monetize button; say in your reply where the booths are, what they charge, and that Monetize now opens.
+- Charging, when the visitor asks for it, is done with tollbooths, placed wherever they say.  Declare them in APP's input-slots: (tolls (list (list :key :cad :label \"STEP download\" :cents 300 :uses 1))) -- with :uses n the payment covers n uses, with :seconds n it covers that long, with neither it covers this visit.  Prices are MONEY, in cents of the author's currency (~a): :cents 300 is $3.00, which the app's users pay by card at the author's prices; the ~a this visitor builds with here are the lab's own unit and never an app's users' -- an app's page never mentions them, nor the lab.  A price may be computed, from the model's size say.  (the (toll-button :cad)) is the booth, a pay button that turns into a paid line: put it in a section.  (the (toll-paid? :cad)) says whether to show what the toll guards, and (the (use-toll! :cad)) spends one use.  (the (file-link :step :label \"STEP file\")) is a link that downloads the first of objects as it stands, inputs and all (:pdf :svg :png anywhere; :step :iges :stl on a solids engine); name the format in (file-tolls (list :step :cad)) and the link wants that toll paid and spends a use of it.  The tollbooths are the app's payment points: the lab takes the payment at them.  Write no payment code of your own.  An app with at least one priced toll can be deployed with the Monetize button; say in your reply where the booths are, what they charge, and that Monetize now opens.
 - Name your own objects and functions with names of your own: a definition named like something Lisp, Gendl or GWL already has (start, publish, header, title ...) is refused.
 - Never include an in-package form."
           *brand*
           (and (member :model *kinds*) t)
           *app-recipe*
-          ;; the lab's unit, in the charging rule
-          (unit-key) (units) (units 1) (units)))
+          ;; the charging rule: the author's currency, and the lab's unit it is not
+          (string-upcase *toll-currency*) (units)))

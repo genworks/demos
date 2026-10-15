@@ -1034,7 +1034,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      (:a :class "pl-open-app" :target "_blank" :rel "noopener"
                                          :|data-show| "$deployed" :|data-attr:href| "$deployed" :|data-text| "$deployed"))
                                (:p :class "pl-line" :|data-show| "!$story"
-                                   (unit-text "Nothing here charges yet.  Tell the agent what should cost {units} -- 'charge 300 {units} for each STEP download', 'a pass for 500 {units} unlocks the results' -- and Monetize opens when it has written that in."))
+                                   "Nothing here charges yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download', 'a pass for $5 unlocks the results' -- and Monetize opens when it has written that in.")
                                (:div :class "pl-deploy" :|data-show| "$monetize && $story"
                                      (:p :class "pl-line"
                                          "Deploy what you built at an address of its own.  A model gets a page where others change its inputs and download its files; a web app is served as it is.  It is a copy: deploy again to update it.")
@@ -1046,11 +1046,11 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              (:textarea :rows "2" :maxlength "400" :|data-bind:dblurb| ""))
                                      ;; the source terms were the session's choice as it opened
                                      (:p :class "pl-line" :|data-show| "!$closed"
-                                         (fmt "Open source, under the GNU Affero General Public License: it runs on Gendl, which is under that licence, so the deployment serves its source to the people who use it.  Of what its users pay, in ~a, ~d% is the monetization fee."
-                                              (units) (house-fee-percent nil)))
+                                         (fmt "Open source, under the GNU Affero General Public License: it runs on Gendl, which is under that licence, so the deployment offers its source to the people who use it, in a line at the foot of its page.  Of what its users pay, ~d% is the monetization fee."
+                                              (house-fee-percent nil)))
                                      (:p :class "pl-line" :|data-show| "$closed"
-                                         (fmt "Closed source, as you chose when the session opened: the house licenses the Gendl it runs on for closed use, so the deployment does not serve its source.  Of what its users pay, in ~a, ~d% is the monetization fee."
-                                              (units) (house-fee-percent t)))
+                                         (fmt "Closed source, as you chose when the session opened: the house licenses the Gendl it runs on for closed use, so the deployment does not serve its source, and its pages carry nothing of the house.  Of what its users pay, ~d% is the monetization fee."
+                                              (house-fee-percent t)))
                                      ;; the author's slider: points of every payment, on top of
                                      ;; the fee, for the community pot (deploy.lisp)
                                      (when *pot-percent-least*

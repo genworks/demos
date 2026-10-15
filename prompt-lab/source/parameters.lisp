@@ -384,6 +384,12 @@ stack init sets :stripe on a lab whose gate holds the Connect keys.")
 a toll, in cents: a rivet is a cent (the agent's brief says a visitor's
 $3 is 300 rivets).  The books stay in the unit; the gate takes the cents.")
 
+(defparameter *toll-currency* "usd"
+  "String. The currency a deployed app's tolls are priced and taken in,
+Stripe's lower-case code; the author's own currency once an author has
+one (their Connect account's default), the gate's for now.  The page's
+money is written for it (money-text).")
+
 (defparameter *pot-percent-least* 0
   "Number or nil. The least an author adds of every payment to the lab's
 community pot, in percentage points on top of the monetization

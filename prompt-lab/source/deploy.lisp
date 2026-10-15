@@ -236,8 +236,8 @@ the same session under the same name replaces the copy and the terms."
          (values nil (format nil "There is nothing to deploy yet: build a ~:[model~;web app~] first." app?)))
         ((not (monetizable? session))
          (values nil (if app?
-                         (unit-text "This app charges for nothing yet.  Tell the agent what should cost {units} -- 'charge 300 {units} for each STEP download', 'a day pass for 500 {units} unlocks the results' -- and Monetize opens when it has written the tollbooths.")
-                         (unit-text "This model charges for nothing yet.  Tell the agent what should cost {units} -- 'charge 300 {units} for each STEP download' -- and Monetize opens when it has written that in."))))
+                         "This app charges for nothing yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download', 'a day pass for $5 unlocks the results' -- and Monetize opens when it has written the tollbooths."
+                         "This model charges for nothing yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download' -- and Monetize opens when it has written that in.")))
         ((not (deployment-name? name))
          (values nil "Give it a name for its address: 3 to 40 lower-case letters, digits and hyphens, a letter first."))
         ((and existing (not (equal (gethash "owner" existing) (session-owner session))))
@@ -546,16 +546,20 @@ has paid it, and spends a use of the payment."
     (net.aserve:with-http-body (req ent :external-format :utf-8)
       (write-string text net.html.generator:*html-stream*))))
 
-(defun deployment-page (title &rest paragraphs)
-  "A small page of the lab's own, for a deployment that cannot open."
+(defun deployment-page (title paragraphs &key back (back-label "Back"))
+  "A small page for a deployment that cannot open, or a payment that could
+not: TITLE, the PARAGRAPHS, and a way BACK (to the app itself) when
+there is one.  Nothing of the house on it: the deployment is its
+author's (the user's ruling, 2026-10-14)."
   (with-lhtml-string ()
     (:html (:head (:meta :charset "utf-8")
                   (:meta :name "viewport" :content "width=device-width, initial-scale=1")
+                  (:link :rel "icon" :href "data:,")
                   (:title (esc title)))
            (:body :style "font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5"
                   (:h1 :style "font-size: 1.4rem" (esc title))
                   (dolist (paragraph paragraphs) (htm (:p (esc paragraph))))
-                  (:p (:a :href *url-prefix* (esc (lab-title))))))))
+                  (when back (htm (:p (:a :href back (esc back-label)))))))))
 
 (defun deployed-door (req ent)
   "GET <prefix>/d/<name>: the deployment, for whoever may use it -- a web
@@ -572,7 +576,7 @@ open deployment's model file."
          (owner-key (query-value req "owner"))
          (record (and *deployments?* (deployment-record name))))
     (cond ((null record)
-           (respond-deployment req ent (deployment-page "Nothing is deployed here" "There is no deployment of that name at this lab.")
+           (respond-deployment req ent (deployment-page "Nothing is deployed here" (list "There is no deployment of that name here."))
                          :response net.aserve:*response-not-found* :type "text/html; charset=utf-8"))
           ((equal what "source")
            (if (truthy? (gethash "closed" record))
@@ -590,7 +594,7 @@ open deployment's model file."
           (t
            (let ((deployed (ensure-deployed name)))
              (cond ((null deployed)
-                    (respond-deployment req ent (deployment-page (gethash "title" record) "This deployment no longer builds on this host.  Its owner can deploy it again.")
+                    (respond-deployment req ent (deployment-page (gethash "title" record) (list "This deployment no longer builds on this host.  Its owner can deploy it again."))
                                   :response net.aserve:*response-internal-server-error* :type "text/html; charset=utf-8"))
                    ;; the page instance's own address carries the request's
                    ;; query, and d=<name> in it is how an instance that has
@@ -697,7 +701,10 @@ the toll is taken here, as the booth's own button does."
                (if url
                    (redirect-to req ent url)
                    (respond-deployment req ent
-                                       (deployment-page "The payment could not be opened" reason)
+                                       (deployment-page "The payment could not be opened" (list reason)
+                                                        :back (the-object app url)
+                                                        :back-label (format nil "Back to ~a"
+                                                                            (or (gethash "title" (deployment-record name)) name)))
                                        :response net.aserve:*response-service-unavailable*
                                        :type "text/html; charset=utf-8"))))))))
 
