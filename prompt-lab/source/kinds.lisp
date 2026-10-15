@@ -168,6 +168,10 @@ lab; nil, any host, where none is set."
 by its door; nil for the session's own preview, where a toll is paid
 without money and nothing is booked."
     deployment-name nil)
+   ("String or nil. The visitor's prepaid balance for this deployment (the
+purse, deploy.lisp), from its cookie when the door made this page; set
+again when they buy a pack."
+    purse-id nil :settable)
    ;; the page is the author's: no icon of the house's on it (gwl's
    ;; default is the engine's); an empty data address asks for none
    (favicon-path "data:,"))
@@ -175,6 +179,11 @@ without money and nothing is booked."
   :computed-slots
   (;; what this visitor has paid: toll key -> (:at <time> [:uses n] [:until time])
    (payments nil :settable)
+
+   ;; what their purse holds for this deployment, in cents
+   (purse-cents (if (and (the purse-id) (the deployment-name))
+                    (purse-cents (the purse-id) (the deployment-name))
+                    0))
 
    ;; the demos' stylesheet from under the lab's own prefix (published
    ;; there by publish-prompt-lab!): the address the mixin would name is
@@ -254,12 +263,28 @@ line saying it is paid.  Put it in a section, so it redraws when paid."
               ;; toll-pay-door); the price is said in money, which is
               ;; what is taken
               ((and (eq *toll-provider* :stripe) (the deployment-name))
-               (htm (:form :method "post" :action (format nil "~a/toll-pay" *url-prefix*) :style "display:inline"
-                           (:input :type "hidden" :name "iid" :value (the instance-id))
-                           (:input :type "hidden" :name "key" :value (format nil "~(~a~)" key))
-                           (:button :type "submit"
-                                    :class "inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
-                                    (fmt "~a -- ~a" (toll-money toll) (getf toll :label))))))
+               (let* ((record (deployment-record (the deployment-name)))
+                      (cents (* (monocle:toll-price toll) *unit-cents*))
+                      (balance (the purse-cents))
+                      (from-balance? (>= balance cents)))
+                 (htm (:form :method "post" :action (format nil "~a/toll-pay" *url-prefix*) :style "display:inline"
+                             (:input :type "hidden" :name "iid" :value (the instance-id))
+                             (:input :type "hidden" :name "key" :value (format nil "~(~a~)" key))
+                             (:button :type "submit"
+                                      :class "inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+                                      (fmt "~a -- ~a~:[~; (from your balance)~]" (toll-money toll) (getf toll :label) from-balance?)))
+                      ;; the app's prepaid balance, when its author offers one
+                      ;; (the purse, deploy.lisp): what it holds, and the packs
+                      (when (balance-offered? record)
+                        (htm (:span :class "text-sm text-gray-600" :style "margin-left:.5rem"
+                                    (fmt "Balance ~a.  Add " (money-text balance))
+                                    (dolist (pack *balance-packs*)
+                                      (htm (:form :method "post" :action (format nil "~a/toll-pay" *url-prefix*) :style "display:inline"
+                                                  (:input :type "hidden" :name "iid" :value (the instance-id))
+                                                  (:input :type "hidden" :name "pack" :value (format nil "~d" pack))
+                                                  (:button :type "submit" :class "underline" :style "font:inherit;cursor:pointer"
+                                                           (str (money-text pack))))
+                                           " "))))))))
               ;; the price is money here too: an app's users never see the
               ;; lab's own unit
               (t (htm (:button :type "button"

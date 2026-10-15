@@ -390,6 +390,14 @@ Stripe's lower-case code; the author's own currency once an author has
 one (their Connect account's default), the gate's for now.  The page's
 money is written for it (money-text).")
 
+(defparameter *balance-packs* '(500 1000 2000)
+  "List of integers. The packs a deployed app's prepaid balance is sold
+in, in cents (the purse, deploy.lisp): $5, $10 and $20, each bought in
+one card payment that goes to the author as a toll does, the balance
+then drawn on by the app's tolls with no card -- how a toll under
+Stripe's 50-cent minimum is taken.  A cent of balance is a cent of
+toll: no bonus, since the author is owed real money for it.")
+
 (defparameter *pot-percent-least* 0
   "Number or nil. The least an author adds of every payment to the lab's
 community pot, in percentage points on top of the monetization

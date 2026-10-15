@@ -861,6 +861,10 @@ the model with one panel under it, the inputs or the tree."
    ;; download links carry it on
    (query-grant (cdr (assoc "grant" (the query-toplevel) :test #'string-equal)))
 
+   ;; purse=<id>: the visitor's prepaid balance for the deployed model,
+   ;; handed back on the address after a pack is bought (deploy.lisp)
+   (query-purse (cdr (assoc "purse" (the query-toplevel) :test #'string-equal)))
+
    ;; A deployed model's wrapper: what it is, and its files to download,
    ;; in a tile at the left; the inspector holds its inputs alone.  (An
    ;; INPUT of the sluice; nil for a session's or a replay's viewer.)
@@ -927,7 +931,20 @@ the model with one panel under it, the inputs or the tree."
                                                         (:input :type "hidden" :name "format" :value format)
                                                         (:button :type "submit" :style "font:inherit;cursor:pointer"
                                                                  (esc (fourth entry))
-                                                                 (fmt " -- ~a" (money-text (* price *unit-cents*)))))))))))
+                                                                 (fmt " -- ~a~:[~; (from your balance)~]" (money-text (* price *unit-cents*))
+                                                                      (>= (purse-cents (the query-purse) name) (* price *unit-cents*)))))))))))
+                                 ;; the model's prepaid balance, when its author offers one (the
+                                 ;; purse, deploy.lisp): what the visitor's holds, and the packs
+                                 (when (balance-offered? record)
+                                   (htm (:p :style "margin:0 0 .6rem"
+                                            (fmt "Balance ~a.  Add " (money-text (purse-cents (the query-purse) name)))
+                                            (dolist (pack *balance-packs*)
+                                              (htm (:form :method "post" :action (format nil "~a/toll-pay" *url-prefix*) :style "display:inline"
+                                                          (:input :type "hidden" :name "deployed" :value name)
+                                                          (:input :type "hidden" :name "pack" :value (format nil "~d" pack))
+                                                          (:button :type "submit" :style "font:inherit;cursor:pointer;text-decoration:underline"
+                                                                   (str (money-text pack))))
+                                                   " ")))))
                                  ;; an open deployment offers its source, as its licence asks;
                                  ;; a closed one shows nothing of the house (the user's ruling, 2026-10-14)
                                  (unless (truthy? (gethash "closed" record))

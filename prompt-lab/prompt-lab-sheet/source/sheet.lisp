@@ -700,7 +700,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', dpot: 0, kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', dpot: 0, dbalance: false, kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; and of its last staged hosting (hosting.lisp)
@@ -1063,6 +1063,13 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                 (:span :|data-text|
                                                        (format nil "'You receive ' + (($closed ? ~d : ~d) - Number($dpot)) + '% of what its users pay.'"
                                                                (- 100 (house-fee-percent t)) (- 100 (house-fee-percent nil)))))))
+                                     ;; the author's switch: a prepaid balance per visitor for the
+                                     ;; app's tolls (the purse, deploy.lisp), how a toll under
+                                     ;; Stripe's 50-cent minimum is taken
+                                     (:label :class "pl-pick"
+                                             :data-doc "Your app's users may buy a balance named for it, in packs of $5, $10 and $20, in one card payment that goes to you as a toll does; its tolls then draw on the balance with no card.  Tolls under 50 cents can only be taken this way."
+                                             (:input :type "checkbox" :|data-bind:dbalance| "")
+                                             " Offer a prepaid balance for its tolls (packs of $5, $10, $20)")
                                      ;; the hosting terms, in short, by the source terms
                                      (:p :class "pl-line" :|data-show| "!$closed"
                                          "Hosting: an open-source deployment with no tollbooth, or with no revenue for an extended period, may be un-hosted -- or kept, if we and its visitors find it interesting.")
@@ -1611,7 +1618,8 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      :payee (gethash "dpayee" signals)
                                      :pot-percent (let ((pot (gethash "dpot" signals)))
                                                     (cond ((realp pot) pot)
-                                                          ((stringp pot) (ignore-errors (parse-integer pot :junk-allowed t))))))
+                                                          ((stringp pot) (ignore-errors (parse-integer pot :junk-allowed t)))))
+                                     :balance? (eq (gethash "dbalance" signals) t))
                   (if record
                       (sheet-send! self (datastar-signals-event
                                          (with-output-to-string (s)

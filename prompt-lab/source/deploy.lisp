@@ -82,6 +82,8 @@ owner what is owed."
        "fee_percent" (gethash "fee_percent" record)
        ;; what its author adds for the community pot, on top of the fee
        "pot_percent" (or (gethash "pot_percent" record) 0)
+       ;; whether its author offers a prepaid balance for its tolls (the purse)
+       "balance" (if (balance-offered? record) t 'yason:false)
        ;; a priced deployment opens to others once the gate takes payment
        "open" (if (or (not (deployment-priced? record)) *deployment-payments?*) t 'yason:false)
        "deployed" (gethash "deployed" record)
@@ -201,12 +203,13 @@ with a price, and for a model a download that toll stands on."
 nil when that one is free."
   (monocle:record-file-price record format))
 
-(defun deploy-session! (session &key name title blurb payee pot-percent)
+(defun deploy-session! (session &key name title blurb payee pot-percent balance?)
   "Deploy what SESSION built as NAME.  Values: the record, or nil and the
 reason.  It must have a monetization story (monetizable?).  Its source is
 closed when the session was opened closed-source, else open.  POT-PERCENT
 is the author's slider: points of every payment, on top of the fee, for
-the lab's community pot.  With the :stripe provider PAYEE must have a
+the lab's community pot.  BALANCE? switches on a prepaid balance per
+visitor for the app's tolls (the purse).  With the :stripe provider PAYEE must have a
 Stripe account of its own, onboarded through the gate (author-account):
 its id is kept in the record as connect_account.  Deploying again from
 the same session under the same name replaces the copy and the terms."
@@ -264,7 +267,9 @@ the same session under the same name replaces the copy and the terms."
                                              :pot-percent (and (realp pot-percent) pot-percent)
                                              :fields (append (list "session" (session-id session)
                                                                    "kind" (kind-name (session-kind session)))
-                                                             (when account (list "connect_account" account))))))
+                                                             (when account (list "connect_account" account))
+                                                             ;; the author's switch: a prepaid balance for the app's tolls
+                                                             (list "balance" (if balance? t 'yason:false))))))
            (ensure-directories-exist directory)
            (write-text-file (model-body session) (merge-pathnames "model.lisp" directory))
            (monocle:save-record! (lab-house) record)
@@ -484,35 +489,6 @@ it asks again every few seconds."
                    (:p (:a :href back "Back")))))
    :type "text/html; charset=utf-8"))
 
-(defun model-toll-pay (req ent)
-  "POST <prefix>/toll-pay (deployed, format): open the payment for a
-deployed model's priced file at the gate and send the visitor to
-Stripe's page; with another provider the toll is taken on the spot (a
-test payment, booked as one) and the grant handed over."
-  (multiple-value-bind (record format toll) (model-toll-request req)
-    (cond ((null record) (refuse req ent net.aserve:*response-not-found* "~a" format))
-          ((not (eq *toll-provider* :stripe))
-           (let ((name (gethash "name" record)))
-             (if (monocle:charge-toll! (lab-house) name toll :reference (format nil "model:~a:~a" name format))
-                 (grant-and-go req ent name format (format nil "test:~a:~a:~a" name format (get-universal-time)))
-                 (refuse req ent net.aserve:*response-service-unavailable* "No payment can be taken here."))))
-          (t
-           (let* ((name (gethash "name" record))
-                  (origin (request-origin req))
-                  (viewer (format nil "~a~a/viewer?deployed=~a" origin *url-prefix* name))
-                  (return-url (format nil "~a~a/toll-return?deployed=~a&format=~a" origin *url-prefix* name format)))
-             (multiple-value-bind (url reason)
-                 (monocle:open-toll :stripe (lab-house) name toll (format nil "model:~a:~a" name format)
-                                    :return-url return-url :cancel-url viewer)
-               (if url
-                   (redirect-to req ent url)
-                   (respond-deployment req ent
-                                       (deployment-page "The payment could not be opened" (list reason)
-                                                        :back viewer
-                                                        :back-label (format nil "Back to ~a" (or (gethash "title" record) name)))
-                                       :response net.aserve:*response-service-unavailable*
-                                       :type "text/html; charset=utf-8"))))))))
-
 (defun model-toll-return (req ent)
   "GET <prefix>/toll-return?deployed=&format=&payment=: the visitor is back
 from Stripe; the grant is minted when the gate says the payment settled."
@@ -527,6 +503,213 @@ from Stripe; the grant is minted when the gate says the payment settled."
                      (grant-and-go req ent name format payment)
                      (confirming-page req ent (format nil "~a/viewer?deployed=~a" *url-prefix* name) word)))))))))
 
+;;
+;; THE PURSE: a prepaid balance per app (the sub-dollar option, step 7
+;; of the Monetize build; the mites design of 2026-10-03/04 reconciled
+;; with Connect).  An author switches it on at Monetize (the record's
+;; "balance"); a visitor then buys a pack (*balance-packs*: $5, $10,
+;; $20) in ONE Checkout -- a destination charge to the author like any
+;; toll, booked then, the card cost off the top -- and the app's tolls
+;; draw on the purse with no card and no Stripe, so a toll under
+;; Stripe's 50 c minimum can be taken.  The purse is the visitor's claim
+;; on that app alone (named for it, nothing of the house), held here --
+;; *purses*, persisted in <deployed-root>/purses.json -- and handed over
+;; as the cookie pl-purse-<name> and purse=<id> on the page's address.
+;; A draw is a line of its own in the books (kind draw: no money moves),
+;; for the author's record of what each toll takes.
+;;
+
+(defvar *purses* nil
+  "Hash table, purse id -> plist (:deployment :cents :made :topped :spent
+:payments); read from the purses file on first use.")
+
+(defvar *purses-lock* (bt:make-lock "prompt-lab purses"))
+
+(defun purses-file () (merge-pathnames "purses.json" *deployed-root*))
+
+(defun purses ()
+  "The purses table, read from its file the first time."
+  (bt:with-lock-held (*purses-lock*)
+    (or *purses*
+        (setf *purses*
+              (let ((table (make-hash-table :test #'equal))
+                    (json (ignore-errors (read-record (purses-file)))))
+                (when (hash-table-p json)
+                  (maphash #'(lambda (id p)
+                               (when (hash-table-p p)
+                                 (setf (gethash id table)
+                                       (list :deployment (gethash "deployment" p) :cents (or (gethash "cents" p) 0)
+                                             :made (gethash "made" p) :topped (or (gethash "topped" p) 0)
+                                             :spent (or (gethash "spent" p) 0)
+                                             :payments (coerce (or (gethash "payments" p) #()) 'list)))))
+                           json))
+                table)))))
+
+(defun save-purses! ()
+  (bt:with-lock-held (*purses-lock*)
+    (let ((table (make-hash-table :test #'equal)))
+      (maphash #'(lambda (id p)
+                   (setf (gethash id table)
+                         (h "deployment" (getf p :deployment) "cents" (getf p :cents) "made" (getf p :made)
+                            "topped" (getf p :topped) "spent" (getf p :spent)
+                            "payments" (coerce (getf p :payments) 'vector))))
+               *purses*)
+      (write-text-file (with-output-to-string (out) (yason:encode table out)) (purses-file)))))
+
+(defun purse-cookie (name) (format nil "pl-purse-~a" name))
+
+(defun request-purse (req name)
+  "The purse REQ names for deployment NAME: purse= on the query, else the
+deployment's cookie."
+  (or (query-value req "purse")
+      (cdr (assoc (purse-cookie name) (net.aserve:get-cookie-values req) :test #'string=))))
+
+(defun find-purse (id name)
+  "Purse ID's plist when it is deployment NAME's; nil otherwise."
+  (and (stringp id) (stringp name)
+       (let ((p (gethash id (purses))))
+         (and p (equal (getf p :deployment) name) p))))
+
+(defun purse-cents (id name)
+  "What purse ID holds for deployment NAME, in cents; 0 for none."
+  (let ((p (find-purse id name))) (if p (getf p :cents) 0)))
+
+(defun credit-purse! (id name cents payment)
+  "Put CENTS into purse ID of deployment NAME, paid by PAYMENT (the gate's
+id), minting the purse when ID is not one of NAME's; nothing twice for
+the same payment.  Returns the purse's id."
+  (let ((id (if (find-purse id name) id (new-owner-key))))
+    (purses)
+    (bt:with-lock-held (*purses-lock*)
+      (let ((p (or (gethash id *purses*)
+                   (list :deployment name :cents 0 :made (get-universal-time) :topped 0 :spent 0 :payments nil))))
+        (unless (member payment (getf p :payments) :test #'equal)
+          (incf (getf p :cents) cents)
+          (incf (getf p :topped) cents)
+          (push payment (getf p :payments)))
+        (setf (gethash id *purses*) p)))
+    (save-purses!)
+    id))
+
+(defun draw-purse! (id name cents)
+  "Take CENTS from purse ID of deployment NAME; true when it held enough."
+  (purses)
+  (let ((drawn (bt:with-lock-held (*purses-lock*)
+                 (let ((p (gethash id *purses*)))
+                   (when (and p (equal (getf p :deployment) name) (>= (getf p :cents) cents))
+                     (decf (getf p :cents) cents)
+                     (incf (getf p :spent) cents)
+                     (setf (gethash id *purses*) p)
+                     t)))))
+    (when drawn (save-purses!))
+    drawn))
+
+(defun balance-offered? (record)
+  "Whether RECORD's author offers a prepaid balance."
+  (and record (truthy? (gethash "balance" record))))
+
+(defun pack? (cents) (and (integerp cents) (member cents *balance-packs*) t))
+
+(defun pack-toll (record pack)
+  "The toll a PACK (cents) of RECORD's balance is bought at: keyed
+:balance, labelled for the app, priced in the lab's unit."
+  (list :key :balance
+        :label (format nil "~a balance: ~a" (or (gethash "title" record) (gethash "name" record)) (money-text pack))
+        (unit-key) (/ pack *unit-cents*)))
+
+(defun hand-purse (req ent name id back)
+  "Hand purse ID of deployment NAME to the visitor -- the cookie for a year,
+purse= on the address -- and send them BACK."
+  (net.aserve:with-http-response (req ent :response net.aserve:*response-found*)
+    (setf (net.aserve:reply-header-slot-value req :location)
+          (format nil "~a~apurse=~a" back (if (find #\? back) "&" "?") id))
+    (setf (net.aserve:reply-header-slot-value req :cache-control) "no-store")
+    (net.aserve:set-cookie-header req :name (purse-cookie name) :value id :path "/" :http-only t
+                                  :expires (+ (get-universal-time) (* 365 86400)))
+    (net.aserve:with-http-body (req ent))))
+
+(defun purse-request (req)
+  "What a purse top-up names: values (record back-url app) -- for a web
+app's page (iid) or a deployed model's (deployed) -- or nil and the
+reason.  BACK is where the visitor returns to, on this host."
+  (let ((iid (query-value req "iid")) (deployed (query-value req "deployed")))
+    (cond ((stringp deployed)
+           (let ((record (and *deployments?* (deployment-record deployed))))
+             (if record
+                 (values record (format nil "~a/viewer?deployed=~a" *url-prefix* deployed) nil)
+                 (values nil "There is no such deployment."))))
+          (t
+           (let* ((app (and (stringp iid) (first (gethash (make-keyword-sensitive iid) gwl::*instance-hash-table*))))
+                  (name (and app (typep app 'web-app) (the-object app deployment-name)))
+                  (record (and name (deployment-record name))))
+             (if record
+                 (values record (the-object app url) app)
+                 (values nil "This page has expired; open the app again.")))))))
+
+(defun purse-topup (req ent)
+  "POST <prefix>/toll-pay with pack=<cents> (and iid= or deployed=): buy a
+pack of the app's balance -- a destination charge to the author, like a
+toll, through the gate; with another provider granted on the spot."
+  (multiple-value-bind (record back app) (purse-request req)
+    (let* ((pack (let ((p (query-value req "pack"))) (and p (ignore-errors (parse-integer p :junk-allowed t)))))
+           (name (and record (gethash "name" record))))
+      (cond ((null record) (refuse req ent net.aserve:*response-not-found* "~a" back))
+            ((not (balance-offered? record)) (refuse req ent "This app offers no prepaid balance."))
+            ((not (pack? pack)) (refuse req ent "No such pack: the packs are ~{~a~^, ~}." (mapcar #'money-text *balance-packs*)))
+            ((not (eq *toll-provider* :stripe))
+             ;; a test payment, booked as one: the pack is credited at once
+             (if (monocle:charge-toll! (lab-house) name (pack-toll record pack) :reference (format nil "purse:~a" name))
+                 (let ((id (credit-purse! (request-purse req name) name pack
+                                          (format nil "test:purse:~a:~a" name (get-universal-time)))))
+                   (when app (the-object app (set-slot! :purse-id id)))
+                   (hand-purse req ent name id back))
+                 (refuse req ent net.aserve:*response-service-unavailable* "No payment can be taken here.")))
+            (t
+             (let* ((origin (request-origin req))
+                    (return-url (format nil "~a~a/toll-return?~a&pack=~a" origin *url-prefix*
+                                        (if app (format nil "iid=~a" (query-value req "iid")) (format nil "deployed=~a" name))
+                                        pack)))
+               (multiple-value-bind (url reason)
+                   (monocle:open-toll :stripe (lab-house) name (pack-toll record pack) (format nil "purse:~a" name)
+                                      :return-url return-url :cancel-url (concatenate 'string origin back))
+                 (if url
+                     (redirect-to req ent url)
+                     (respond-deployment req ent
+                                         (deployment-page "The payment could not be opened" (list reason)
+                                                          :back back :back-label (format nil "Back to ~a" (or (gethash "title" record) name)))
+                                         :response net.aserve:*response-service-unavailable*
+                                         :type "text/html; charset=utf-8")))))))))
+
+(defun purse-return (req ent)
+  "GET <prefix>/toll-return with pack=<cents> and payment=: back from
+Stripe after buying a pack; credited to the visitor's purse when the
+gate says the payment settled, and the purse handed over."
+  (multiple-value-bind (record back app) (purse-request req)
+    (let* ((pack (let ((p (query-value req "pack"))) (and p (ignore-errors (parse-integer p :junk-allowed t)))))
+           (payment (query-value req "payment"))
+           (name (and record (gethash "name" record))))
+      (cond ((null record) (refuse req ent net.aserve:*response-not-found* "~a" back))
+            ((not (pack? pack)) (refuse req ent "No such pack."))
+            ((not (payment-id? payment)) (refuse req ent "No payment named."))
+            (t (multiple-value-bind (paid? word) (monocle:settle-toll! (lab-house) name payment)
+                 (if paid?
+                     (let ((id (credit-purse! (request-purse req name) name pack payment)))
+                       (when app (the-object app (set-slot! :purse-id id)))
+                       (hand-purse req ent name id back))
+                     (confirming-page req ent back word))))))))
+
+(defun draw-for-toll! (req name toll)
+  "Pay TOLL at deployment NAME from the visitor's purse when it holds
+enough: the draw booked; the purse's id, or nil."
+  (let* ((id (request-purse req name))
+         (cents (* (monocle:toll-price toll) *unit-cents*)))
+    (when (and (find-purse id name) (draw-purse! id name cents))
+      (ignore-errors
+       (monocle:book-draw! (lab-house) name (monocle:toll-price toll)
+                           :toll (string-downcase (symbol-name (getf toll :key))) :purse id
+                           :reference (format nil "purse:~a:~a" id (get-universal-time))))
+      id)))
+
 (defun deployment-admits? (record format owner-key &optional grant)
   "Whether a deployed model's download in FORMAT opens to a visitor holding
 OWNER-KEY (or none) and GRANT (or none): a free format to everyone, a
@@ -537,56 +720,96 @@ bought on the model's page (model-toll-pay)."
       (grant-admits? grant (gethash "name" record) format)))
 
 (defun toll-pay-door (req ent)
-  "POST <prefix>/toll-pay: a web app's booth (form: iid, key) or a deployed
-model's priced file (deployed, format): open the payment at the gate and
-send the visitor to Stripe's page.  With another provider the toll is
-taken here, as the booth's own button does."
-  (if (query-value req "deployed")
-      (model-toll-pay req ent)
-      (multiple-value-bind (app key toll) (toll-app req)
-        (cond ((null app) (refuse req ent net.aserve:*response-not-found* "~a" key))
-              ((not (eq *toll-provider* :stripe))
-               (the-object app (pay-toll! key))
-               (redirect-to req ent (the-object app url)))
-              (t
-               (let* ((name (the-object app deployment-name))
-                      (origin (request-origin req))
-                      (back (format nil "~a~a" origin (the-object app url)))
-                      (return-url (format nil "~a~a/toll-return?iid=~a&key=~(~a~)"
-                                          origin *url-prefix* (the-object app instance-id) key)))
-                 (multiple-value-bind (url reason)
-                     (monocle:open-toll :stripe (lab-house) name toll (the-object app instance-id)
-                                        :return-url return-url :cancel-url back)
-                   (if url
-                       (redirect-to req ent url)
-                       (respond-deployment req ent
-                                           (deployment-page "The payment could not be opened" (list reason)
-                                                            :back (the-object app url)
-                                                            :back-label (format nil "Back to ~a"
-                                                                                (or (gethash "title" (deployment-record name)) name)))
-                                           :response net.aserve:*response-service-unavailable*
-                                           :type "text/html; charset=utf-8")))))))))
+  "POST <prefix>/toll-pay: a web app's booth (form: iid, key), a deployed
+model's priced file (deployed, format), or a pack of an app's prepaid
+balance (iid or deployed, pack=<cents>).  A toll the visitor's purse
+covers is drawn from it here; otherwise the payment is opened at the
+gate and the visitor sent to Stripe's page.  With another provider the
+toll is taken here, as the booth's own button does."
+  (cond ((query-value req "pack") (purse-topup req ent))
+        ((query-value req "deployed") (model-toll-pay req ent))
+        (t
+         (multiple-value-bind (app key toll) (toll-app req)
+           (cond ((null app) (refuse req ent net.aserve:*response-not-found* "~a" key))
+                 ;; from the visitor's purse, when it holds enough
+                 ((draw-for-toll! req (the-object app deployment-name) toll)
+                  (the-object app (grant-toll! key))
+                  (redirect-to req ent (the-object app url)))
+                 ((not (eq *toll-provider* :stripe))
+                  (the-object app (pay-toll! key))
+                  (redirect-to req ent (the-object app url)))
+                 (t
+                  (let* ((name (the-object app deployment-name))
+                         (origin (request-origin req))
+                         (back (format nil "~a~a" origin (the-object app url)))
+                         (return-url (format nil "~a~a/toll-return?iid=~a&key=~(~a~)"
+                                             origin *url-prefix* (the-object app instance-id) key)))
+                    (multiple-value-bind (url reason)
+                        (monocle:open-toll :stripe (lab-house) name toll (the-object app instance-id)
+                                           :return-url return-url :cancel-url back)
+                      (if url
+                          (redirect-to req ent url)
+                          (respond-deployment req ent
+                                              (deployment-page "The payment could not be opened" (list reason)
+                                                               :back (the-object app url)
+                                                               :back-label (format nil "Back to ~a"
+                                                                                   (or (gethash "title" (deployment-record name)) name)))
+                                              :response net.aserve:*response-service-unavailable*
+                                              :type "text/html; charset=utf-8"))))))))))
 
 (defun toll-return-door (req ent)
   "GET <prefix>/toll-return: the visitor is back from Stripe -- a web app's
-booth (iid, key, payment) or a deployed model's file (deployed, format,
-payment).  The grant is given when the gate says the payment settled (its
-webhook) and the line is booked; until then a page that asks again every
-few seconds."
-  (if (query-value req "deployed")
-      (model-toll-return req ent)
-      (multiple-value-bind (app key toll) (toll-app req)
-        (let ((payment (query-value req "payment")))
-          (cond ((null app) (refuse req ent net.aserve:*response-not-found* "~a" key))
-                ((not (payment-id? payment)) (refuse req ent "No payment named."))
-                ((the-object app (toll-paid? key)) (redirect-to req ent (the-object app url)))
-                (t
-                 (multiple-value-bind (paid? word)
-                     (monocle:settle-toll! (lab-house) (the-object app deployment-name) payment)
-                   (cond (paid?
-                          (the-object app (grant-toll! key))
-                          (redirect-to req ent (the-object app url)))
-                         (t (confirming-page req ent (the-object app url) word))))))))))
+booth (iid, key, payment), a deployed model's file (deployed, format,
+payment), or a pack of the balance (iid or deployed, pack, payment).
+The grant or the credit is given when the gate says the payment settled
+(its webhook) and the line is booked; until then a page that asks again
+every few seconds."
+  (cond ((query-value req "pack") (purse-return req ent))
+        ((query-value req "deployed") (model-toll-return req ent))
+        (t
+         (multiple-value-bind (app key toll) (toll-app req)
+           (let ((payment (query-value req "payment")))
+             (cond ((null app) (refuse req ent net.aserve:*response-not-found* "~a" key))
+                   ((not (payment-id? payment)) (refuse req ent "No payment named."))
+                   ((the-object app (toll-paid? key)) (redirect-to req ent (the-object app url)))
+                   (t
+                    (multiple-value-bind (paid? word)
+                        (monocle:settle-toll! (lab-house) (the-object app deployment-name) payment)
+                      (cond (paid?
+                             (the-object app (grant-toll! key))
+                             (redirect-to req ent (the-object app url)))
+                            (t (confirming-page req ent (the-object app url) word)))))))))))
+
+(defun model-toll-pay (req ent)
+  "POST <prefix>/toll-pay (deployed, format): a deployed model's priced
+file -- drawn from the visitor's purse when it holds enough, else opened
+at the gate and the visitor sent to Stripe's page; with another provider
+the toll is taken on the spot (a test payment, booked as one) and the
+grant handed over."
+  (multiple-value-bind (record format toll) (model-toll-request req)
+    (let ((name (and record (gethash "name" record))))
+      (cond ((null record) (refuse req ent net.aserve:*response-not-found* "~a" format))
+            ((let ((purse (draw-for-toll! req name toll)))
+               (and purse (grant-and-go req ent name format (format nil "purse:~a:~a" purse (get-universal-time))))))
+            ((not (eq *toll-provider* :stripe))
+             (if (monocle:charge-toll! (lab-house) name toll :reference (format nil "model:~a:~a" name format))
+                 (grant-and-go req ent name format (format nil "test:~a:~a:~a" name format (get-universal-time)))
+                 (refuse req ent net.aserve:*response-service-unavailable* "No payment can be taken here.")))
+            (t
+             (let* ((origin (request-origin req))
+                    (viewer (format nil "~a~a/viewer?deployed=~a" origin *url-prefix* name))
+                    (return-url (format nil "~a~a/toll-return?deployed=~a&format=~a" origin *url-prefix* name format)))
+               (multiple-value-bind (url reason)
+                   (monocle:open-toll :stripe (lab-house) name toll (format nil "model:~a:~a" name format)
+                                      :return-url return-url :cancel-url viewer)
+                 (if url
+                     (redirect-to req ent url)
+                     (respond-deployment req ent
+                                         (deployment-page "The payment could not be opened" (list reason)
+                                                          :back viewer
+                                                          :back-label (format nil "Back to ~a" (or (gethash "title" record) name)))
+                                         :response net.aserve:*response-service-unavailable*
+                                         :type "text/html; charset=utf-8")))))))))
 
 (defun deployed-for-viewer (name)
   "The running deployment NAME for the viewer: a deployed model opens to
@@ -665,7 +888,8 @@ stands it wants its token."
                                         :name (gethash "name" json) :title (gethash "title" json)
                                         :blurb (gethash "blurb" json)
                                         :payee (gethash "payee" json)
-                                        :pot-percent (gethash "pot_percent" json))
+                                        :pot-percent (gethash "pot_percent" json)
+                                        :balance? (eq (gethash "balance" json) t))
                      (if record
                          (respond-json req ent (deployment-state record :owner? t))
                          (refuse req ent "~a" reason)))))))))
@@ -851,7 +1075,9 @@ open deployment's model file."
                     ;; the instance knows which deployment it serves: its
                     ;; tollbooths book to it (kinds.lisp)
                     (gwl-make-object req ent (format nil "~s" (app-symbol deployed))
-                                     :make-object-args (list :deployment-name name)))
+                                     ;; and the visitor's purse, from its cookie, so the booths can say the balance
+                                     :make-object-args (list :deployment-name name
+                                                             :purse-id (request-purse req name))))
                    (t
                     (touch deployed)
                     (net.aserve:with-http-response (req ent :response net.aserve:*response-found*)
