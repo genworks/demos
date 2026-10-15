@@ -1207,3 +1207,134 @@ email, reason}.  A lab without the :stripe provider answers 404."
                                                 "url" (or url "")
                                                 "email" email
                                                 "reason" (or why "")))))))))))
+
+;;
+;; The upstream licensor's view of what accrues to it from the hosted
+;; applications (step 8 of the Monetize build): the lab's books through
+;; monocle:upstream-report, under RATES the house keeps in a private
+;; file -- nothing of the arithmetic is in this repository -- behind a
+;; token of its own, so the licensor's reader needs no lab password.
+;; `<prefix>/api/royalty?token=` answers JSON, `<prefix>/royalty?token=`
+;; a page; without the files both answer 404.  The books are this
+;; host's; a house with several hosts reads each.
+;;
+
+(defvar *royalty-rates-file* nil
+  "String or nil. The file holding the licensor's rates as monocle:upstream-report
+reads them, a plist (:percent :lisp-match :attribution :minimum); set by
+the stack's init, read at every request.  Nil: no royalty view here.")
+
+(defvar *royalty-token-file* nil
+  "String or nil. The file whose first line is the token that opens the
+royalty view (token= on the query, or X-Prompt-Lab-Royalty).  Nil: no
+royalty view here.")
+
+(defun royalty-rates ()
+  "The rates plist, read from *royalty-rates-file*; nil without one."
+  (and (stringp *royalty-rates-file*)
+       (ignore-errors
+        (with-open-file (in *royalty-rates-file* :if-does-not-exist nil)
+          (and in (let ((*read-eval* nil))
+                    (let ((plist (read in nil nil)))
+                      (and (consp plist) (evenp (length plist)) plist))))))))
+
+(defun royalty-token ()
+  (and (stringp *royalty-token-file*)
+       (ignore-errors
+        (with-open-file (in *royalty-token-file* :if-does-not-exist nil)
+          (and in (let ((line (read-line in nil nil)))
+                    (and (stringp line) (plusp (length (string-trim " " line))) (string-trim " " line))))))))
+
+(defun royalty-admits? (req)
+  (let ((token (royalty-token))
+        (given (or (query-value req "token") (net.aserve:header-slot-value req :x-prompt-lab-royalty))))
+    (and token (stringp given) (string= token given))))
+
+(defun royalty-report (&key tests?)
+  "The licensor's report from this host's books under the private rates;
+nil without rates."
+  (let ((rates (royalty-rates)))
+    (and rates (monocle:upstream-report (lab-house) rates :tests? tests?))))
+
+(defun dollars-of (units)
+  "UNITS of the lab's unit as money, two places."
+  (money-text (* units *unit-cents*)))
+
+(defun royalty-door (req ent)
+  "GET <prefix>/api/royalty?token=<token>[&tests=1]: the licensor's share
+quarter by quarter, as JSON; 404 without the rates or the token."
+  (cond ((not (and (royalty-rates) (royalty-token)))
+         (refuse req ent net.aserve:*response-not-found* "No royalty view here."))
+        ((not (royalty-admits? req))
+         (refuse req ent net.aserve:*response-forbidden* "This view opens only with its token."))
+        (t (let ((report (royalty-report :tests? (equal (query-value req "tests") "1"))))
+             (respond-json req ent
+                           (h "unit" (units) "cents_per_unit" *unit-cents*
+                              "percent" (getf report :percent)
+                              "other_half" (getf report :other-half)
+                              "quarters" (map 'vector
+                                              #'(lambda (q)
+                                                  (h "year" (getf q :year) "quarter" (getf q :quarter)
+                                                     "share" (getf q :share) "rounded" (getf q :rounded)
+                                                     "carried_in" (getf q :carried-in) "payable" (getf q :payable)
+                                                     "carried_out" (getf q :carried-out)
+                                                     "rows" (map 'vector
+                                                                 #'(lambda (row)
+                                                                     (h "lisp" (getf row :lisp) "engine" (getf row :engine)
+                                                                        "licensed" (if (getf row :licensed?) t 'yason:false)
+                                                                        "payments" (getf row :payments) "refunds" (getf row :refunds)
+                                                                        "base" (getf row :base) "attributable" (getf row :attributable)
+                                                                        "share" (getf row :share)))
+                                                                 (getf q :rows))))
+                                              (getf report :quarters))))))))
+
+(defun royalty-page (req ent)
+  "GET <prefix>/royalty?token=<token>[&tests=1]: the same, as a page for
+the licensor's reader."
+  (cond ((not (and (royalty-rates) (royalty-token)))
+         (respond-deployment req ent (deployment-page "Nothing here" (list "There is no royalty view on this host."))
+                             :response net.aserve:*response-not-found* :type "text/html; charset=utf-8"))
+        ((not (royalty-admits? req))
+         (respond-deployment req ent (deployment-page "Not yours" (list "This page opens only with its token."))
+                             :response net.aserve:*response-forbidden* :type "text/html; charset=utf-8"))
+        (t
+         (let* ((tests? (equal (query-value req "tests") "1"))
+                (report (royalty-report :tests? tests?))
+                (minimum (or (getf (royalty-rates) :minimum) 0)))
+           (respond-deployment
+            req ent
+            (with-lhtml-string ()
+              (:html (:head (:meta :charset "utf-8")
+                            (:meta :name "viewport" :content "width=device-width, initial-scale=1")
+                            (:link :rel "icon" :href "data:,")
+                            (:title "Hosted applications: the royalty accruing")
+                            (:style "body{font-family:system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;line-height:1.45}table{border-collapse:collapse;margin:.5rem 0 1rem}th,td{border-bottom:1px solid #ddd;padding:.3rem .6rem;text-align:right}th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}.muted{color:#666}"))
+                     (:body
+                      (:h1 :style "font-size:1.4rem" "Hosted applications: the royalty accruing")
+                      (:p :class "muted"
+                          (fmt "This host's books, read ~a.  The base is the house's fee before its share of the card cost, net of refunds and disputes; the share is ~a% of what is attributable, summed over each quarter and rounded once; a quarter under ~a is carried into the next.  Amounts in ~a (~a)."
+                               (multiple-value-bind (s m h d mo y) (decode-universal-time (get-universal-time) 0)
+                                 (declare (ignore s)) (format nil "~4,'0d-~2,'0d-~2,'0d ~2,'0d:~2,'0d UTC" y mo d h m))
+                               (getf report :percent) (dollars-of minimum) (units) (dollars-of 1))
+                          (when tests? (htm " " (:b "Test payments are included on this page."))))
+                      (dolist (q (getf report :quarters))
+                        (htm (:h2 :style "font-size:1.1rem;margin:1.2rem 0 .3rem" (fmt "~a Q~a" (getf q :year) (getf q :quarter)))
+                             (:table
+                              (:thead (:tr (:th "Runtime") (:th "Engine") (:th "Payments") (:th "Refunds") (:th "Base") (:th "Attributable") (:th "Share")))
+                              (:tbody
+                               (dolist (row (getf q :rows))
+                                 (htm (:tr (:td (esc (getf row :lisp)))
+                                           (:td (esc (getf row :engine)))
+                                           (:td (fmt "~d" (getf row :payments)))
+                                           (:td (fmt "~d" (getf row :refunds)))
+                                           (:td (str (dollars-of (getf row :base))))
+                                           (:td (if (getf row :licensed?) (str (dollars-of (getf row :attributable))) (htm (:span :class "muted" "no part"))))
+                                           (:td (if (getf row :licensed?) (str (dollars-of (getf row :share))) (htm (:span :class "muted" "none")))))))))
+                             (:p (fmt "Share for the quarter ~a, rounded ~a; carried in ~a; "
+                                      (dollars-of (getf q :share)) (dollars-of (getf q :rounded)) (dollars-of (getf q :carried-in)))
+                                 (if (plusp (getf q :payable))
+                                     (htm (:b (fmt "payable ~a" (dollars-of (getf q :payable)))))
+                                     (htm (fmt "carried out ~a" (dollars-of (getf q :carried-out))))))))
+                      (:p :class "muted" (fmt "Not attributed of the licensed runtimes' fees, all time (the other half): ~a." (dollars-of (getf report :other-half))))
+                      (:p :class "muted" "Runtimes the licensor has no part in are summed the same way and shown with no share."))))
+            :type "text/html; charset=utf-8")))))

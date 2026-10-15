@@ -1124,6 +1124,10 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
     (net.aserve:publish :path (door-path "earnings") :server server :host host :function (gated #'earnings-door))
     ;; the author's Stripe account, through the gate's Connect door (deploy.lisp)
     (net.aserve:publish :path (door-path "connect") :server server :host host :function (gated #'connect-door))
+    ;; the upstream licensor's view of the royalty accruing (deploy.lisp):
+    ;; behind a token of its own, not the lab's lock
+    (net.aserve:publish :path (door-path "royalty") :server server :host host :function #'royalty-door)
+    (net.aserve:publish :path (format nil "~a/royalty" *url-prefix*) :server server :host host :function #'royalty-page)
     ;; the doors a web app is reached by answer on the apps' own host as
     ;; well as the lab's (app-doors-host, kinds.lisp); not behind the lock:
     ;; a deployed app is for others
