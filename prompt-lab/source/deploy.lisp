@@ -1493,11 +1493,16 @@ gate credits the deployment's hosting once and the deployment runs again."
              (let ((outcome (and answer (gethash "outcome" answer))))
                (when (member outcome '("credited" "already") :test #'equal)
                  (remhash name *stopped*))
+               ;; the sale into the books: hosting bought on a licensed
+               ;; runtime counts toward the licensor's base
+               (when (equal outcome "credited")
+                 (book-hosting-line! name checkout answer))
                (respond-deployment
                 req ent
                 (deployment-page (cond ((equal outcome "credited") "Hosting added")
                                        ((equal outcome "already") "Hosting was already added")
                                        ((equal outcome "unpaid") "The payment has not completed yet")
+                                       ((equal outcome "expired") "The checkout expired unpaid")
                                        (t "Hosting could not be confirmed"))
                                  (list (cond ((member outcome '("credited" "already") :test #'equal)
                                               (format nil "~a has ~a hosting credits now and runs again."
@@ -1505,3 +1510,43 @@ gate credits the deployment's hosting once and the deployment runs again."
                                              (t (or (and answer (gethash "text" answer)) (format nil "The gate answered ~a." status)))))
                                  :back (deployment-url name) :back-label (format nil "Open ~a" (or (gethash "title" record) name)))
                 :type "text/html; charset=utf-8")))))))
+
+(defun book-hosting-line! (name checkout answer)
+  "Book the gate's word that hosting was bought for deployment NAME -- the
+host-confirm ANSWER, outcome credited, for CHECKOUT -- as a line of kind
+hosting in the books (monocle book-hosting!): the whole amount the
+house's, the card cost the gate's estimate, the credits bought.  Hosting
+bought on a licensed runtime counts toward the licensor's base at the
+engine's attribution (the user's ruling, 2026-10-15: Allegro or not is
+the test, the engine only the fraction).  Nothing booked when the answer
+names no amount."
+  (let ((amount (gethash "amount_cents" answer)))
+    (when (and (realp amount) (plusp amount))
+      (handler-case
+          (monocle:book-hosting! (lab-house) name (/ amount *unit-cents*)
+                                 :card (/ (or (gethash "card_cents" answer) 0) *unit-cents*)
+                                 :credits (gethash "credits_bought" answer)
+                                 :reference (let ((intent (gethash "intent" answer)))
+                                              (if (stringp intent) (format nil "stripe:~a" intent) (format nil "checkout:~a" checkout))))
+        (error (condition) (format *error-output* "~&prompt-lab: hosting for ~a not booked: ~a~%" name condition) nil)))))
+
+(defun sweep-hosting! ()
+  "Confirm the hosting checkouts the gate still holds pending for this lab
+and older than ten minutes -- a buyer who paid and never came back --
+crediting and booking as the return door does; an unpaid one stays
+pending until Stripe expires it.  On the reaper's thread.  Nothing
+without the meter, or a gate without the door."
+  (when *hosting-meter?*
+    (multiple-value-bind (answer status) (ignore-errors (gate-post "host-pending" (h "lab" (deployment-lab-name))))
+      (when (and (eql status 200) (hash-table-p answer))
+        (dolist (row (coerce (or (gethash "pending" answer) #()) 'list))
+          (let ((name (gethash "deployment" row))
+                (checkout (gethash "checkout" row))
+                (opened (gethash "opened" row)))
+            (when (and (stringp name) (stringp checkout) (realp opened)
+                       (> (- (get-universal-time) opened) 600))
+              (multiple-value-bind (confirm status)
+                  (gate-post "host-confirm" (h "lab" (deployment-lab-name) "deployment" name "checkout" checkout))
+                (when (and (eql status 200) (hash-table-p confirm) (equal (gethash "outcome" confirm) "credited"))
+                  (remhash name *stopped*)
+                  (book-hosting-line! name checkout confirm))))))))))
