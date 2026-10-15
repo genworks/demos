@@ -206,8 +206,10 @@ nil when that one is free."
 reason.  It must have a monetization story (monetizable?).  Its source is
 closed when the session was opened closed-source, else open.  POT-PERCENT
 is the author's slider: points of every payment, on top of the fee, for
-the lab's community pot.  Deploying again from the same session under the
-same name replaces the copy and the terms."
+the lab's community pot.  With the :stripe provider PAYEE must have a
+Stripe account of its own, onboarded through the gate (author-account):
+its id is kept in the record as connect_account.  Deploying again from
+the same session under the same name replaces the copy and the terms."
   (bt:with-lock-held (*deploy-lock*)
     (let* ((closed? (session-closed? session))
            (name (and (stringp name) (string-downcase (string-trim " " name))))
@@ -220,7 +222,14 @@ same name replaces the copy and the terms."
                      (multiple-value-bind (tolls file-tolls) (built-tolls session)
                        (file-prices tolls file-tolls))))
            (payee (clip-line payee 200))
-           (symbol (ignore-errors (built-symbol session))))
+           (symbol (ignore-errors (built-symbol session)))
+           (account nil) (account-problem nil))
+      ;; the author's account, where the gate takes the money
+      (when (and (eq *toll-provider* :stripe) (find #\@ payee))
+        (multiple-value-bind (id url ready? why) (author-account payee)
+          (declare (ignore url))
+          (setq account (and ready? id)
+                account-problem why)))
       (cond
         ((not *deployments?*) (values nil "This lab deploys nothing."))
         ((not (and symbol (find-class symbol nil)))
@@ -240,26 +249,31 @@ same name replaces the copy and the terms."
          (values nil "This lab holds all the deployments it takes."))
         ((not (and (find #\@ payee) (> (length payee) 5)))
          (values nil "Say where your share is to be paid: an email address we can reach you at."))
+        ((and (eq *toll-provider* :stripe) (null account))
+         (values nil (or account-problem "Set up payouts with Stripe first: the button beside your email.")))
         (t
          (let* ((directory (deployment-directory name))
                 ;; the terms as they stand today, what it runs on (revenue
                 ;; is reported by runtime), a model's downloads that cost;
-                ;; and the lab's own: the session it came from and its kind
+                ;; and the lab's own: the session it came from, its kind,
+                ;; and the author's account at the gate
                 (record (monocle:make-record (lab-house)
                                              :name name :title title :blurb blurb
                                              :owner (session-owner session) :payee payee
                                              :closed? closed? :file-prices prices :existing existing
                                              :pot-percent (and (realp pot-percent) pot-percent)
-                                             :fields (list "session" (session-id session)
-                                                           "kind" (kind-name (session-kind session))))))
+                                             :fields (append (list "session" (session-id session)
+                                                                   "kind" (kind-name (session-kind session)))
+                                                             (when account (list "connect_account" account))))))
            (ensure-directories-exist directory)
            (write-text-file (model-body session) (merge-pathnames "model.lisp" directory))
            (monocle:save-record! (lab-house) record)
            (drop-deployed! name)
            (let ((saved (deployment-record name)))
-             (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee~@[ and ~a% goes to the community pot~]."
+             (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee~@[ and ~a% goes to the community pot~]~:[~;; paid by card through Stripe to your account~]."
                         name (deployment-url name) closed? (house-fee-percent closed?)
-                        (let ((pot (gethash "pot_percent" saved))) (and (realp pot) (plusp pot) pot)))
+                        (let ((pot (gethash "pot_percent" saved))) (and (realp pot) (plusp pot) pot))
+                        account)
              saved)))))))
 
 (defun undeploy! (name owner-key)
@@ -600,3 +614,183 @@ open deployment's model file."
                             (format nil "~a/viewer?deployed=~a~@[&owner=~a~]" *url-prefix* name
                                     (and (deployment-priced? record) owner-key)))
                       (net.aserve:with-http-body (req ent))))))))))
+
+;;
+;; A toll paid through the gate (*toll-provider* :stripe).  The booth is
+;; a form (kinds.lisp, toll-button) that POSTs to <prefix>/toll-pay: the
+;; door has Monocle open the payment at the gate's Connect door -- a
+;; Checkout Session on the platform, the author's account the
+;; destination and the name on the customer's statement -- and sends the
+;; visitor to Stripe's page.  Back at <prefix>/toll-return the grant is
+;; given only when the gate says the payment settled, which it knows from
+;; Stripe's webhook, never from the visitor's return; the line is booked
+;; then, with the card cost the charge's balance transaction reports, the
+;; engine and the fee at the deployment's terms.  A visitor who paid and
+;; never came back is booked by the sweep (sweep-toll-payments!, on the
+;; reaper's thread), which asks the gate what is paid and unbooked for
+;; this lab.
+;;
+;; The author's side: at deploy the payee email must have a Stripe
+;; account of the author's own, made and onboarded through the gate
+;; (author-account, the connect door); its id goes into the deployment's
+;; record as connect_account, which the lab never serves.
+;;
+
+(defun gate-ask (door plist)
+  "Ask the gate's side DOOR with PLIST (string keys and values): Monocle's
+way in (lab-house's gate).  Values: the answer, a hash table, and the
+status."
+  (gate-post door (apply #'h plist)))
+
+(defun request-origin (req)
+  "The scheme and host the visitor's browser used, as the proxies
+forwarded them: \"https://host\"."
+  (flet ((header (value) (and (stringp value) (plusp (length value)) value)))
+    (format nil "~a://~a"
+            (or (header (net.aserve:header-slot-value req :x-forwarded-proto)) "http")
+            (or (header (net.aserve:header-slot-value req :x-cyclops-forwarded-host))
+                (header (net.aserve:header-slot-value req :host))
+                "localhost"))))
+
+(defun redirect-to (req ent url)
+  (net.aserve:with-http-response (req ent :response net.aserve:*response-found*)
+    (setf (net.aserve:reply-header-slot-value req :location) url)
+    (setf (net.aserve:reply-header-slot-value req :cache-control) "no-store")
+    (net.aserve:with-http-body (req ent))))
+
+(defun toll-app (req)
+  "The web app instance the request's iid= names, with the toll its key=
+names: values (app key toll); or nil and the reason."
+  (let* ((iid (query-value req "iid"))
+         (app (and (stringp iid)
+                   (first (gethash (make-keyword-sensitive iid) gwl::*instance-hash-table*))))
+         (key-name (query-value req "key"))
+         (toll (and app (typep app 'web-app) (stringp key-name)
+                    (find key-name (the-object app tolls)
+                          :key #'(lambda (toll) (and (listp toll) (string (getf toll :key))))
+                          :test #'string-equal))))
+    (cond ((or (null app) (not (typep app 'web-app)))
+           (values nil "This page has expired; open the app again."))
+          ((null toll) (values nil "No such toll here."))
+          ((null (the-object app deployment-name))
+           (values nil "This is the app's own preview: nothing is charged here."))
+          (t (values app (getf toll :key) toll)))))
+
+(defun toll-pay-door (req ent)
+  "POST <prefix>/toll-pay (form: iid, key): open the toll's payment at
+the gate and send the visitor to Stripe's page.  With another provider
+the toll is taken here, as the booth's own button does."
+  (multiple-value-bind (app key toll) (toll-app req)
+    (cond ((null app) (refuse req ent net.aserve:*response-not-found* "~a" key))
+          ((not (eq *toll-provider* :stripe))
+           (the-object app (pay-toll! key))
+           (redirect-to req ent (the-object app url)))
+          (t
+           (let* ((name (the-object app deployment-name))
+                  (origin (request-origin req))
+                  (back (format nil "~a~a" origin (the-object app url)))
+                  (return-url (format nil "~a~a/toll-return?iid=~a&key=~(~a~)"
+                                      origin *url-prefix* (the-object app instance-id) key)))
+             (multiple-value-bind (url reason)
+                 (monocle:open-toll :stripe (lab-house) name toll (the-object app instance-id)
+                                    :return-url return-url :cancel-url back)
+               (if url
+                   (redirect-to req ent url)
+                   (respond-deployment req ent
+                                       (deployment-page "The payment could not be opened" reason)
+                                       :response net.aserve:*response-service-unavailable*
+                                       :type "text/html; charset=utf-8"))))))))
+
+(defun toll-return-door (req ent)
+  "GET <prefix>/toll-return?iid=&key=&payment=: the visitor is back from
+Stripe.  The grant is given when the gate says the payment settled (its
+webhook) and the line is booked; until then a page that asks again every
+few seconds."
+  (multiple-value-bind (app key toll) (toll-app req)
+    (let ((payment (query-value req "payment")))
+      (cond ((null app) (refuse req ent net.aserve:*response-not-found* "~a" key))
+            ((not (and (stringp payment) (< 3 (length payment) 200)
+                       (every #'(lambda (c) (or (alphanumericp c) (char= c #\_))) payment)))
+             (refuse req ent "No payment named."))
+            ((the-object app (toll-paid? key)) (redirect-to req ent (the-object app url)))
+            (t
+             (multiple-value-bind (paid? word)
+                 (monocle:settle-toll! (lab-house) (the-object app deployment-name) payment)
+               (cond (paid?
+                      (the-object app (grant-toll! key))
+                      (redirect-to req ent (the-object app url)))
+                     (t
+                      (respond-deployment
+                       req ent
+                       (with-lhtml-string ()
+                         (:html (:head (:meta :charset "utf-8")
+                                       (:meta :name "viewport" :content "width=device-width, initial-scale=1")
+                                       (:meta :http-equiv "refresh" :content "4")
+                                       (:title "Confirming your payment"))
+                                (:body :style "font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5"
+                                       (:h1 :style "font-size: 1.4rem" "Confirming your payment")
+                                       (:p "Stripe is telling us the payment went through.  This page asks again every few seconds; there is nothing more to do.")
+                                       (:p :style "color: #666" (esc (format nil "Status: ~a." (or word "pending"))))
+                                       (:p (:a :href (the-object app url) "Back to the app")))))
+                       :type "text/html; charset=utf-8")))))))))
+
+(defun sweep-toll-payments! ()
+  "Book the toll payments the gate has settled for this lab that the books
+lack (a visitor who paid and never came back), and tell the gate.
+Nothing without the :stripe provider."
+  (when (eq *toll-provider* :stripe)
+    (monocle:settle-unbooked! (lab-house))))
+
+(defun author-account (email &key create? return-url refresh-url)
+  "The author's Stripe account for EMAIL, from the gate's connect door
+(made when CREATE? and there is none).  Values: the account's id or nil,
+an onboarding URL when the gate gave one (RETURN-URL and REFRESH-URL
+asked for it), whether it is ready to be paid (details submitted and
+charges enabled), and the reason when it is not."
+  (multiple-value-bind (answer status)
+      (gate-post "connect" (h "email" email
+                              "create" (if create? t 'yason:false)
+                              "return_url" (or return-url "")
+                              "refresh_url" (or refresh-url "")
+                              "lab" (monocle:house-lab-name (lab-house))))
+    (let* ((account (and answer (gethash "account" answer)))
+           (url (and answer (let ((url (gethash "url" answer)))
+                              (and (stringp url) (plusp (length url)) url))))
+           (ready? (and answer (eq (gethash "details_submitted" answer) t)
+                        (eq (gethash "charges_enabled" answer) t))))
+      (cond ((eql status 404)
+             (values nil nil nil "No Stripe account for that address yet: set up payouts first."))
+            ((not (and (eql status 200) (stringp account)))
+             (values nil nil nil (or (ignore-errors (gethash "message" (gethash "error" answer)))
+                                     "The gate did not answer about payouts; try again in a moment.")))
+            (ready? (values account url t nil))
+            (t (values account url nil "Payouts are not set up yet: finish Stripe's onboarding first."))))))
+
+(defun connect-door (req ent)
+  "POST <prefix>/api/connect {session, email, turnstile?}: the session's
+owner sets up payouts -- the gate finds or makes their Stripe account for
+EMAIL and answers an onboarding link.  Answers {account, ready, url,
+email, reason}.  A lab without the :stripe provider answers 404."
+  (let* ((json (request-json req))
+         (session (requested-session req json))
+         (email (and json (gethash "email" json))))
+    (cond ((not (eq *toll-provider* :stripe))
+           (refuse req ent net.aserve:*response-not-found* "This lab takes no card payments."))
+          ((null session) (no-such-session req ent))
+          ((not (owner-request? req session json)) (not-yours req ent))
+          ((not (and (stringp email) (find #\@ email) (> (length email) 5)))
+           (refuse req ent "Say your email address."))
+          (t (multiple-value-bind (ok? reason)
+                 (topup-check! session (gethash "turnstile" json) (client-address req))
+               (if (not ok?)
+                   (refuse req ent net.aserve:*response-forbidden* "~a" reason)
+                   (let ((back (page-url req session)))
+                     (multiple-value-bind (account url ready? why)
+                         (author-account email :create? t
+                                               :return-url (concatenate 'string back "&connect=1")
+                                               :refresh-url (concatenate 'string back "&connect=refresh"))
+                       (respond-json req ent (h "account" (or account "")
+                                                "ready" (if ready? t 'yason:false)
+                                                "url" (or url "")
+                                                "email" email
+                                                "reason" (or why "")))))))))))

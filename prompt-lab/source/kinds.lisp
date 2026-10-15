@@ -206,6 +206,21 @@ stands: uses left, time left, or made on this visit."
                 (list* :uses (1- (getf payment :uses)) (alexandria:remove-from-plist payment :uses)))
           (the (set-slot! :payments payments))))))
 
+   ("Void. Record a payment for toll KEY by this visitor: good for the
+toll's :uses or :seconds, else this visit.  The lab calls it once a
+payment is taken (pay-toll!, or the gate's settled word: deploy.lisp)."
+    grant-toll!
+    (key)
+    (let ((toll (the (toll key))))
+      (when toll
+        (let ((payments (copy-list (the payments))))
+          (setf (getf payments key)
+                (append (list :at (get-universal-time))
+                        (when (getf toll :uses) (list :uses (getf toll :uses)))
+                        (when (getf toll :seconds)
+                          (list :until (+ (get-universal-time) (getf toll :seconds))))))
+          (the (set-slot! :payments payments))))))
+
    ;; called by the toll's button through gdlAjax: the price is the
    ;; toll's own, never the browser's
    (pay-toll!
@@ -213,13 +228,7 @@ stands: uses left, time left, or made on this visit."
     (let ((toll (the (toll key))))
       (when (and toll (not (the (toll-paid? key))))
         (when (charge-toll! self toll)
-          (let ((payments (copy-list (the payments))))
-            (setf (getf payments key)
-                  (append (list :at (get-universal-time))
-                          (when (getf toll :uses) (list :uses (getf toll :uses)))
-                          (when (getf toll :seconds)
-                            (list :until (+ (get-universal-time) (getf toll :seconds))))))
-            (the (set-slot! :payments payments)))))))
+          (the (grant-toll! key))))))
 
    ("String of html. The booth for toll KEY: a button that pays it, or a
 line saying it is paid.  Put it in a section, so it redraws when paid."
@@ -233,6 +242,17 @@ line saying it is paid.  Put it in a section, so it redraws when paid."
                            (fmt "Paid: ~a" (getf toll :label))
                            (let ((uses (getf (getf (the payments) key) :uses)))
                              (when uses (fmt " (~d left)" uses))))))
+              ;; paid by card at the gate's door: a form, so the browser
+              ;; goes to Stripe's page and comes back (deploy.lisp,
+              ;; toll-pay-door); the price is said in money, which is
+              ;; what is taken
+              ((and (eq *toll-provider* :stripe) (the deployment-name))
+               (htm (:form :method "post" :action (format nil "~a/toll-pay" *url-prefix*) :style "display:inline"
+                           (:input :type "hidden" :name "iid" :value (the instance-id))
+                           (:input :type "hidden" :name "key" :value (format nil "~(~a~)" key))
+                           (:button :type "submit"
+                                    :class "inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+                                    (fmt "~a -- ~a" (toll-money toll) (getf toll :label))))))
               (t (htm (:button :type "button"
                                :class "inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
                                :onclick (the (gdl-ajax-call :function-key :pay-toll! :arguments (list key)))
@@ -263,6 +283,11 @@ now, inputs and all.  A format named in file-tolls wants its toll paid."
   (cond ((null (the-object app deployment-name)) " (preview: no charge)")
         ((eq *toll-provider* :test) " (test payment: no charge)")
         (t "")))
+
+(defun toll-money (toll)
+  "TOLL's price as money, what a card is charged: the price in the lab's
+unit at *unit-cents*, in dollars."
+  (format nil "$~,2f" (/ (* (monocle:toll-price toll) *unit-cents*) 100)))
 
 (defun charge-toll! (app toll)
   "Take TOLL from the visitor of APP.  True when it is paid."

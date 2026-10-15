@@ -1084,6 +1084,8 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
     (net.aserve:publish :path (door-path "undeploy") :server server :host host :function (gated #'undeploy-door))
     (net.aserve:publish :path (door-path "deployments") :server server :host host :function (gated #'deployments-door))
     (net.aserve:publish :path (door-path "earnings") :server server :host host :function (gated #'earnings-door))
+    ;; the author's Stripe account, through the gate's Connect door (deploy.lisp)
+    (net.aserve:publish :path (door-path "connect") :server server :host host :function (gated #'connect-door))
     ;; the doors a web app is reached by answer on the apps' own host as
     ;; well as the lab's (app-doors-host, kinds.lisp); not behind the lock:
     ;; a deployed app is for others
@@ -1091,6 +1093,12 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
                                :server server :host (app-doors-host host) :function #'deployed-door)
     (net.aserve:publish :path (format nil "~a/app-file" *url-prefix*)
                         :server server :host (app-doors-host host) :function #'app-file-door)
+    ;; a deployed app's tolls paid by card through the gate (deploy.lisp):
+    ;; the booth's form and the way back from Stripe
+    (net.aserve:publish :path (format nil "~a/toll-pay" *url-prefix*)
+                        :server server :host (app-doors-host host) :function #'toll-pay-door)
+    (net.aserve:publish :path (format nil "~a/toll-return" *url-prefix*)
+                        :server server :host (app-doors-host host) :function #'toll-return-door)
     ;; a session's web app and the stylesheet it wears (kinds.lisp)
     (net.aserve:publish :path (format nil "~a/app" *url-prefix*)
                         :server server :host (app-doors-host host) :function #'app-door)

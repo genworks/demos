@@ -372,8 +372,17 @@ record when it is deployed: a later change here does not reach back.")
 
 (defparameter *toll-provider* :test
   "Keyword or nil. How a deployed app's tolls are taken: :test (granted at
-once, booked as a test payment: no money moves), or nil (no toll can be
-paid).  A real provider is the gate's to add.")
+once, booked as a test payment: no money moves); :stripe (paid by card
+through the gate's Connect door -- Stripe's page, the author's own
+account the destination and the name on the customer's statement, the
+house's fee kept -- and granted once the gate says the payment settled,
+on Stripe's webhook: deploy.lisp); or nil (no toll can be paid).  A
+stack init sets :stripe on a lab whose gate holds the Connect keys.")
+
+(defparameter *unit-cents* 1
+  "Integer. What one of the lab's own unit costs a deployed app's user at
+a toll, in cents: a rivet is a cent (the agent's brief says a visitor's
+$3 is 300 rivets).  The books stay in the unit; the gate takes the cents.")
 
 (defparameter *pot-percent-least* 0
   "Number or nil. The least an author adds of every payment to the lab's
@@ -389,12 +398,14 @@ and nothing goes to the pot.  The fee itself is the house's.")
 
 (defun lab-house ()
   "This lab as Monocle knows it: where its deployments and books are kept,
-the engine and the Lisp they run on, its unit (*unit*), the fees for its
-engine, the community pot's least share and the toll provider, as the
-parameters above stand now."
+the engine and the Lisp they run on, its unit (*unit*) and what one
+costs at a toll, the fees for its engine, the community pot's least
+share, the toll provider and the gate's doors (deploy.lisp, gate-ask),
+as the parameters above stand now."
   (monocle:make-house :root *deployed-root* :runtime (engine-name) :unit (unit-key)
                       :fee-percents (house-fee-percents) :pot-percent *pot-percent-least*
-                      :provider *toll-provider*))
+                      :provider *toll-provider*
+                      :gate #'gate-ask :cents-per-unit *unit-cents*))
 
 (defun house-fee-percent (closed?) (monocle:fee-percent (lab-house) closed?))
 

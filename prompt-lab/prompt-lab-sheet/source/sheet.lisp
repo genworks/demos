@@ -578,7 +578,7 @@ not hold."
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
    (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :wear-skin :upload :adopt
-                           :deploy :undeploy :open-project :push-project :deploy-project))
+                           :deploy :undeploy :connect :open-project :push-project :deploy-project))
 
    ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
    ;; sibling, on this site) whose files this lab is offered (routing.lisp)
@@ -1071,11 +1071,27 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      ;; what it charges for is in the source, written by
                                      ;; the agent at the visitor's word (deploy.lisp)
                                      (:p :class "pl-line"
-                                         "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  No money moves yet: a web app's tolls are taken as test payments, booked and marked as tests, and a model's priced downloads open only to you.")
-                                     (:label "Where to reach you about your share (email)"
-                                             (:input :type "email" :maxlength "200" :|data-bind:dpayee| ""))
+                                         (if (eq *toll-provider* :stripe)
+                                             (esc "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  Its users pay by card on Stripe's page, in dollars at a cent a rivet; the house keeps the monetization fee and the rest is transferred to your own Stripe account with each payment.  A model's priced downloads open only to you for now.")
+                                             (esc "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  No money moves yet: a web app's tolls are taken as test payments, booked and marked as tests, and a model's priced downloads open only to you.")))
+                                     (:label (if (eq *toll-provider* :stripe) "Your email, for your Stripe account and your share" "Where to reach you about your share (email)")
+                                             (:input :type "email" :maxlength "200" :|data-bind:dpayee| ""
+                                                     ;; the address this browser last set payouts up with
+                                                     :|data-init| "try{$dpayee=localStorage.getItem('prompt-lab-payee')||$dpayee}catch(e){}"))
+                                     ;; the author's own Stripe account, made and onboarded
+                                     ;; through the gate's Connect door (deploy.lisp)
+                                     (when (eq *toll-provider* :stripe)
+                                       (htm (:p :class "pl-line"
+                                                "Your share goes to a Stripe account of your own, which takes a minute to set up: Stripe asks who you are and where to pay you, and your name is what your users' card statements say.  Deploy checks it is ready.")
+                                            (:div :class "pl-row"
+                                                  (:button :type "button" :class "pl-download"
+                                                           :|data-attr:disabled| "!$dpayee.includes('@')"
+                                                           :|data-on:click| (the (datastar-action :connect :options "{filterSignals: {include: /^(dpayee|owner|turnstile)$/}}"))
+                                                           "Set up payouts with Stripe"))))
                                      (:p :class "pl-line"
-                                         (unit-text "Your share is held in {units} through each quarter and paid out after it, at that day's rate.  ")
+                                         (if (eq *toll-provider* :stripe)
+                                             (esc "Each payment is split at Stripe: your share is transferred to your account at once, the card cost taken off the top and shared, and Stripe pays it out on its schedule.  ")
+                                             (unit-text "Your share is held in {units} through each quarter and paid out after it, at that day's rate.  "))
                                          (:a :target "_blank" :rel "noopener" :|data-show| "$deployed"
                                              :|data-attr:href| (format nil "'~a?name=' + $deployed.split('/').pop() + '&owner=' + $owner"
                                                                        (door-path "earnings"))
@@ -1462,6 +1478,21 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
         (touch session)
         (sheet-send! self (datastar-signals-event "{\"editable\": true}")
                      (datastar-script-event (keep-last-script (session-id session))))
+        ;; back from Stripe's onboarding (the connect action): Deploy
+        ;; checks the account; the address is cleaned
+        (let ((connect (cdr (assoc "connect" (the query-toplevel) :test #'string-equal))))
+          (when (member connect '("1" "refresh") :test #'equal)
+            (sheet-send! self
+                         (datastar-signals-event
+                          (with-output-to-string (s)
+                            (yason:encode (h "monetize" t
+                                             "notice" (if (equal connect "1")
+                                                          "Back from Stripe.  Press Deploy: it checks your account is ready, and sends you back to Stripe if something is still wanted."
+                                                          "Stripe's onboarding link expired or was refreshed: press 'Set up payouts with Stripe' again."))
+                                          s)))
+                         (datastar-script-event
+                          (format nil "history.replaceState(null,'',~a)"
+                                  (js-string-literal (format nil "~a?session=~a" *url-prefix* (session-id session))))))))
         (when (and (stringp checkout) (plusp (length checkout)) (wallet-id? wallet))
           (multiple-value-bind (outcome text) (confirm-topup! session wallet checkout)
             (sheet-send! self
@@ -1590,6 +1621,39 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                          s))))
                       (the (tell-error! reason)))))
             (the spent-token!)))))
+
+   (connect
+    (signals)
+    ;; Monetize (deploy.lisp): the owner sets up payouts -- the gate finds
+    ;; or makes their Stripe account for the email typed and sends them
+    ;; to Stripe's onboarding; back here, Deploy checks it is ready
+    (let ((session (the session))
+          (email (gethash "dpayee" signals))
+          (address (client-address *datastar-request*))
+          (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
+      (cond ((not (the owner?)) (the (tell-error! "Only the session's owner may set up payouts.")))
+            ((not (eq *toll-provider* :stripe)) (the (tell-error! "This lab takes no card payments yet.")))
+            ((not (and (stringp email) (find #\@ email) (> (length email) 5)))
+             (the (tell-error! "Type your email address first.")))
+            (t (multiple-value-bind (ok? reason) (topup-check! session token address)
+                 (if (not ok?)
+                     (the (tell-error! reason))
+                     (let ((back (page-url *datastar-request* session)))
+                       (multiple-value-bind (account url ready? why)
+                           (author-account email :create? t
+                                                 :return-url (concatenate 'string back "&connect=1")
+                                                 :refresh-url (concatenate 'string back "&connect=refresh"))
+                         (declare (ignore account))
+                         (cond (ready?
+                                (sheet-send! self (datastar-signals-event
+                                                   (with-output-to-string (s)
+                                                     (yason:encode (h "notice" (format nil "Payouts are set up for ~a: deploy away." email)) s)))))
+                               ((stringp url)
+                                (sheet-send! self (datastar-script-event
+                                                   (format nil "try{localStorage.setItem('prompt-lab-payee',~a)}catch(e){};location.href=~a"
+                                                           (js-string-literal email) (js-string-literal url)))))
+                               (t (the (tell-error! (or why "Payouts could not be set up; try again in a moment.")))))))))
+               (the spent-token!)))))
 
    (open-project
     (signals)
