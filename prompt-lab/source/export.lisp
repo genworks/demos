@@ -251,10 +251,13 @@ there is nothing to write."
 
 (defun download-door (req ent)
   "GET <prefix>/api/download?session=<id>&format=<name> (or replay=<id>
-for an archived session's replay; owner=<key> for a private one): the
-model as a file.  400 for a format not offered, 404 for no such session
-or no model, 422 when the format has nothing to write (STEP of a model
-with no solids), 429 when the owner's credits are spent."
+for an archived session's replay; owner=<key> for a private one; or
+deployed=<name> for a deployed model, with grant=<id> or the deployment's
+cookie for a file that was paid for): the model as a file.  400 for a
+format not offered, 402 for a deployed model's priced file without a
+grant, 404 for no such session or no model, 422 when the format has
+nothing to write (STEP of a model with no solids), 429 when the owner's
+credits are spent.  A grant is spent when its file is served."
   (let* ((id (query-value req "session"))
          (replay (query-value req "replay"))
          (key (request-owner-key req))
@@ -265,15 +268,20 @@ with no solids), 429 when the owner's credits are spent."
                         ((stringp deployed) (deployed-for-viewer deployed))))
          (kind (string-downcase (or (query-value req "format") "")))
          (entry (assoc kind (download-formats) :test #'string=))
-         (record (and session (stringp deployed) (deployment-record deployed))))
+         (record (and session (stringp deployed) (deployment-record deployed)))
+         (grant (and record (request-grant req deployed)))
+         ;; the file is served on a grant bought for it: spent when it goes out
+         (on-grant? (and record (deployment-file-price record kind)
+                         (not (and (stringp (or key (query-value req "owner")))
+                                   (equal (gethash "owner" record) (or key (query-value req "owner")))))
+                         (grant-admits? grant deployed kind))))
     (cond ((or (null session) (not (visible-to? session key))) (no-such-session req ent))
           ((null entry) (refuse req ent "No such download here: ~a." kind))
-          ;; a deployed model's priced download: its owner's alone until a
-          ;; gateway takes the payment
-          ((and record (not (deployment-admits? record kind (or key (query-value req "owner")))))
+          ;; a deployed model's priced download: its owner's, or bought on its page
+          ((and record (not (deployment-admits? record kind (or key (query-value req "owner")) grant)))
            (refuse req ent (net.aserve::make-resp 402 "Payment Required")
-                   "This file costs $~,2f.  Taking payment is not switched on here yet."
-                   (/ (deployment-file-price record kind) 100)))
+                   "This file costs ~a: buy it on the model's page."
+                   (money-text (* (deployment-file-price record kind) *unit-cents*))))
           ((not (model-defined? session)) (refuse req ent "No model has been built in this session yet."))
           (t
            (when (owner? session key)
@@ -292,19 +300,23 @@ with no solids), 429 when the owner's credits are spent."
                         (error (condition) (values nil (format nil "The model did not write: ~a" condition))))
                     (if (not ok?)
                         (refuse req ent (net.aserve::make-resp 422 "Unprocessable Entity") "~a" note)
-                        (net.aserve:with-http-response (req ent :content-type (second entry) :format :binary)
-                          (setf (net.aserve:reply-header-slot-value req :content-disposition)
-                                (format nil "attachment; filename=\"prompt-lab-~a.~a\""
-                                        (session-id session) (third entry)))
-                          (setf (net.aserve:reply-header-slot-value req :cache-control) "no-store")
-                          (when note
-                            (setf (net.aserve:reply-header-slot-value req :x-prompt-lab-note)
-                                  (remove-if-not #'(lambda (c) (< 31 (char-code c) 127)) note)))
-                          (net.aserve:with-http-body (req ent)
-                            (with-open-file (in file :element-type '(unsigned-byte 8))
-                              (let ((buffer (make-array 4096 :element-type '(unsigned-byte 8)))
-                                    (out (net.aserve:request-reply-stream req)))
-                                (loop for count = (read-sequence buffer in)
-                                      while (plusp count)
-                                      do (write-sequence buffer out :end count))))))))
+                        (progn
+                          (when on-grant? (spend-grant! grant))
+                          (net.aserve:with-http-response (req ent :content-type (second entry) :format :binary)
+                            (setf (net.aserve:reply-header-slot-value req :content-disposition)
+                                  ;; a deployment's file is named for it, nothing of the lab's
+                                  (format nil "attachment; filename=\"~a.~a\""
+                                          (if record deployed (format nil "prompt-lab-~a" (session-id session)))
+                                          (third entry)))
+                            (setf (net.aserve:reply-header-slot-value req :cache-control) "no-store")
+                            (when note
+                              (setf (net.aserve:reply-header-slot-value req :x-prompt-lab-note)
+                                    (remove-if-not #'(lambda (c) (< 31 (char-code c) 127)) note)))
+                            (net.aserve:with-http-body (req ent)
+                              (with-open-file (in file :element-type '(unsigned-byte 8))
+                                (let ((buffer (make-array 4096 :element-type '(unsigned-byte 8)))
+                                      (out (net.aserve:request-reply-stream req)))
+                                  (loop for count = (read-sequence buffer in)
+                                        while (plusp count)
+                                        do (write-sequence buffer out :end count)))))))))
                (when (probe-file file) (ignore-errors (delete-file file)))))))))

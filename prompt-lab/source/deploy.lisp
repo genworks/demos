@@ -338,14 +338,255 @@ none or its file no longer compiles."
                       (bt:with-lock-held (*deployed-lock*)
                         (setf (gethash name *deployed*) deployed)))))))))))
 
-(defun deployment-admits? (record format owner-key)
+;;
+;; A deployed MODEL's priced download is a toll keyed by its format
+;; ("step"), paid on Stripe's page from the viewer's tile and answered by
+;; a GRANT: an id the lab mints when the gate says the payment settled,
+;; good for one download of that format of that deployment, kept in
+;; *grants* and in <deployed-root>/grants.json (a restart keeps it),
+;; handed to the visitor as grant=<id> on the viewer's address and in a
+;; cookie, and spent by the download door when the file is served.  The
+;; same doors as a web app's booth, told apart by deployed=<name>.
+;;
+
+(defvar *grants* nil
+  "Hash table, grant id -> plist (:deployment :format :uses :made :payment);
+read from the grants file on first use.")
+
+(defvar *grants-lock* (bt:make-lock "prompt-lab grants"))
+
+(defun grants-file () (merge-pathnames "grants.json" *deployed-root*))
+
+(defun grants ()
+  "The grants table, read from its file the first time."
+  (bt:with-lock-held (*grants-lock*)
+    (or *grants*
+        (setf *grants*
+              (let ((table (make-hash-table :test #'equal))
+                    (json (ignore-errors (read-record (grants-file)))))
+                (when (hash-table-p json)
+                  (maphash #'(lambda (id g)
+                               (when (hash-table-p g)
+                                 (setf (gethash id table)
+                                       (list :deployment (gethash "deployment" g) :format (gethash "format" g)
+                                             :uses (gethash "uses" g) :made (gethash "made" g)
+                                             :payment (gethash "payment" g)))))
+                           json))
+                table)))))
+
+(defun save-grants! ()
+  (bt:with-lock-held (*grants-lock*)
+    (let ((table (make-hash-table :test #'equal)))
+      (maphash #'(lambda (id g)
+                   (setf (gethash id table)
+                         (h "deployment" (getf g :deployment) "format" (getf g :format)
+                            "uses" (getf g :uses) "made" (getf g :made) "payment" (getf g :payment))))
+               *grants*)
+      (write-text-file (with-output-to-string (out) (yason:encode table out)) (grants-file)))))
+
+(defun grant-for-payment (payment)
+  "The grant already minted for PAYMENT (the gate's id), or nil: one grant a
+payment, however many times its return page is loaded."
+  (grants)
+  (bt:with-lock-held (*grants-lock*)
+    (loop for id being the hash-keys of *grants* using (hash-value g)
+          when (equal (getf g :payment) payment) return id)))
+
+(defun mint-grant! (name format payment &key (uses 1))
+  "A grant for USES downloads of FORMAT of deployment NAME, paid by PAYMENT
+(the gate's id); its id -- the one minted before for that payment, if any."
+  (or (grant-for-payment payment)
+      (let ((id (new-owner-key)))
+        (grants)
+        (bt:with-lock-held (*grants-lock*)
+          (setf (gethash id *grants*)
+                (list :deployment name :format format :uses uses :made (get-universal-time) :payment payment)))
+        (save-grants!)
+        id)))
+
+(defun grant-admits? (id name format)
+  "Whether grant ID is live for FORMAT of deployment NAME."
+  (and (stringp id) (stringp name)
+       (let ((g (gethash id (grants))))
+         (and g (equal (getf g :deployment) name) (string-equal (getf g :format) format)
+              (let ((uses (getf g :uses))) (or (null uses) (plusp uses)))))))
+
+(defun spend-grant! (id)
+  "One download served on grant ID."
+  (grants)
+  (bt:with-lock-held (*grants-lock*)
+    (let ((g (gethash id *grants*)))
+      (when (and g (integerp (getf g :uses)) (plusp (getf g :uses)))
+        (setf (getf g :uses) (1- (getf g :uses)))
+        (setf (gethash id *grants*) g))))
+  (save-grants!))
+
+(defun grant-cookie (name) (format nil "pl-grant-~a" name))
+
+(defun request-grant (req name)
+  "The grant REQ names for deployment NAME: grant= on the query, else the
+deployment's cookie."
+  (or (query-value req "grant")
+      (cdr (assoc (grant-cookie name) (net.aserve:get-cookie-values req) :test #'string=))))
+
+(defun model-toll (record format)
+  "The toll a deployed model's priced FORMAT stands behind: keyed by the
+format, labelled by its name, priced as RECORD says, one use; nil for a
+free format or one not offered."
+  (let ((price (deployment-file-price record format))
+        (entry (assoc format (download-formats) :test #'string=)))
+    (when (and price entry)
+      (list :key (intern (string-upcase format) :keyword) :label (fourth entry) (unit-key) price :uses 1))))
+
+(defun model-toll-request (req)
+  "For deployed=<name>&format=<f>: values (record format toll); or nil and
+the reason."
+  (let* ((name (query-value req "deployed"))
+         (record (and (stringp name) *deployments?* (deployment-record name)))
+         (format (string-downcase (or (query-value req "format") "")))
+         (toll (and record (model-toll record format))))
+    (cond ((null record) (values nil "There is no such deployment."))
+          ((null toll) (values nil "That file is free here, or not offered."))
+          (t (values record format toll)))))
+
+(defun payment-id? (payment)
+  (and (stringp payment) (< 3 (length payment) 200)
+       (every #'(lambda (c) (or (alphanumericp c) (char= c #\_))) payment)))
+
+(defun grant-and-go (req ent name format payment)
+  "Mint the grant for FORMAT of deployment NAME paid by PAYMENT, hand it to
+the visitor -- grant= on the model's page address, and the deployment's
+cookie for a year -- and send them there."
+  (let ((id (mint-grant! name format payment)))
+    (net.aserve:with-http-response (req ent :response net.aserve:*response-found*)
+      (setf (net.aserve:reply-header-slot-value req :location)
+            (format nil "~a/viewer?deployed=~a&grant=~a" *url-prefix* name id))
+      (setf (net.aserve:reply-header-slot-value req :cache-control) "no-store")
+      (net.aserve:set-cookie-header req :name (grant-cookie name) :value id :path "/" :http-only t
+                                    :expires (+ (get-universal-time) (* 365 86400)))
+      (net.aserve:with-http-body (req ent)))))
+
+(defun confirming-page (req ent back word)
+  "The page shown while the gate waits for Stripe's word on a payment:
+it asks again every few seconds."
+  (respond-deployment
+   req ent
+   (with-lhtml-string ()
+     (:html (:head (:meta :charset "utf-8")
+                   (:meta :name "viewport" :content "width=device-width, initial-scale=1")
+                   (:meta :http-equiv "refresh" :content "4")
+                   (:link :rel "icon" :href "data:,")
+                   (:title "Confirming your payment"))
+            (:body :style "font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5"
+                   (:h1 :style "font-size: 1.4rem" "Confirming your payment")
+                   (:p "Stripe is telling us the payment went through.  This page asks again every few seconds; there is nothing more to do.")
+                   (:p :style "color: #666" (esc (format nil "Status: ~a." (or word "pending"))))
+                   (:p (:a :href back "Back")))))
+   :type "text/html; charset=utf-8"))
+
+(defun model-toll-pay (req ent)
+  "POST <prefix>/toll-pay (deployed, format): open the payment for a
+deployed model's priced file at the gate and send the visitor to
+Stripe's page; with another provider the toll is taken on the spot (a
+test payment, booked as one) and the grant handed over."
+  (multiple-value-bind (record format toll) (model-toll-request req)
+    (cond ((null record) (refuse req ent net.aserve:*response-not-found* "~a" format))
+          ((not (eq *toll-provider* :stripe))
+           (let ((name (gethash "name" record)))
+             (if (monocle:charge-toll! (lab-house) name toll :reference (format nil "model:~a:~a" name format))
+                 (grant-and-go req ent name format (format nil "test:~a:~a:~a" name format (get-universal-time)))
+                 (refuse req ent net.aserve:*response-service-unavailable* "No payment can be taken here."))))
+          (t
+           (let* ((name (gethash "name" record))
+                  (origin (request-origin req))
+                  (viewer (format nil "~a~a/viewer?deployed=~a" origin *url-prefix* name))
+                  (return-url (format nil "~a~a/toll-return?deployed=~a&format=~a" origin *url-prefix* name format)))
+             (multiple-value-bind (url reason)
+                 (monocle:open-toll :stripe (lab-house) name toll (format nil "model:~a:~a" name format)
+                                    :return-url return-url :cancel-url viewer)
+               (if url
+                   (redirect-to req ent url)
+                   (respond-deployment req ent
+                                       (deployment-page "The payment could not be opened" (list reason)
+                                                        :back viewer
+                                                        :back-label (format nil "Back to ~a" (or (gethash "title" record) name)))
+                                       :response net.aserve:*response-service-unavailable*
+                                       :type "text/html; charset=utf-8"))))))))
+
+(defun model-toll-return (req ent)
+  "GET <prefix>/toll-return?deployed=&format=&payment=: the visitor is back
+from Stripe; the grant is minted when the gate says the payment settled."
+  (multiple-value-bind (record format) (model-toll-request req)
+    (let ((payment (query-value req "payment")))
+      (cond ((null record) (refuse req ent net.aserve:*response-not-found* "~a" format))
+            ((not (payment-id? payment)) (refuse req ent "No payment named."))
+            (t
+             (let ((name (gethash "name" record)))
+               (multiple-value-bind (paid? word) (monocle:settle-toll! (lab-house) name payment)
+                 (if paid?
+                     (grant-and-go req ent name format payment)
+                     (confirming-page req ent (format nil "~a/viewer?deployed=~a" *url-prefix* name) word)))))))))
+
+(defun deployment-admits? (record format owner-key &optional grant)
   "Whether a deployed model's download in FORMAT opens to a visitor holding
-OWNER-KEY (or none): a free format to everyone, a priced one to its owner
--- and to a visitor who has paid, once a gateway takes payment
-(*deployment-payments?*; that side is not written yet, so no one else is
-let in)."
+OWNER-KEY (or none) and GRANT (or none): a free format to everyone, a
+priced one to its owner, and to a visitor whose GRANT is live for it --
+bought on the model's page (model-toll-pay)."
   (or (not (deployment-file-price record format))
-      (and (stringp owner-key) (equal (gethash "owner" record) owner-key))))
+      (and (stringp owner-key) (equal (gethash "owner" record) owner-key))
+      (grant-admits? grant (gethash "name" record) format)))
+
+(defun toll-pay-door (req ent)
+  "POST <prefix>/toll-pay: a web app's booth (form: iid, key) or a deployed
+model's priced file (deployed, format): open the payment at the gate and
+send the visitor to Stripe's page.  With another provider the toll is
+taken here, as the booth's own button does."
+  (if (query-value req "deployed")
+      (model-toll-pay req ent)
+      (multiple-value-bind (app key toll) (toll-app req)
+        (cond ((null app) (refuse req ent net.aserve:*response-not-found* "~a" key))
+              ((not (eq *toll-provider* :stripe))
+               (the-object app (pay-toll! key))
+               (redirect-to req ent (the-object app url)))
+              (t
+               (let* ((name (the-object app deployment-name))
+                      (origin (request-origin req))
+                      (back (format nil "~a~a" origin (the-object app url)))
+                      (return-url (format nil "~a~a/toll-return?iid=~a&key=~(~a~)"
+                                          origin *url-prefix* (the-object app instance-id) key)))
+                 (multiple-value-bind (url reason)
+                     (monocle:open-toll :stripe (lab-house) name toll (the-object app instance-id)
+                                        :return-url return-url :cancel-url back)
+                   (if url
+                       (redirect-to req ent url)
+                       (respond-deployment req ent
+                                           (deployment-page "The payment could not be opened" (list reason)
+                                                            :back (the-object app url)
+                                                            :back-label (format nil "Back to ~a"
+                                                                                (or (gethash "title" (deployment-record name)) name)))
+                                           :response net.aserve:*response-service-unavailable*
+                                           :type "text/html; charset=utf-8")))))))))
+
+(defun toll-return-door (req ent)
+  "GET <prefix>/toll-return: the visitor is back from Stripe -- a web app's
+booth (iid, key, payment) or a deployed model's file (deployed, format,
+payment).  The grant is given when the gate says the payment settled (its
+webhook) and the line is booked; until then a page that asks again every
+few seconds."
+  (if (query-value req "deployed")
+      (model-toll-return req ent)
+      (multiple-value-bind (app key toll) (toll-app req)
+        (let ((payment (query-value req "payment")))
+          (cond ((null app) (refuse req ent net.aserve:*response-not-found* "~a" key))
+                ((not (payment-id? payment)) (refuse req ent "No payment named."))
+                ((the-object app (toll-paid? key)) (redirect-to req ent (the-object app url)))
+                (t
+                 (multiple-value-bind (paid? word)
+                     (monocle:settle-toll! (lab-house) (the-object app deployment-name) payment)
+                   (cond (paid?
+                          (the-object app (grant-toll! key))
+                          (redirect-to req ent (the-object app url)))
+                         (t (confirming-page req ent (the-object app url) word))))))))))
 
 (defun deployed-for-viewer (name)
   "The running deployment NAME for the viewer: a deployed model opens to
@@ -679,67 +920,6 @@ names: values (app key toll); or nil and the reason."
           ((null (the-object app deployment-name))
            (values nil "This is the app's own preview: nothing is charged here."))
           (t (values app (getf toll :key) toll)))))
-
-(defun toll-pay-door (req ent)
-  "POST <prefix>/toll-pay (form: iid, key): open the toll's payment at
-the gate and send the visitor to Stripe's page.  With another provider
-the toll is taken here, as the booth's own button does."
-  (multiple-value-bind (app key toll) (toll-app req)
-    (cond ((null app) (refuse req ent net.aserve:*response-not-found* "~a" key))
-          ((not (eq *toll-provider* :stripe))
-           (the-object app (pay-toll! key))
-           (redirect-to req ent (the-object app url)))
-          (t
-           (let* ((name (the-object app deployment-name))
-                  (origin (request-origin req))
-                  (back (format nil "~a~a" origin (the-object app url)))
-                  (return-url (format nil "~a~a/toll-return?iid=~a&key=~(~a~)"
-                                      origin *url-prefix* (the-object app instance-id) key)))
-             (multiple-value-bind (url reason)
-                 (monocle:open-toll :stripe (lab-house) name toll (the-object app instance-id)
-                                    :return-url return-url :cancel-url back)
-               (if url
-                   (redirect-to req ent url)
-                   (respond-deployment req ent
-                                       (deployment-page "The payment could not be opened" (list reason)
-                                                        :back (the-object app url)
-                                                        :back-label (format nil "Back to ~a"
-                                                                            (or (gethash "title" (deployment-record name)) name)))
-                                       :response net.aserve:*response-service-unavailable*
-                                       :type "text/html; charset=utf-8"))))))))
-
-(defun toll-return-door (req ent)
-  "GET <prefix>/toll-return?iid=&key=&payment=: the visitor is back from
-Stripe.  The grant is given when the gate says the payment settled (its
-webhook) and the line is booked; until then a page that asks again every
-few seconds."
-  (multiple-value-bind (app key toll) (toll-app req)
-    (let ((payment (query-value req "payment")))
-      (cond ((null app) (refuse req ent net.aserve:*response-not-found* "~a" key))
-            ((not (and (stringp payment) (< 3 (length payment) 200)
-                       (every #'(lambda (c) (or (alphanumericp c) (char= c #\_))) payment)))
-             (refuse req ent "No payment named."))
-            ((the-object app (toll-paid? key)) (redirect-to req ent (the-object app url)))
-            (t
-             (multiple-value-bind (paid? word)
-                 (monocle:settle-toll! (lab-house) (the-object app deployment-name) payment)
-               (cond (paid?
-                      (the-object app (grant-toll! key))
-                      (redirect-to req ent (the-object app url)))
-                     (t
-                      (respond-deployment
-                       req ent
-                       (with-lhtml-string ()
-                         (:html (:head (:meta :charset "utf-8")
-                                       (:meta :name "viewport" :content "width=device-width, initial-scale=1")
-                                       (:meta :http-equiv "refresh" :content "4")
-                                       (:title "Confirming your payment"))
-                                (:body :style "font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5"
-                                       (:h1 :style "font-size: 1.4rem" "Confirming your payment")
-                                       (:p "Stripe is telling us the payment went through.  This page asks again every few seconds; there is nothing more to do.")
-                                       (:p :style "color: #666" (esc (format nil "Status: ~a." (or word "pending"))))
-                                       (:p (:a :href (the-object app url) "Back to the app")))))
-                       :type "text/html; charset=utf-8")))))))))
 
 (defun sweep-toll-payments! ()
   "Book the toll payments the gate has settled for this lab that the books

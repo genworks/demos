@@ -856,6 +856,11 @@ the model with one panel under it, the inputs or the tree."
    ;; ?deployed=<name> instead: a deployed model (deploy.lisp)
    (deployed-name (cdr (assoc "deployed" (the query-toplevel) :test #'string-equal)))
 
+   ;; grant=<id>: a file of the deployed model bought on its page, the
+   ;; grant handed back on the address (deploy.lisp, grant-and-go); the
+   ;; download links carry it on
+   (query-grant (cdr (assoc "grant" (the query-toplevel) :test #'string-equal)))
+
    ;; A deployed model's wrapper: what it is, and its files to download,
    ;; in a tile at the left; the inspector holds its inputs alone.  (An
    ;; INPUT of the sluice; nil for a session's or a replay's viewer.)
@@ -902,19 +907,35 @@ the model with one panel under it, the inputs or the tree."
                                  (:p :style "margin:0 0 .3rem;font-weight:600" "Download")
                                  (:p :style "margin:0 0 .6rem"
                                      (dolist (entry (download-formats))
-                                       (htm (:a :style "display:inline-block;margin:0 .5rem .3rem 0"
-                                                :href (format nil "~a?deployed=~a&format=~a~@[&owner=~a~]"
-                                                              (door-path "download") name (first entry) key)
-                                                (esc (fourth entry))
-                                                ;; what the author charges for this one
-                                                (let ((cents (deployment-file-price record (first entry))))
-                                                  (when cents (fmt " ($~,2f)" (/ cents 100))))))))
+                                       (let* ((format (first entry))
+                                              (price (deployment-file-price record format))
+                                              (grant (the query-grant))
+                                              (paid? (and price grant (grant-admits? grant name format))))
+                                         (cond
+                                           ;; free, the owner's, or bought: a link (the grant rides on it)
+                                           ((or (null price) key paid?)
+                                            (htm (:a :style "display:inline-block;margin:0 .5rem .3rem 0"
+                                                     :href (format nil "~a?deployed=~a&format=~a~@[&owner=~a~]~@[&grant=~a~]"
+                                                                   (door-path "download") name format key (and paid? grant))
+                                                     (esc (fourth entry))
+                                                     (when paid? (htm " (paid)")))))
+                                           ;; priced: bought on Stripe's page through the toll door (deploy.lisp)
+                                           (t
+                                            (htm (:form :method "post" :action (format nil "~a/toll-pay" *url-prefix*)
+                                                        :style "display:inline-block;margin:0 .5rem .3rem 0"
+                                                        (:input :type "hidden" :name "deployed" :value name)
+                                                        (:input :type "hidden" :name "format" :value format)
+                                                        (:button :type "submit" :style "font:inherit;cursor:pointer"
+                                                                 (esc (fourth entry))
+                                                                 (fmt " -- ~a" (money-text (* price *unit-cents*)))))))))))
+                                 ;; an open deployment offers its source, as its licence asks;
+                                 ;; a closed one shows nothing of the house (the user's ruling, 2026-10-14)
                                  (unless (truthy? (gethash "closed" record))
                                    (htm (:p :style "margin:0 0 .6rem"
                                             (:a :href (format nil "~a/source" (deployment-url name)) "Its source")
-                                            ", under the GNU Affero General Public License.")))
-                                 (:p :style "margin:0;opacity:.7"
-                                     "Built in the " (:a :href *url-prefix* (esc (lab-title))) "."))))))))
+                                            ", under the GNU Affero General Public License.")
+                                        (:p :style "margin:0;opacity:.7"
+                                            "Built in the " (:a :href *url-prefix* (esc (lab-title))) "."))))))))))
 
   :functions
   ((set-instantiation-time!

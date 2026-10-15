@@ -427,7 +427,9 @@ a download, in cents.")
   "Integer. Deployments this lab keeps for its engine, all owners together.")
 
 (defparameter *deployment-payments?* nil
-  "Boolean. Whether the gate behind this lab takes payment for a deployed
-model's priced downloads.  Nil: the model opens to everyone and its
-downloads only to its owner until payments are on.  (A deployed web app
-keeps tollbooths of its own: kinds.lisp, *toll-provider*.)")
+  "Boolean. Whether a deployed model's priced downloads are sold on its
+page: a file's toll opened at the gate through the same doors as a web
+app's booth and granted on the settled payment (deploy.lisp, grants).
+Nil: the model opens to everyone and its priced downloads only to its
+owner.  A stack init sets it beside *toll-provider* :stripe (with :test
+the file is granted on the spot, booked as a test payment).")

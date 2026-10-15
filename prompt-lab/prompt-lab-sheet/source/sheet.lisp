@@ -1072,7 +1072,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      ;; the agent at the visitor's word (deploy.lisp)
                                      (:p :class "pl-line"
                                          (if (eq *toll-provider* :stripe)
-                                             (esc "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  Its users pay by card on Stripe's page, in dollars at a cent a rivet; the house keeps the monetization fee and the rest is transferred to your own Stripe account with each payment.  A model's priced downloads open only to you for now.")
+                                             (esc "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  Its users pay by card on Stripe's page, in dollars at a cent a rivet; the house keeps the monetization fee and the rest is transferred to your own Stripe account with each payment.  A model's priced files are sold on its page the same way.")
                                              (esc "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  No money moves yet: a web app's tolls are taken as test payments, booked and marked as tests, and a model's priced downloads open only to you.")))
                                      (:label (if (eq *toll-provider* :stripe) "Your email, for your Stripe account and your share" "Where to reach you about your share (email)")
                                              (:input :type "email" :maxlength "200" :|data-bind:dpayee| ""
