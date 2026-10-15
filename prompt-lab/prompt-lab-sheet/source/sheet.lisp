@@ -1072,9 +1072,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              " Offer a prepaid balance for its tolls (packs of $5, $10, $20)")
                                      ;; the hosting terms, in short, by the source terms
                                      (:p :class "pl-line" :|data-show| "!$closed"
-                                         "Hosting: an open-source deployment with no tollbooth, or with no revenue for an extended period, may be un-hosted -- or kept, if we and its visitors find it interesting.")
+                                         "Hosting: its compute is yours past a free monthly allowance -- its visitors' runs draw on the allowance, then on hosting bought for it, and it pauses until more is added.  An open-source deployment with no tollbooth, or with no revenue for an extended period, may be un-hosted -- or kept, if we and its visitors find it interesting.")
                                      (:p :class "pl-line" :|data-show| "$closed"
-                                         "Hosting: a closed-source deployment that shows no revenue, or too little, for some time may be taken down.  Its code then stays yours, still closed, and is wiped from our systems.")
+                                         "Hosting: its compute is yours past a free monthly allowance -- its visitors' runs draw on the allowance, then on hosting bought for it, and it pauses until more is added.  A closed-source deployment that shows no revenue, or too little, for some time may be taken down.  Its code then stays yours, still closed, and is wiped from our systems.")
                                      ;; what it charges for is in the source, written by
                                      ;; the agent at the visitor's word (deploy.lisp)
                                      (:p :class "pl-line"

@@ -398,6 +398,12 @@ then drawn on by the app's tolls with no card -- how a toll under
 Stripe's 50-cent minimum is taken.  A cent of balance is a cent of
 toll: no bonus, since the author is owed real money for it.")
 
+(defparameter *hosting-meter?* t
+  "Boolean. Whether a deployment's compile and runs are metered against
+its author's hosting at the gate's host-meter door (deploy.lisp): the
+month's free allowance, then what was bought for it; a deployment whose
+hosting is spent pauses until hosting is added.")
+
 (defparameter *pot-percent-least* 0
   "Number or nil. The least an author adds of every payment to the lab's
 community pot, in percentage points on top of the monetization

@@ -341,7 +341,11 @@ none or its file no longer compiles."
                     (declare (ignore blocks))
                     (unless error?
                       (bt:with-lock-held (*deployed-lock*)
-                        (setf (gethash name *deployed*) deployed)))))))))))
+                        (setf (gethash name *deployed*) deployed))
+                      ;; the compile is the author's compute (meter-deployment!, below):
+                      ;; a refusal marks the stop, which the first run then honours
+                      (meter-deployment! name :compile (model-volume deployed))
+                      deployed)))))))))
 
 ;;
 ;; A deployed MODEL's priced download is a toll keyed by its format
@@ -814,7 +818,9 @@ grant handed over."
 (defun deployed-for-viewer (name)
   "The running deployment NAME for the viewer: a deployed model opens to
 everyone."
-  (and *deployments?* (deployment-record name) (ensure-deployed name)))
+  ;; the deployment's door metered the run and sends the visitor here;
+  ;; a deployment whose hosting is spent (deployment-stopped?) shows nothing
+  (and *deployments?* (deployment-record name) (not (deployment-stopped? name)) (ensure-deployed name)))
 
 (defun deployed-for-download (name format owner-key)
   "The running deployment NAME for the download door, when the visitor may
@@ -973,6 +979,11 @@ has paid it, and spends a use of the payment."
           ((and key (not (the-object app (toll-paid? key))))
            (refuse req ent (net.aserve::make-resp 402 "Payment Required")
                    "This file is paid for on the app's page first."))
+          ;; writing the file runs the model: the author's compute (the hosting meter, below)
+          ((and (the-object app deployment-name)
+                (not (meter-deployment! (the-object app deployment-name) :run
+                                        (deployment-volume (the-object app deployment-name)))))
+           (refuse req ent net.aserve:*response-service-unavailable* "This app is paused: its hosting is spent."))
           (t
            (let ((file (merge-pathnames (format nil "download-~a.~a" (random 1000000000) (third entry))
                                         (uiop:temporary-directory))))
@@ -1070,6 +1081,10 @@ open deployment's model file."
                       (setf (net.aserve:reply-header-slot-value req :location)
                             (format nil "~a?d=~a~@[&owner=~a~]" (deployment-url name) name owner-key))
                       (net.aserve:with-http-body (req ent))))
+                   ;; the run is the author's compute, metered against the
+                   ;; deployment's hosting; spent, the deployment pauses (below)
+                   ((not (meter-deployment! name :run (model-volume deployed)))
+                    (paused-page req ent record (deployment-stopped? name)))
                    ((and (eq (session-kind deployed) :app) (app-defined? deployed))
                     (touch deployed)
                     ;; the instance knows which deployment it serves: its
@@ -1338,3 +1353,155 @@ the licensor's reader."
                       (:p :class "muted" (fmt "Not attributed of the licensed runtimes' fees, all time (the other half): ~a." (dollars-of (getf report :other-half))))
                       (:p :class "muted" "Runtimes the licensor has no part in are summed the same way and shown with no share."))))
             :type "text/html; charset=utf-8")))))
+
+;;
+;; HOSTING METERED AGAINST THE AUTHOR (step 9 of the Monetize build;
+;; the user's point of 2026-10-14: a busy app with a free tier of its
+;; own is what neither the revenue share nor an idle-stop covers).  A
+;; deployment's compile (ensure-deployed) and every run -- a visit to an
+;; app or a model, a download -- are measured by symbol volume as a
+;; session's are (meter.lisp) and reported to the gate's host-meter
+;; door, which books them against the deployment's hosting: the month's
+;; free allowance first, then the credits bought for it.  When the gate
+;; refuses, the deployment PAUSES: its page is the begging page, which
+;; offers hosting -- bought from the house in one Checkout (the gate's
+;; host-topup, the house's own sale; host-confirm credits it) by its
+;; author, or anyone -- and the stop is lifted.  The gate's
+;; stopped-since date is what the un-hosting rule counts from; nothing
+;; here un-hosts.  A gate without the door, or none, meters nothing and
+;; the deployment runs on.
+;;
+
+(defvar *stopped* (make-hash-table :test #'equal)
+  "Deployment name -> the gate's hosting answer when it last refused, so
+the page can say what is left; cleared when it serves again.")
+
+(defun deployment-lab-name () (monocle:house-lab-name (lab-house)))
+
+(defun meter-deployment! (name kind symbols)
+  "Report to the gate that deployment NAME did KIND (:compile or :run)
+over SYMBOLS symbols, against its author's hosting.  Values: true when
+served -- or when there is nothing to meter, or no gate to meter it --
+and nil with the gate's answer (a hash table) when the hosting is spent,
+so the caller pauses the deployment."
+  (if (or (not *hosting-meter?*) (not (integerp symbols)) (zerop symbols))
+      t
+      (handler-case
+          (multiple-value-bind (json status)
+              (gate-post "host-meter" (h "lab" (deployment-lab-name) "deployment" name
+                                         "kind" (string-downcase (symbol-name kind))
+                                         "symbols" symbols "engine" (engine-name)))
+            (cond ((eql status 429)
+                   (setf (gethash name *stopped*) (or json (h)))
+                   (values nil json))
+                  (t (remhash name *stopped*) t)))
+        (error () t))))
+
+(defun deployment-stopped? (name) (gethash name *stopped*))
+
+(defun deployment-volume (name)
+  "The symbol volume of the running deployment NAME's model file: what a
+run of it is metered at; 0 when it is not running."
+  (let ((deployed (bt:with-lock-held (*deployed-lock*) (gethash name *deployed*))))
+    (if deployed (model-volume deployed) 0)))
+
+(defun hosting-balance (name)
+  "The deployment's hosting as the gate says it, a hash table, or nil."
+  (ignore-errors
+   (multiple-value-bind (json status) (gate-post "host-balance" (h "lab" (deployment-lab-name) "deployment" name))
+     (and (eql status 200) (hash-table-p json) json))))
+
+(defun hosting-offers (balance)
+  "The packs of hosting the gate sells, (cents . credits) pairs, from a
+balance answer; nil when it names none."
+  (let ((amounts (and balance (coerce (or (gethash "topup_amounts" balance) #()) 'list)))
+        (credits (and balance (coerce (or (gethash "topup_credits" balance) #()) 'list))))
+    (loop for cents in amounts for n in (or credits amounts) collect (cons cents n))))
+
+(defun paused-page (req ent record &optional balance)
+  "The page a paused deployment answers: what is spent, and how to add
+hosting for it."
+  (let* ((name (gethash "name" record))
+         (title (or (gethash "title" record) name))
+         (balance (or balance (hosting-balance name)))
+         (offers (hosting-offers balance)))
+    (respond-deployment
+     req ent
+     (with-lhtml-string ()
+       (:html (:head (:meta :charset "utf-8")
+                     (:meta :name "viewport" :content "width=device-width, initial-scale=1")
+                     (:link :rel "icon" :href "data:,")
+                     (:title (esc (format nil "~a is paused" title))))
+              (:body :style "font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5"
+                     (:h1 :style "font-size: 1.4rem" (esc (format nil "~a is paused" title)))
+                     (:p "Its hosting allowance for the month, and what was added for it, are spent: it runs again when hosting is added.")
+                     (when balance
+                       (htm (:p :style "color: #666"
+                                (esc (format nil "This month: ~a of ~a free credits used; ~a bought credits left."
+                                             (round (or (gethash "free_used" balance) 0)) (or (gethash "free_credits" balance) 0)
+                                             (round (or (gethash "credits" balance) 0)))))))
+                     (when offers
+                       (htm (:p "Add hosting for it:")
+                            (:p (dolist (offer offers)
+                                  (htm (:form :method "post" :action (format nil "~a/host-topup" *url-prefix*) :style "display:inline;margin-right:.6rem"
+                                              (:input :type "hidden" :name "deployed" :value name)
+                                              (:input :type "hidden" :name "amount_cents" :value (format nil "~d" (car offer)))
+                                              (:button :type "submit" :style "font:inherit;cursor:pointer;padding:.3rem .8rem"
+                                                       (esc (format nil "~:d credits for ~a" (cdr offer) (money-text (car offer)))))))))))
+                     (:p :style "color: #666" "Hosting credits pay for the compute its visitors use, and keep until they are used."))))
+     :response net.aserve:*response-service-unavailable*
+     :type "text/html; charset=utf-8")))
+
+(defun host-topup-door (req ent)
+  "POST <prefix>/host-topup (form: deployed, amount_cents): buy hosting
+for a deployment at the gate and go to Stripe's page."
+  (let* ((name (query-value req "deployed"))
+         (record (and (stringp name) *deployments?* (deployment-record name)))
+         (amount (let ((a (query-value req "amount_cents"))) (and a (ignore-errors (parse-integer a :junk-allowed t)))))
+         (origin (request-origin req)))
+    (cond ((null record) (refuse req ent net.aserve:*response-not-found* "There is no such deployment."))
+          ((not (integerp amount)) (refuse req ent "Say how much."))
+          (t
+           (multiple-value-bind (answer status)
+               (gate-post "host-topup" (h "lab" (deployment-lab-name) "deployment" name
+                                          "title" (or (gethash "title" record) name)
+                                          "amount_cents" amount
+                                          "success_url" (format nil "~a~a/host-return?deployed=~a" origin *url-prefix* name)
+                                          "cancel_url" (format nil "~a~a" origin (deployment-url name))))
+             (let ((url (and answer (gethash "url" answer))))
+               (if (and (eql status 200) (stringp url))
+                   (redirect-to req ent url)
+                   (respond-deployment req ent
+                                       (deployment-page "Hosting could not be bought"
+                                                        (list (or (ignore-errors (gethash "message" (gethash "error" answer)))
+                                                                  "The gate did not answer; try again in a moment."))
+                                                        :back (deployment-url name) :back-label (format nil "Back to ~a" (or (gethash "title" record) name)))
+                                       :response net.aserve:*response-service-unavailable*
+                                       :type "text/html; charset=utf-8"))))))))
+
+(defun host-return-door (req ent)
+  "GET <prefix>/host-return?deployed=&checkout=: back from Stripe; the
+gate credits the deployment's hosting once and the deployment runs again."
+  (let* ((name (query-value req "deployed"))
+         (record (and (stringp name) *deployments?* (deployment-record name)))
+         (checkout (query-value req "checkout")))
+    (cond ((null record) (refuse req ent net.aserve:*response-not-found* "There is no such deployment."))
+          ((not (payment-id? checkout)) (refuse req ent "No checkout named."))
+          (t
+           (multiple-value-bind (answer status)
+               (gate-post "host-confirm" (h "lab" (deployment-lab-name) "deployment" name "checkout" checkout))
+             (let ((outcome (and answer (gethash "outcome" answer))))
+               (when (member outcome '("credited" "already") :test #'equal)
+                 (remhash name *stopped*))
+               (respond-deployment
+                req ent
+                (deployment-page (cond ((equal outcome "credited") "Hosting added")
+                                       ((equal outcome "already") "Hosting was already added")
+                                       ((equal outcome "unpaid") "The payment has not completed yet")
+                                       (t "Hosting could not be confirmed"))
+                                 (list (cond ((member outcome '("credited" "already") :test #'equal)
+                                              (format nil "~a has ~a hosting credits now and runs again."
+                                                      (or (gethash "title" record) name) (round (or (gethash "credits" answer) 0))))
+                                             (t (or (and answer (gethash "text" answer)) (format nil "The gate answered ~a." status)))))
+                                 :back (deployment-url name) :back-label (format nil "Open ~a" (or (gethash "title" record) name)))
+                :type "text/html; charset=utf-8")))))))

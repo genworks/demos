@@ -284,6 +284,10 @@ credits are spent.  A grant is spent when its file is served."
                    (money-text (* (deployment-file-price record kind) *unit-cents*))))
           ((not (model-defined? session)) (refuse req ent "No model has been built in this session yet."))
           (t
+           ;; a deployed model's file is its author's compute (deploy.lisp, the hosting meter)
+           (when (and record (not (meter-deployment! deployed :run (model-volume session))))
+             (return-from download-door
+               (refuse req ent net.aserve:*response-service-unavailable* "~a is paused: its hosting is spent." deployed)))
            (when (owner? session key)
              (multiple-value-bind (ok? reason) (meter! session :run (model-volume session))
                (unless ok?
