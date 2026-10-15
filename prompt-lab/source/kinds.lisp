@@ -267,7 +267,7 @@ line saying it is paid.  Put it in a section, so it redraws when paid."
                       (cents (* (monocle:toll-price toll) *unit-cents*))
                       (balance (the purse-cents))
                       (from-balance? (>= balance cents)))
-                 (htm (:form :method "post" :action (format nil "~a/toll-pay" *url-prefix*) :style "display:inline"
+                 (htm (:form :method "post" :action (door-url (the deployment-name) "toll-pay") :style "display:inline"
                              (:input :type "hidden" :name "iid" :value (the instance-id))
                              (:input :type "hidden" :name "key" :value (format nil "~(~a~)" key))
                              (:button :type "submit"
@@ -279,7 +279,7 @@ line saying it is paid.  Put it in a section, so it redraws when paid."
                         (htm (:span :class "text-sm text-gray-600" :style "margin-left:.5rem"
                                     (fmt "Balance ~a.  Add " (money-text balance))
                                     (dolist (pack *balance-packs*)
-                                      (htm (:form :method "post" :action (format nil "~a/toll-pay" *url-prefix*) :style "display:inline"
+                                      (htm (:form :method "post" :action (door-url (the deployment-name) "toll-pay") :style "display:inline"
                                                   (:input :type "hidden" :name "iid" :value (the instance-id))
                                                   (:input :type "hidden" :name "pack" :value (format nil "~d" pack))
                                                   (:button :type "submit" :class "underline" :style "font:inherit;cursor:pointer"
@@ -296,12 +296,14 @@ line saying it is paid.  Put it in a section, so it redraws when paid."
 
    ("String of html. A link that downloads the first of objects as FORMAT
 (:pdf :svg :png, and :step :iges :stl on a solids engine) as it stands
-now, inputs and all.  A format named in file-tolls wants its toll paid."
+now, inputs and all.  A format named in file-tolls wants its toll paid.
+Under the deployment's own address when this instance serves one
+(door-url, deploy.lisp), as the booth is."
     file-link
     (format &key label)
     (with-lhtml-string ()
       (:a :class "text-sm font-medium text-indigo-600 hover:text-indigo-500"
-          :href (format nil "~a/app-file?iid=~a&format=~(~a~)" *url-prefix* (the instance-id) format)
+          :href (format nil "~a?iid=~a&format=~(~a~)" (door-url (the deployment-name) "app-file") (the instance-id) format)
           (str (or label (format nil "~:@(~a~) file" format))))))))
 
 ;;

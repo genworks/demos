@@ -62,6 +62,29 @@
 
 (defun deployment-url (name) (format nil "~a/d/~a" *url-prefix* name))
 
+(defun deployment-door-url (name door)
+  "The address of DOOR -- toll-pay, toll-return, app-file, host-topup or
+host-return -- for deployment NAME: under the deployment's own address,
+<prefix>/d/<name>/<door>, where deployed-door answers it (below).  The
+booth, the file links, the paused page and the way back from Stripe all
+use this form when an instance serves a deployment, so that ONE rule at
+the proxy for <prefix>/d/<name> carries the whole application to
+wherever it runs -- a machine of its own (basilisk/firecracker, the
+hangar) as well as this image.  The same doors answer at <prefix>/<door>
+for the lab's own pages (a deployed model's viewer)."
+  (format nil "~a/~a" (deployment-url name) door))
+
+(defun door-url (name door)
+  "deployment-door-url when NAME names a deployment, else the lab's own
+<prefix>/<door>."
+  (if (stringp name) (deployment-door-url name door) (format nil "~a/~a" *url-prefix* door)))
+
+(defparameter *deployment-doors*
+  '(("toll-pay" . toll-pay-door) ("toll-return" . toll-return-door) ("app-file" . app-file-door)
+    ("host-topup" . host-topup-door) ("host-return" . host-return-door))
+  "Alist, the side doors a deployment's own address carries (deployment-door-url)
+and the functions that answer them.")
+
 (defun deployment-priced? (record) (monocle:record-priced? record))
 
 (defun deployment-state (record &key owner?)
@@ -670,19 +693,17 @@ toll, through the gate; with another provider granted on the spot."
                  (refuse req ent net.aserve:*response-service-unavailable* "No payment can be taken here.")))
             (t
              (let* ((origin (request-origin req))
-                    (return-url (format nil "~a~a/toll-return?~a&pack=~a" origin *url-prefix*
+                    ;; an app's way back is under its own address; a model's at the lab's
+                    (return-url (format nil "~a~a?~a&pack=~a" origin (door-url (and app name) "toll-return")
                                         (if app (format nil "iid=~a" (query-value req "iid")) (format nil "deployed=~a" name))
                                         pack)))
-               (multiple-value-bind (url reason)
+               (multiple-value-bind (url reason status)
                    (monocle:open-toll :stripe (lab-house) name (pack-toll record pack) (format nil "purse:~a" name)
                                       :return-url return-url :cancel-url (concatenate 'string origin back))
                  (if url
                      (redirect-to req ent url)
-                     (respond-deployment req ent
-                                         (deployment-page "The payment could not be opened" (list reason)
-                                                          :back back :back-label (format nil "Back to ~a" (or (gethash "title" record) name)))
-                                         :response net.aserve:*response-service-unavailable*
-                                         :type "text/html; charset=utf-8")))))))))
+                     (payment-not-opened req ent reason status back
+                                         (format nil "Back to ~a" (or (gethash "title" record) name)))))))))))
 
 (defun purse-return (req ent)
   "GET <prefix>/toll-return with pack=<cents> and payment=: back from
@@ -723,6 +744,21 @@ bought on the model's page (model-toll-pay)."
       (and (stringp owner-key) (equal (gethash "owner" record) owner-key))
       (grant-admits? grant (gethash "name" record) format)))
 
+(defun payment-not-opened (req ent reason status back back-label)
+  "The page for a payment the gate would not open: 429 and 'Not today'
+when the gate refused it for the day (the caps at its pay door, cyclops
+:pay-cap-author-cents-per-day and :pay-cap-cents-per-day), else 503.
+Nothing of the house on it; a way BACK to the app."
+  (let ((capped? (eql status 429)))
+    (respond-deployment req ent
+                        (deployment-page (if capped? "Not today" "The payment could not be opened")
+                                         (list (if capped?
+                                                   (format nil "No more can be paid here today: ~a." reason)
+                                                   reason))
+                                         :back back :back-label back-label)
+                        :response (if capped? *response-too-many-requests* net.aserve:*response-service-unavailable*)
+                        :type "text/html; charset=utf-8")))
+
 (defun toll-pay-door (req ent)
   "POST <prefix>/toll-pay: a web app's booth (form: iid, key), a deployed
 model's priced file (deployed, format), or a pack of an app's prepaid
@@ -746,20 +782,15 @@ toll is taken here, as the booth's own button does."
                   (let* ((name (the-object app deployment-name))
                          (origin (request-origin req))
                          (back (format nil "~a~a" origin (the-object app url)))
-                         (return-url (format nil "~a~a/toll-return?iid=~a&key=~(~a~)"
-                                             origin *url-prefix* (the-object app instance-id) key)))
-                    (multiple-value-bind (url reason)
+                         (return-url (format nil "~a~a?iid=~a&key=~(~a~)"
+                                             origin (deployment-door-url name "toll-return") (the-object app instance-id) key)))
+                    (multiple-value-bind (url reason status)
                         (monocle:open-toll :stripe (lab-house) name toll (the-object app instance-id)
                                            :return-url return-url :cancel-url back)
                       (if url
                           (redirect-to req ent url)
-                          (respond-deployment req ent
-                                              (deployment-page "The payment could not be opened" (list reason)
-                                                               :back (the-object app url)
-                                                               :back-label (format nil "Back to ~a"
-                                                                                   (or (gethash "title" (deployment-record name)) name)))
-                                              :response net.aserve:*response-service-unavailable*
-                                              :type "text/html; charset=utf-8"))))))))))
+                          (payment-not-opened req ent reason status (the-object app url)
+                                              (format nil "Back to ~a" (or (gethash "title" (deployment-record name)) name))))))))))))
 
 (defun toll-return-door (req ent)
   "GET <prefix>/toll-return: the visitor is back from Stripe -- a web app's
@@ -803,17 +834,13 @@ grant handed over."
              (let* ((origin (request-origin req))
                     (viewer (format nil "~a~a/viewer?deployed=~a" origin *url-prefix* name))
                     (return-url (format nil "~a~a/toll-return?deployed=~a&format=~a" origin *url-prefix* name format)))
-               (multiple-value-bind (url reason)
+               (multiple-value-bind (url reason status)
                    (monocle:open-toll :stripe (lab-house) name toll (format nil "model:~a:~a" name format)
                                       :return-url return-url :cancel-url viewer)
                  (if url
                      (redirect-to req ent url)
-                     (respond-deployment req ent
-                                         (deployment-page "The payment could not be opened" (list reason)
-                                                          :back viewer
-                                                          :back-label (format nil "Back to ~a" (or (gethash "title" record) name)))
-                                         :response net.aserve:*response-service-unavailable*
-                                         :type "text/html; charset=utf-8")))))))))
+                     (payment-not-opened req ent reason status viewer
+                                         (format nil "Back to ~a" (or (gethash "title" record) name)))))))))))
 
 (defun deployed-for-viewer (name)
   "The running deployment NAME for the viewer: a deployed model opens to
@@ -1040,7 +1067,11 @@ author's (the user's ruling, 2026-10-14)."
 (defun deployed-door (req ent)
   "GET <prefix>/d/<name>: the deployment, for whoever may use it -- a web
 app as its own page, a model in the viewer.  <prefix>/d/<name>/source: an
-open deployment's model file."
+open deployment's model file.  <prefix>/d/<name>/<door>, for the doors
+of *deployment-doors*: the deployment's own side doors -- its booths
+paid and the way back from Stripe, its files, hosting bought for it --
+the same functions as <prefix>/<door>, under the deployment's address
+(deployment-door-url)."
   (let* ((path (net.uri:uri-path (net.aserve:request-uri req)))
          (prefix (format nil "~a/d/" *url-prefix*))
          (rest (if (and (> (length path) (length prefix)) (string= prefix path :end2 (length prefix)))
@@ -1062,6 +1093,9 @@ open deployment's model file."
                                      (gethash "title" record) (deployment-url name)
                                      (file-model-body (merge-pathnames "model.lisp" (deployment-directory name))))
                              :attachment (format nil "~a.lisp" name))))
+          ;; the deployment's side doors under its own address
+          ((and what (assoc what *deployment-doors* :test #'string=))
+           (funcall (cdr (assoc what *deployment-doors* :test #'string=)) req ent))
           ((and what (plusp (length what)))
            (respond-deployment req ent "Not found." :response net.aserve:*response-not-found*))
           ;; a deployed web app is served on the apps' own origin only
@@ -1443,7 +1477,7 @@ hosting for it."
                      (when offers
                        (htm (:p "Add hosting for it:")
                             (:p (dolist (offer offers)
-                                  (htm (:form :method "post" :action (format nil "~a/host-topup" *url-prefix*) :style "display:inline;margin-right:.6rem"
+                                  (htm (:form :method "post" :action (deployment-door-url name "host-topup") :style "display:inline;margin-right:.6rem"
                                               (:input :type "hidden" :name "deployed" :value name)
                                               (:input :type "hidden" :name "amount_cents" :value (format nil "~d" (car offer)))
                                               (:button :type "submit" :style "font:inherit;cursor:pointer;padding:.3rem .8rem"
@@ -1466,7 +1500,7 @@ for a deployment at the gate and go to Stripe's page."
                (gate-post "host-topup" (h "lab" (deployment-lab-name) "deployment" name
                                           "title" (or (gethash "title" record) name)
                                           "amount_cents" amount
-                                          "success_url" (format nil "~a~a/host-return?deployed=~a" origin *url-prefix* name)
+                                          "success_url" (format nil "~a~a?deployed=~a" origin (deployment-door-url name "host-return") name)
                                           "cancel_url" (format nil "~a~a" origin (deployment-url name))))
              (let ((url (and answer (gethash "url" answer))))
                (if (and (eql status 200) (stringp url))
@@ -1513,30 +1547,41 @@ gate credits the deployment's hosting once and the deployment runs again."
 
 (defun book-hosting-line! (name checkout answer)
   "Book the gate's word that hosting was bought for deployment NAME -- the
-host-confirm ANSWER, outcome credited, for CHECKOUT -- as a line of kind
-hosting in the books (monocle book-hosting!): the whole amount the
-house's, the card cost the gate's estimate, the credits bought.  Hosting
-bought on a licensed runtime counts toward the licensor's base at the
-engine's attribution (the user's ruling, 2026-10-15: Allegro or not is
-the test, the engine only the fraction).  Nothing booked when the answer
-names no amount."
+host-confirm ANSWER, outcome credited, for CHECKOUT (or a row of the
+gate's host-pending list of credited purchases not yet booked) -- as a
+line of kind hosting in the books (monocle book-hosting!): the whole
+amount the house's, the card cost the gate's estimate, the credits
+bought; then the gate is told (host-booked), so its list leaves it out.
+Hosting bought on a licensed runtime counts toward the licensor's base
+at the engine's attribution (the user's ruling, 2026-10-15: Allegro or
+not is the test, the engine only the fraction).  Nothing booked when
+the answer names no amount, nor on a runtime that keeps no books
+(*books?*): the lab's sweep books it then.  A reference the books hold
+already is not booked twice."
   (let ((amount (gethash "amount_cents" answer)))
-    (when (and (realp amount) (plusp amount))
+    (when (and *books?* (realp amount) (plusp amount))
       (handler-case
-          (monocle:book-hosting! (lab-house) name (/ amount *unit-cents*)
-                                 :card (/ (or (gethash "card_cents" answer) 0) *unit-cents*)
-                                 :credits (gethash "credits_bought" answer)
-                                 :reference (let ((intent (gethash "intent" answer)))
-                                              (if (stringp intent) (format nil "stripe:~a" intent) (format nil "checkout:~a" checkout))))
+          (let ((reference (let ((intent (gethash "intent" answer)))
+                             (if (stringp intent) (format nil "stripe:~a" intent) (format nil "checkout:~a" checkout)))))
+            (unless (monocle:booked? (lab-house) reference)
+              (monocle:book-hosting! (lab-house) name (/ amount *unit-cents*)
+                                     :card (/ (or (gethash "card_cents" answer) 0) *unit-cents*)
+                                     :credits (gethash "credits_bought" answer)
+                                     :reference reference))
+            (gate-post "host-booked" (h "lab" (deployment-lab-name) "deployment" name "checkout" checkout))
+            t)
         (error (condition) (format *error-output* "~&prompt-lab: hosting for ~a not booked: ~a~%" name condition) nil)))))
 
 (defun sweep-hosting! ()
   "Confirm the hosting checkouts the gate still holds pending for this lab
 and older than ten minutes -- a buyer who paid and never came back --
 crediting and booking as the return door does; an unpaid one stays
-pending until Stripe expires it.  On the reaper's thread.  Nothing
-without the meter, or a gate without the door."
-  (when *hosting-meter?*
+pending until Stripe expires it.  And book the purchases the gate has
+credited that nobody booked: those confirmed by a runtime that keeps no
+books (*books?* nil, a hosted application in a machine of its own).  On
+the reaper's thread.  Nothing without the meter, a gate without the
+door, or a runtime without books."
+  (when (and *hosting-meter?* *books?*)
     (multiple-value-bind (answer status) (ignore-errors (gate-post "host-pending" (h "lab" (deployment-lab-name))))
       (when (and (eql status 200) (hash-table-p answer))
         (dolist (row (coerce (or (gethash "pending" answer) #()) 'list))
@@ -1549,4 +1594,10 @@ without the meter, or a gate without the door."
                   (gate-post "host-confirm" (h "lab" (deployment-lab-name) "deployment" name "checkout" checkout))
                 (when (and (eql status 200) (hash-table-p confirm) (equal (gethash "outcome" confirm) "credited"))
                   (remhash name *stopped*)
-                  (book-hosting-line! name checkout confirm))))))))))
+                  (book-hosting-line! name checkout confirm))))))
+        ;; credited elsewhere, booked here
+        (dolist (row (coerce (or (gethash "unbooked" answer) #()) 'list))
+          (let ((name (gethash "deployment" row))
+                (checkout (gethash "checkout" row)))
+            (when (and (stringp name) (stringp checkout) (deployment-record name))
+              (book-hosting-line! name checkout row))))))))

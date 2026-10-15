@@ -404,6 +404,25 @@ its author's hosting at the gate's host-meter door (deploy.lisp): the
 month's free allowance, then what was bought for it; a deployment whose
 hosting is spent pauses until hosting is added.")
 
+(defparameter *lab-name* nil
+  "String or nil. How this lab names itself to the gate: the key of its
+hosting ledger, its payments and its royalty view there (monocle
+house-lab-name, deployment-lab-name).  A stack init sets it to a name of
+the host's own, \"prompt-lab@narad\", so that every runtime serving
+this lab's deployments -- the lab itself and a hosted application in a
+machine of its own -- reports under one name.  Nil: the engine at the
+deployed root, '<engine>@<root>', a path, which differs from one host to
+the next.")
+
+(defparameter *books?* t
+  "Boolean. Whether this runtime keeps the books: books a settled toll
+and a hosting sale and tells the gate they are booked.  Nil on a HOSTED
+runtime -- one of this lab's deployments served in a machine of its own
+(the hangar, basilisk/firecracker) -- which grants on the gate's settled
+word, books nothing and marks nothing; the lab's own sweep, on the
+reaper's thread, books what the gate settled, as it does for a payer who
+never came back (deploy.lisp sweep-toll-payments!, sweep-hosting!).")
+
 (defparameter *pot-percent-least* 0
   "Number or nil. The least an author adds of every payment to the lab's
 community pot, in percentage points on top of the monetization
@@ -420,12 +439,14 @@ and nothing goes to the pot.  The fee itself is the house's.")
   "This lab as Monocle knows it: where its deployments and books are kept,
 the engine and the Lisp they run on, its unit (*unit*) and what one
 costs at a toll, the fees for its engine, the community pot's least
-share, the toll provider and the gate's doors (deploy.lisp, gate-ask),
-as the parameters above stand now."
+share, the toll provider, the gate's doors (deploy.lisp, gate-ask), its
+name at the gate (*lab-name*) and whether this runtime keeps the books
+(*books?*), as the parameters above stand now."
   (monocle:make-house :root *deployed-root* :runtime (engine-name) :unit (unit-key)
                       :fee-percents (house-fee-percents) :pot-percent *pot-percent-least*
                       :provider *toll-provider*
-                      :gate #'gate-ask :cents-per-unit *unit-cents*))
+                      :gate #'gate-ask :cents-per-unit *unit-cents*
+                      :name *lab-name* :books? *books?*))
 
 (defun house-fee-percent (closed?) (monocle:fee-percent (lab-house) closed?))
 

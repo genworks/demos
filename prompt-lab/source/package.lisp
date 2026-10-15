@@ -39,6 +39,8 @@
              #:*house-fee-percents*
              #:*closed-source?*
              #:*toll-provider*
+             #:*lab-name*
+             #:*books?*
              #:payables
              #:book-revenue!
              #:revenue-report
