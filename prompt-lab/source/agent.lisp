@@ -30,14 +30,21 @@ only.  Nil when *messages-url* is a gate that adds the key.")
 (defparameter *effort* "medium"
   "String. output_config.effort for every call: low, medium or high.")
 
-(defparameter *max-tokens* 16000
-  "Integer. max_tokens per call (thinking counts toward it).")
+(defparameter *max-tokens* 32000
+  "Integer. max_tokens per call (thinking counts toward it).  The gate
+caps it too (:max-tokens in the stack's :llm-gate block): raise both.
+Raised from 16000 on 2026-10-20, when one write_model of a 23 KB app
+file with a bigger table in it outgrew the reply twice, and nothing of
+a cut-off tool call arrives.")
 
 (defparameter *max-rounds* 12
   "Integer. Tool rounds allowed for one visitor prompt.")
 
-(defparameter *call-seconds* 180
-  "Integer. Seconds one API call may take.")
+(defparameter *call-seconds* 300
+  "Integer. Seconds one API call may take.  About 140 output tokens a
+second were seen on claude-opus-5-5 (2026-10-20), so a reply of
+*max-tokens* needs most of this; the gate's :timeout-seconds must be
+longer still.")
 
 
 ;;
@@ -118,6 +125,7 @@ How to work:
 Rules:
 - Units are millimetres.  The model is always the object named MODEL, built by (make-object 'model) with no arguments.
 - The visitor may have edited the model file by hand.  Before changing an existing model, read_model and work from what is there.
+- Change a file that is already long with edit_model (one passage that occurs once in the file, replaced), not by writing it whole again.  A reply holds about 30,000 tokens in all, thinking included; one that runs out is lost entirely, nothing written.  A table of many rows is built up over several edits.
 - Give every visible part a colour: :display-controls (list :color <name>) with medium-toned, varied, plausible colours (named colours such as :steelblue, :saddlebrown, :darkolivegreen, :slategray, :firebrick, :goldenrod; not pale ones like :wheat or :beige, which vanish as wireframe lines on the light background), so both the shaded and the wireframe views read.
 - ~a
 - Unsure what a type takes or which type to use?  describe_object names a type's inputs and documented messages~:[~;, and search_docs finds definitions, guide sections and examples~].  Ask them rather than guess an input name.

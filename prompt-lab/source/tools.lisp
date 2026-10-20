@@ -154,6 +154,40 @@ The file's header already sets the session package.")) t)))
               (session-id session) (eq (session-kind session) :app) package-name source))
     (load-model-file session)))
 
+(defun edit-model (session old new)
+  "Replace OLD, which must occur exactly once in the model file's body
+(the file as read_model shows it), with NEW, and compile and load the
+result as write-model does.  The agent's way to change a long file
+without writing it whole again (2026-10-20: one write_model of a 23 KB
+app file with a bigger table in it outgrew the reply twice, and nothing
+of a cut-off tool call arrives).  Values: content blocks and an error
+flag."
+  (let ((file (session-model-file session)))
+    (cond ((not (probe-file file))
+           (values (list (text-result "There is no model file yet; write one with write_model.")) t))
+          ((or (not (stringp old)) (zerop (length old)))
+           (values (list (text-result "Refused: OLD is empty.  Give the passage to replace, exactly as read_model shows it.")) t))
+          (t
+           (let* ((body (file-model-body file))
+                  (new (if (stringp new) new ""))
+                  (count (loop with start = 0
+                               for pos = (search old body :start2 start)
+                               while pos
+                               count t
+                               do (setq start (+ pos (length old))))))
+             (if (/= count 1)
+                 (values (list (text-result "Refused: OLD occurs ~a times in the model file, not once.  ~:[Give enough surrounding text to match one passage.~;Read the file with read_model and give the passage exactly as it is there.~]"
+                                            count (zerop count)))
+                         t)
+                 ;; the body's trailing newline is write-model's to add
+                 ;; back, or every edit would leave one more
+                 (let ((pos (search old body)))
+                   (write-model session (string-right-trim '(#\Newline #\Return)
+                                                           (concatenate 'string
+                                                                        (subseq body 0 pos)
+                                                                        new
+                                                                        (subseq body (+ pos (length old)))))))))))))
+
 (defun load-model-file (session)
   "Compile and load the session's model file.  Values: content blocks and
 an error flag.  The file as it is now goes to the archive first, so a
@@ -396,6 +430,7 @@ lens and rasterised in process (raster.lisp): no Ghostscript."
 SESSION.  Values: content blocks, and true on failure."
   (touch session)
   (cond ((string= name "write_model") (write-model session (input "source" input)))
+        ((string= name "edit_model") (edit-model session (input "old" input) (input "new" input)))
         ((string= name "read_model") (read-model session))
         ((string= name "evaluate") (evaluate-expression session (input "expression" input)))
         ((string= name "check_model")
@@ -449,7 +484,7 @@ and check_app only for a SESSION that builds a web app (kinds.lisp)."
       ;; a project session works on its files and builds nothing here;
       ;; any other has no project (project.lisp)
       (if (and session (eq (session-kind session) :project))
-          (dolist (name '("write_model" "read_model" "evaluate" "check_model" "render"))
+          (dolist (name '("write_model" "edit_model" "read_model" "evaluate" "check_model" "render"))
             (setq tools (without name tools)))
           (dolist (name '("list_project" "read_project_file" "write_project_file" "check_profile"))
             (setq tools (without name tools))))
@@ -466,6 +501,13 @@ and check_app only for a SESSION that builds a web app (kinds.lisp)."
      ("input_schema" . ,(schema `(("source" . (("type" . "string")
                                                ("description" . "Complete Lisp source for the model file."))))
                                 '("source"))))
+   `(("name" . "edit_model")
+     ("description" . "Change part of the model file: replace OLD, a passage that occurs exactly once in the file as read_model shows it, with NEW, then compile and load as write_model does. Use it to change a file that is already long -- rows added to a table, one definition rewritten -- instead of writing the whole file again: a reply holds about 30,000 tokens in all, thinking included, and one that runs out is lost entirely, nothing written. Give OLD enough surrounding text to be unique; refused when it occurs no times or more than once. Returns compiler warnings and errors.")
+     ("input_schema" . ,(schema `(("old" . (("type" . "string")
+                                            ("description" . "The passage to replace, exactly as it is in the file, occurring once.")))
+                                  ("new" . (("type" . "string")
+                                            ("description" . "What takes its place; empty to delete the passage."))))
+                                '("old" "new"))))
    `(("name" . "read_model")
      ("description" . "Return the current contents of the model file. Read it before changing a model the visitor may have edited by hand.")
      ("input_schema" . ,(schema nil)))

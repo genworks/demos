@@ -297,7 +297,7 @@ works on a session in place of the lab's own loop:
   address of the session's tools; later it takes the agent's progress
   and its reply, for the log the page shows.
 - `<prefix>/mcp?session=<id>` is the session's tools -- `write_model`,
-  `read_model`, `evaluate`, `check_model`, `render`, `describe_object`,
+  `edit_model`, `read_model`, `evaluate`, `check_model`, `render`, `describe_object`,
   `search_docs` -- as a [Model Context Protocol](https://modelcontextprotocol.io)
   server over HTTP.  Any MCP client that holds the session's key can
   call them.

@@ -113,6 +113,10 @@ Never signals."
          (expression (and (hash-table-p input) (gethash "expression" input))))
     (cond ((and (equal name "write_model") (stringp source))
            (format out "### Tool: write_model~%~%```lisp~%~a~%```~%~%" source))
+          ;; an edit: the passage replaced and what took its place
+          ((and (equal name "edit_model") (hash-table-p input) (stringp (gethash "old" input)))
+           (format out "### Tool: edit_model~%~%Old:~%~%```lisp~%~a~%```~%~%New:~%~%```lisp~%~a~%```~%~%"
+                   (gethash "old" input) (or (gethash "new" input) "")))
           ((and (equal name "evaluate") (stringp expression))
            (format out "### Tool: evaluate~%~%```lisp~%~a~%```~%~%" expression))
           ;; a project's file (project.lisp), as written
