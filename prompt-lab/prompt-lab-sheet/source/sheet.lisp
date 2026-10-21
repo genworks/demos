@@ -741,8 +741,12 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
             (let ((id (or (the shown-id) (the archive-pending))))
               (if id (owner-signal-expression id) "''"))
             (js-string-literal (or (the query-checkout) ""))
+            ;; a wallet named on the address is kept, as one handed back by
+            ;; Stripe is: a GRANT LINK (the gate's grant_wallet, a development
+            ;; allowance given on merit) lands the wallet in this browser
             (if (the query-wallet)
-                (js-string-literal (the query-wallet))
+                (format nil "(function(){try{localStorage.setItem('prompt-lab-wallet',~a)}catch(e){};return ~a})()"
+                        (js-string-literal (the query-wallet)) (js-string-literal (the query-wallet)))
                 "(function(){try{return localStorage.getItem('prompt-lab-wallet')||''}catch(e){return ''}})()"))))
 
   :objects
