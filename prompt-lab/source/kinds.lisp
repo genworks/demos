@@ -161,9 +161,12 @@ the lab's own unit, under its key (:rivets, :mites: unit-key; an older
 the key of the toll its file-link asks for; a format not named is free."
     file-tolls nil)
    ("String or nil. The host the page is served on: the apps' own
-(*app-origin*), so a page a visitor's prompts wrote never runs as the
-lab; nil, any host, where none is set."
-    host (app-origin-host))
+(*app-origin*; under a per-deployment origin, this deployment's), so a
+page a visitor's prompts wrote never runs as the lab; nil, any host,
+where none is set."
+    host (if (app-origin-pattern?)
+             (and (the deployment-name) (app-origin-host (the deployment-name)))
+             (app-origin-host)))
    ("String or nil. The deployment this instance serves (deploy.lisp), set
 by its door; nil for the session's own preview, where a toll is paid
 without money and nothing is booked."
@@ -339,7 +342,7 @@ author's.  Nil for a closed deployment, or none."
   (let ((record (deployment-record name)))
     (when (and record (not (truthy? (gethash "closed" record))))
       (format nil "<script>document.addEventListener('DOMContentLoaded',function(){var p=document.createElement('p');p.style.cssText='margin:2rem 0 1rem;text-align:center;font-size:.8rem;color:#6b7280';p.innerHTML='<a href=\"~a/source\" style=\"color:inherit;text-decoration:underline\">Source</a>, under the GNU Affero General Public License.';document.body.appendChild(p)});</script>"
-              (deployment-url name)))))
+              (deployment-path name)))))
 
 (defun charge-toll! (app toll)
   "Take TOLL from the visitor of APP.  True when it is paid."
@@ -356,18 +359,46 @@ drawing would be: the session builds a web app and has defined APP."
 ;; served there and nowhere else, so its script never runs as the lab.
 ;;
 
-(defun app-origin-host ()
-  "The host of *app-origin*, in lower case, without scheme or port; nil
+(defun app-origin-pattern? ()
+  "Whether *app-origin* names a host PER DEPLOYMENT: it carries {name},
+which a deployment's name replaces -- \"https://{name}.gen.works\" puts
+each hosted application on a host of its own, so no two share a
+browser origin (cookies, localStorage, service workers apart)."
+  (and (stringp *app-origin*) (search "{name}" *app-origin*) t))
+
+(defun app-origin-for (name)
+  "The apps' origin for deployment NAME -- the pattern filled in, or
+*app-origin* itself when it names one host for every app; the preview's
+origin (*app-preview-label* in place of a name) when NAME is nil.  Nil
 when apps are served on the lab's own address."
   (when (and (stringp *app-origin*) (plusp (length *app-origin*)))
-    (let* ((start (let ((at (search "://" *app-origin*))) (if at (+ at 3) 0)))
-           (end (or (position-if #'(lambda (c) (member c '(#\: #\/))) *app-origin* :start start)
-                    (length *app-origin*))))
-      (string-downcase (subseq *app-origin* start end)))))
+    (if (app-origin-pattern?)
+        (let ((label (or name *app-preview-label*)))
+          (with-output-to-string (out)
+            (loop with start = 0
+                  for at = (search "{name}" *app-origin* :start2 start)
+                  do (write-string *app-origin* out :start start :end (or at (length *app-origin*)))
+                     (when at (write-string label out))
+                     (setq start (and at (+ at 6)))
+                  while at)))
+        *app-origin*)))
 
-(defun app-origin-base ()
-  "*app-origin* without a trailing slash, or the empty string."
-  (if (app-origin-host) (string-right-trim "/" *app-origin*) ""))
+(defun app-origin-host (&optional name)
+  "The host of the apps' origin for deployment NAME (the preview's when
+NAME is nil), in lower case, without scheme or port; nil when apps are
+served on the lab's own address."
+  (let ((origin (app-origin-for name)))
+    (when origin
+      (let* ((start (let ((at (search "://" origin))) (if at (+ at 3) 0)))
+             (end (or (position-if #'(lambda (c) (member c '(#\: #\/))) origin :start start)
+                      (length origin))))
+        (string-downcase (subseq origin start end))))))
+
+(defun app-origin-base (&optional name)
+  "The apps' origin for NAME (app-origin-for) without a trailing slash,
+or the empty string."
+  (let ((origin (app-origin-for name)))
+    (if origin (string-right-trim "/" origin) "")))
 
 (defun request-host (req)
   "The host the visitor's browser asked for, as the proxies forwarded it,
@@ -378,26 +409,33 @@ in lower case and without its port."
                     "")))
       (string-downcase (subseq host 0 (or (position #\: host) (length host)))))))
 
-(defun on-app-origin? (req)
-  "True when REQ may be answered with a web app: it came to the apps' own
-host, or none is set."
-  (let ((host (app-origin-host)))
+(defun on-app-origin? (req &optional name)
+  "True when REQ may be answered with a web app -- deployment NAME's, or
+a session's preview when NAME is nil: it came to the apps' own host for
+it, or none is set."
+  (let ((host (app-origin-host name)))
     (or (null host) (string= (request-host req) host))))
 
-(defun to-app-origin (req ent)
-  "Answer REQ with a redirect to the same path and query on *app-origin*."
+(defun to-app-origin (req ent &optional name)
+  "Answer REQ with a redirect to the apps' origin for deployment NAME (a
+preview's when nil): the same path and query there -- or, under a
+per-deployment origin, the ROOT of the deployment's own host, where the
+proxy's root rule (cyclops :root-target-path) sends the visitor on to
+the deployment."
   (let ((query (net.aserve:request-query req)))
     (net.aserve:with-http-response (req ent :response net.aserve:*response-found*)
       (setf (net.aserve:reply-header-slot-value req :location)
-            (format nil "~a~a~@[?~a~]" (app-origin-base)
-                    (net.uri:uri-path (net.aserve:request-uri req))
+            (format nil "~a~a~@[?~a~]" (app-origin-base name)
+                    (if (and name (app-origin-pattern?)) "/" (net.uri:uri-path (net.aserve:request-uri req)))
                     (and query (net.aserve:query-to-form-urlencoded query))))
       (net.aserve:with-http-body (req ent)))))
 
 (defun app-doors-host (host)
   "The host the app doors are published for, given the lab's HOST: the
-lab's and the apps' own, when both are named; else HOST."
-  (let ((app (app-origin-host)))
+lab's and the apps' own, when both are named; else HOST.  Under a
+per-deployment origin the hosts cannot be listed, so the doors answer
+for HOST (nil: every host the server hears)."
+  (let ((app (and (not (app-origin-pattern?)) (app-origin-host))))
     (if (and host app)
         (remove-duplicates (cons app (if (listp host) host (list host))) :test #'string-equal)
         host)))

@@ -193,8 +193,24 @@ of their own, \"https://lab-apps.common-lisp.app\", so that a page a
 visitor's prompts wrote never runs as the lab and cannot reach what the
 lab keeps in the browser (owner keys, the wallet).  App pages answer on
 that host alone, and the lab's app doors send a request that arrives
-elsewhere there (kinds.lisp).  Nil: apps on the lab's own address, as on
-a development ship.")
+elsewhere there (kinds.lisp).  With {name} in it,
+\"https://{name}.gen.works\", a host PER DEPLOYMENT: each hosted app is
+reached at its own name's host, so no two share a browser origin either
+(kinds.lisp app-origin-pattern?; the proxy's rule for *.gen.works sends
+a host's root to the deployment, cyclops :root-target-path); a session's
+preview lives at *app-preview-label*'s host.  Nil: apps on the lab's own
+address, as on a development ship.")
+
+(defparameter *app-preview-label* "preview"
+  "String. Under a per-deployment *app-origin*, the label a session's app
+PREVIEW is served under in place of a deployment's name:
+preview.gen.works.  Reserved as a deployment name with the rest of
+*reserved-deployment-names*.")
+
+(defparameter *reserved-deployment-names* '("preview" "apps" "app" "www" "lab" "api" "mail" "admin")
+  "List of strings. Names a deployment may not take: under a per-deployment
+origin a deployment's name is a host of its own, and these are the
+house's (the preview's label, the apps host, the usual service names).")
 
 (defparameter *gitlab-url* nil
   "String or nil. The GitLab a visitor's own project may be opened from

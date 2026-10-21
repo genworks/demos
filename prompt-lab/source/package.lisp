@@ -31,6 +31,8 @@
              #:*brand*
              #:*session-header*
              #:*app-origin*
+             #:*app-preview-label*
+             #:*reserved-deployment-names*
              #:*gitlab-url*
              #:*git-gate-url*
              #:*unit*

@@ -60,7 +60,22 @@
   (find (session-id session) (deployment-records)
         :key #'(lambda (record) (gethash "session" record)) :test #'equal))
 
-(defun deployment-url (name) (format nil "~a/d/~a" *url-prefix* name))
+(defun deployment-path (name)
+  "Deployment NAME's address on the lab's own host, a path: <prefix>/d/<name>.
+Every link from one of its pages to another of its doors uses this
+form, which answers on whatever host the page is served from."
+  (format nil "~a/d/~a" *url-prefix* name))
+
+(defun deployment-url (name)
+  "Where deployment NAME is reached from outside.  Under a per-deployment
+origin (app-origin-pattern?) a web APP has a host of its own,
+https://<name>.gen.works/ -- the proxy's root rule sends that host's
+root on to deployment-path; a model, and every deployment where apps
+share one apps host or the lab's own address, is at deployment-path."
+  (let ((record (deployment-record name)))
+    (if (and (app-origin-pattern?) record (equal (gethash "kind" record) "app"))
+        (format nil "~a/" (app-origin-base name))
+        (deployment-path name))))
 
 (defun deployment-door-url (name door)
   "The address of DOOR -- toll-pay, toll-return, app-file, host-topup or
@@ -72,7 +87,7 @@ the proxy for <prefix>/d/<name> carries the whole application to
 wherever it runs -- a machine of its own (basilisk/firecracker, the
 hangar) as well as this image.  The same doors answer at <prefix>/<door>
 for the lab's own pages (a deployed model's viewer)."
-  (format nil "~a/~a" (deployment-url name) door))
+  (format nil "~a/~a" (deployment-path name) door))
 
 (defun door-url (name door)
   "deployment-door-url when NAME names a deployment, else the lab's own
@@ -99,7 +114,7 @@ owner what is owed."
        "engine" (gethash "engine" record)
        "closed" (if (truthy? (gethash "closed" record)) t 'yason:false)
        "source_url" (unless (truthy? (gethash "closed" record))
-                      (format nil "~a/source" (deployment-url name)))
+                      (format nil "~a/source" (deployment-path name)))
        ;; the most any of its files costs, in the lab's unit, named for it
        (monocle:amount-field (lab-house) "price") (or (monocle:record-price record) 0)
        "fee_percent" (gethash "fee_percent" record)
@@ -266,6 +281,10 @@ the same session under the same name replaces the copy and the terms."
                          "This model charges for nothing yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download' -- and Monetize opens when it has written that in.")))
         ((not (deployment-name? name))
          (values nil "Give it a name for its address: 3 to 40 lower-case letters, digits and hyphens, a letter first."))
+        ;; a name that is a host of its own under a per-deployment origin
+        ;; must not be one the house uses (the preview's, www)
+        ((member name *reserved-deployment-names* :test #'string=)
+         (values nil (format nil "The name ~a is reserved; choose another." name)))
         ((and existing (not (equal (gethash "owner" existing) (session-owner session))))
          (values nil (format nil "The name ~a is taken; choose another." name)))
         ((and mine (not (equal (gethash "name" mine) name)))
@@ -1099,8 +1118,8 @@ the same functions as <prefix>/<door>, under the deployment's address
           ((and what (plusp (length what)))
            (respond-deployment req ent "Not found." :response net.aserve:*response-not-found*))
           ;; a deployed web app is served on the apps' own origin only
-          ((and (equal (gethash "kind" record) "app") (not (on-app-origin? req)))
-           (to-app-origin req ent))
+          ((and (equal (gethash "kind" record) "app") (not (on-app-origin? req name)))
+           (to-app-origin req ent name))
           (t
            (let ((deployed (ensure-deployed name)))
              (cond ((null deployed)
@@ -1113,7 +1132,7 @@ the same functions as <prefix>/<door>, under the deployment's address
                          (not (equal (query-value req "d") name)))
                     (net.aserve:with-http-response (req ent :response net.aserve:*response-found*)
                       (setf (net.aserve:reply-header-slot-value req :location)
-                            (format nil "~a?d=~a~@[&owner=~a~]" (deployment-url name) name owner-key))
+                            (format nil "~a?d=~a~@[&owner=~a~]" (deployment-path name) name owner-key))
                       (net.aserve:with-http-body (req ent))))
                    ;; the run is the author's compute, metered against the
                    ;; deployment's hosting; spent, the deployment pauses (below)
@@ -1501,7 +1520,7 @@ for a deployment at the gate and go to Stripe's page."
                                           "title" (or (gethash "title" record) name)
                                           "amount_cents" amount
                                           "success_url" (format nil "~a~a?deployed=~a" origin (deployment-door-url name "host-return") name)
-                                          "cancel_url" (format nil "~a~a" origin (deployment-url name))))
+                                          "cancel_url" (format nil "~a~a" origin (deployment-path name))))
              (let ((url (and answer (gethash "url" answer))))
                (if (and (eql status 200) (stringp url))
                    (redirect-to req ent url)
@@ -1509,7 +1528,7 @@ for a deployment at the gate and go to Stripe's page."
                                        (deployment-page "Hosting could not be bought"
                                                         (list (or (ignore-errors (gethash "message" (gethash "error" answer)))
                                                                   "The gate did not answer; try again in a moment."))
-                                                        :back (deployment-url name) :back-label (format nil "Back to ~a" (or (gethash "title" record) name)))
+                                                        :back (deployment-path name) :back-label (format nil "Back to ~a" (or (gethash "title" record) name)))
                                        :response net.aserve:*response-service-unavailable*
                                        :type "text/html; charset=utf-8"))))))))
 
@@ -1542,7 +1561,7 @@ gate credits the deployment's hosting once and the deployment runs again."
                                               (format nil "~a has ~a hosting credits now and runs again."
                                                       (or (gethash "title" record) name) (round (or (gethash "credits" answer) 0))))
                                              (t (or (and answer (gethash "text" answer)) (format nil "The gate answered ~a." status)))))
-                                 :back (deployment-url name) :back-label (format nil "Open ~a" (or (gethash "title" record) name)))
+                                 :back (deployment-path name) :back-label (format nil "Open ~a" (or (gethash "title" record) name)))
                 :type "text/html; charset=utf-8")))))))
 
 (defun book-hosting-line! (name checkout answer)

@@ -949,7 +949,7 @@ the model with one panel under it, the inputs or the tree."
                                  ;; a closed one shows nothing of the house (the user's ruling, 2026-10-14)
                                  (unless (truthy? (gethash "closed" record))
                                    (htm (:p :style "margin:0 0 .6rem"
-                                            (:a :href (format nil "~a/source" (deployment-url name)) "Its source")
+                                            (:a :href (format nil "~a/source" (deployment-path name)) "Its source")
                                             ", under the GNU Affero General Public License.")
                                         (:p :style "margin:0;opacity:.7"
                                             "Built in the " (:a :href *url-prefix* (esc (lab-title))) "."))))))))))
@@ -1038,7 +1038,7 @@ application's address."
             (archive (or (named "archive") (named "replay")))
             (deployed (or (named "d") (named "deployed"))))
         (cond ((and deployed *deployments?* (deployment-record deployed))
-               (deployment-url deployed))
+               (deployment-path deployed))
               ((and session (session-id? session) (find-session session))
                (format nil "~a?session=~a" *url-prefix* session))
               ;; a session that has ended since: its archive entry
