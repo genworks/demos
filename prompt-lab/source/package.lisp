@@ -42,6 +42,7 @@
              #:*closed-source?*
              #:*toll-provider*
              #:*lab-name*
+             #:*hangar-token-file*
              #:*books?*
              #:payables
              #:book-revenue!

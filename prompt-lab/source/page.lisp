@@ -1128,6 +1128,10 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
     ;; behind a token of its own, not the lab's lock
     (net.aserve:publish :path (door-path "royalty") :server server :host host :function #'royalty-door)
     (net.aserve:publish :path (format nil "~a/royalty" *url-prefix*) :server server :host host :function #'royalty-page)
+    ;; the hangar's feed of this lab's deployments (deploy.lisp): behind
+    ;; the hangar's token, not the lab's lock
+    (net.aserve:publish :path (door-path "hangar/deployments") :server server :host host :function #'hangar-deployments-door)
+    (net.aserve:publish :path (door-path "hangar/deployment") :server server :host host :function #'hangar-deployment-door)
     ;; the doors a web app is reached by answer on the apps' own host as
     ;; well as the lab's (app-doors-host, kinds.lisp); not behind the lock:
     ;; a deployed app is for others

@@ -1408,6 +1408,77 @@ the licensor's reader."
             :type "text/html; charset=utf-8")))))
 
 ;;
+;; THE HANGAR'S FEED (2026-10-22).  A hangar on another host (the fleet's
+;; placement: balaram flies suzie's deployments) mirrors this lab's
+;; deployed root through two doors, outside the lock and behind a token
+;; of their own (*hangar-token-file*, as the royalty view's): the list of
+;; this engine's deployments with a STAMP that changes when one is
+;; deployed again, and one deployment's record and model file.  The
+;; hangar fetches what is new or changed, drops what is gone, and flies
+;; the rest (basilisk/firecracker/hangar/hangar-init).  Closed-source
+;; deployments travel too: the hangar is the house's, not the public's.
+;;
+
+(defvar *hangar-token-file* nil
+  "String or nil. The file whose first line is the token a hangar carries
+to this lab's feed doors (X-Prompt-Lab-Hangar, or token= on the query).
+Nil: no feed here.")
+
+(defun hangar-token ()
+  (and (stringp *hangar-token-file*)
+       (ignore-errors
+        (with-open-file (in *hangar-token-file* :if-does-not-exist nil)
+          (and in (let ((line (read-line in nil nil)))
+                    (and (stringp line) (plusp (length (string-trim " " line))) (string-trim " " line))))))))
+
+(defun hangar-admits? (req)
+  (let ((token (hangar-token))
+        (given (or (query-value req "token") (net.aserve:header-slot-value req :x-prompt-lab-hangar))))
+    (and token (stringp given) (string= token given))))
+
+(defun deployment-stamp (name)
+  "A short text that changes whenever deployment NAME is deployed again:
+the record's deployed time and the model file's write date and length."
+  (let* ((record (deployment-record name))
+         (file (merge-pathnames "model.lisp" (deployment-directory name)))
+         (date (or (ignore-errors (file-write-date file)) 0))
+         (length (or (ignore-errors (with-open-file (in file :element-type '(unsigned-byte 8)) (file-length in))) 0)))
+    (format nil "~a-~a-~a" (or (and record (gethash "deployed" record)) 0) date length)))
+
+(defun hangar-deployments-door (req ent)
+  "GET <prefix>/api/hangar/deployments, the hangar's token: this engine's
+deployments -- name, kind, title, closed, deployed, stamp -- and the
+lab's name and engine.  404 without a token file, 403 without the token."
+  (cond ((not (hangar-token)) (refuse req ent net.aserve:*response-not-found* "No hangar feed here."))
+        ((not (hangar-admits? req)) (refuse req ent net.aserve:*response-forbidden* "The feed opens only with its token."))
+        (t (respond-json req ent
+                         (h "lab" (deployment-lab-name) "engine" (engine-name)
+                            "deployments" (map 'vector
+                                                #'(lambda (record)
+                                                    (let ((name (gethash "name" record)))
+                                                      (h "name" name "kind" (gethash "kind" record)
+                                                         "title" (gethash "title" record)
+                                                         "closed" (if (truthy? (gethash "closed" record)) t 'yason:false)
+                                                         "deployed" (gethash "deployed" record)
+                                                         "stamp" (deployment-stamp name))))
+                                                (deployment-records)))))))
+
+(defun hangar-deployment-door (req ent)
+  "GET <prefix>/api/hangar/deployment?name=<name>, the hangar's token: the
+deployment's record (deployment.json as the lab keeps it) and its model
+file's text, with the stamp."
+  (let* ((name (query-value req "name"))
+         (record (and (stringp name) (deployment-name? name) (deployment-record name)))
+         (file (and record (merge-pathnames "model.lisp" (deployment-directory name)))))
+    (cond ((not (hangar-token)) (refuse req ent net.aserve:*response-not-found* "No hangar feed here."))
+          ((not (hangar-admits? req)) (refuse req ent net.aserve:*response-forbidden* "The feed opens only with its token."))
+          ((not (and record file (probe-file file))) (refuse req ent net.aserve:*response-not-found* "There is no such deployment."))
+          (t (respond-json req ent
+                           (h "name" name "stamp" (deployment-stamp name)
+                              "record" (or (read-record (merge-pathnames "deployment.json" (deployment-directory name))) record)
+                              "model" (uiop:read-file-string file :external-format :utf-8)))))))
+
+;;
 ;; HOSTING METERED AGAINST THE AUTHOR (step 9 of the Monetize build;
 ;; the user's point of 2026-10-14: a busy app with a free tier of its
 ;; own is what neither the revenue share nor an idle-stop covers).  A
