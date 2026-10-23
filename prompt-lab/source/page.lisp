@@ -594,6 +594,50 @@ nil and the reason."
             (t (values nil (or (ignore-errors (gethash "message" (gethash "error" answer)))
                                "The top-up could not be started; try again in a moment.")))))))
 
+(defun free-lab-settings! ()
+  "A free public lab (*free-lab?*): every money path shut, so nothing is
+for sale and nothing closed -- deploys, tolls and payouts, closed-source
+sessions, hosting, priced files, the pot slider.  The top-up doors, the
+privacy switch and the agent's charging rules read *free-lab?* themselves."
+  (setq *deployments?* nil
+        *closed-source?* nil
+        *toll-provider* nil
+        *deployment-payments?* nil
+        *pot-percent-least* nil
+        *hosting-meter?* nil))
+
+(defun free-lab-refusal (req ent)
+  (refuse req ent net.aserve:*response-forbidden* "This is the free public lab: nothing is sold here."))
+
+(defun mint-author! (token address)
+  "An AUTHOR KEY for the visitor at ADDRESS (*author-keys?*): a wallet with
+no credits minted at the gate's <path>/author door, after the human check
+where it stands and within the address's daily cap.  Values: the key, or
+nil and the reason."
+  (cond ((not *author-keys?*) (values nil "This lab mints no author keys."))
+        ((address-over-limit? address :authors)
+         (values nil "This address has had its author keys for today; keep the one you have."))
+        (t (multiple-value-bind (ok? reason) (verify-turnstile token address)
+             (if (not ok?)
+                 (values nil (or reason "Complete the human check first."))
+                 (let* ((answer (ignore-errors (gate-post "author" (h))))
+                        (id (and (hash-table-p answer) (gethash "wallet" answer))))
+                   (cond ((wallet-id? id) (count-address! address :authors) id)
+                         (t (values nil "No author key could be made just now; try again in a moment.")))))))))
+
+(defun author-door (req ent)
+  "POST <prefix>/api/author {session?, turnstile?}: an author key minted for
+this browser (mint-author!).  Named with a session its owner holds that
+has no wallet yet, the session takes it too.  Answers {author}."
+  (let* ((json (request-json req))
+         (session (and json (gethash "session" json) (requested-session req json))))
+    (multiple-value-bind (id reason) (mint-author! (and json (gethash "turnstile" json)) (client-address req))
+      (cond ((null id) (refuse req ent net.aserve:*response-forbidden* "~a" reason))
+            (t (when (and session (owner-request? req session json) (null (session-wallet session)))
+                 (setf (session-wallet session) id)
+                 (save-session! session))
+               (respond-json req ent (h "author" id)))))))
+
 (defun topup-door (req ent)
   "POST <prefix>/api/topup {session, amount_cents, embedded?, flow?}: a
 payment through the gate.  Answers {url, wallet} for Stripe's hosted
@@ -605,7 +649,8 @@ checkout, publishable_key, wallet} for Stripe's one-line card control."
          (amount (and json (gethash "amount_cents" json)))
          (embedded? (and json (eq (gethash "embedded" json) t)))
          (flow (and json (equal (gethash "flow" json) "card") "card")))
-    (cond ((null session) (no-such-session req ent))
+    (cond (*free-lab?* (free-lab-refusal req ent))
+          ((null session) (no-such-session req ent))
           ((not (owner-request? req session json)) (not-yours req ent))
           ((not (integerp amount)) (refuse req ent "Say how much."))
           (t
@@ -669,7 +714,8 @@ spend state with the outcome."
          (session (requested-session req json))
          (wallet (and json (gethash "wallet" json)))
          (checkout (and json (gethash "checkout" json))))
-    (cond ((null session) (no-such-session req ent))
+    (cond (*free-lab?* (free-lab-refusal req ent))
+          ((null session) (no-such-session req ent))
           ((not (owner-request? req session json)) (not-yours req ent))
           ((not (wallet-id? wallet)) (refuse req ent "No wallet named."))
           (t (multiple-value-bind (outcome text) (confirm-topup! session wallet checkout)
@@ -695,7 +741,9 @@ listings, live and archived, its URL answering no one else -- or opens it
 again.  Closing takes a session that has bought credits.  A session opened
 before owner keys gets one, since the address no longer suffices once
 nobody else may look.  Values: true, or nil and the reason."
-  (cond ((and private? (not (paid? session)))
+  (cond ((and private? *free-lab?*)
+         (values nil "Everything made in the free public lab is public; private sessions are a rung up the ladder."))
+        ((and private? (not (paid? session)))
          (values nil (unit-text "A session becomes private once it has bought {units}.")))
         (t (unless (session-owner session) (setf (session-owner session) (new-owner-key)))
            (unless (eq private? (session-private? session))
@@ -1073,6 +1121,7 @@ page itself is the sheet's (publish-lab-sheet!, prompt-lab-sheet).
 With a password set (guards.lisp, THE LOCK) every door of the lab's own
 is behind it -- gated -- and <prefix>/api/unlock is the way in."
   (load-password!)
+  (when *free-lab?* (free-lab-settings!))
   (gwl:with-all-servers (server)
     ;; THE PAGE IS THE SHEET (prompt-lab-sheet, publish-lab-sheet!): it
     ;; answers at the prefix.  The classic page was retired on 2026-10-02;
@@ -1094,6 +1143,7 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
     (net.aserve:publish :path (door-path "unlock") :server server :host host :function #'unlock-door)
     (net.aserve:publish :path (door-path "config") :server server :host host :function (gated #'config-door))
     (net.aserve:publish :path (door-path "session") :server server :host host :function (gated #'session-door))
+    (net.aserve:publish :path (door-path "author") :server server :host host :function (gated #'author-door))
     (net.aserve:publish :path (door-path "state") :server server :host host :function (gated #'state-door))
     (net.aserve:publish :path (door-path "prompt") :server server :host host :function (gated #'prompt-door))
     (net.aserve:publish :path (door-path "model") :server server :host host :function (gated #'model-door))

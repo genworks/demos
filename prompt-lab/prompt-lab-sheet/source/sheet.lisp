@@ -215,7 +215,8 @@ from a gate that names no credits."
       (pot
        (let* ((held (max 0 (floor (or (getf pot :credits) 0))))
               (most (or (getf pot :max) 0))
-              (offers (and (getf pot :topup?) (offers (getf pot :amounts) (getf pot :credits-sold)))))
+              ;; a free public lab sells nothing: the house fills its pot
+              (offers (and (not *free-lab?*) (getf pot :topup?) (offers (getf pot :amounts) (getf pot :credits-sold)))))
          (with-output-to-string (out)
            (format out "<div class=\"pl-figure~:[~; pl-out~]\"><b>~:d</b> ~a left in the community pot</div>"
                    (zerop held) held (units held))
@@ -230,13 +231,16 @@ from a gate that names no credits."
                (format out "<p class=\"pl-line\">~@[this session has drawn ~:d~]~:[~; &middot; ~]~@[you have added ~:d~]</p>"
                        drawn (and drawn added) added)))
            (when (zerop held)
-             (format out "<p class=\"pl-begging\">The pot is empty: nothing builds until someone tops it up.</p>"))
+             (format out "<p class=\"pl-begging\">~a</p>"
+                     (if *free-lab?*
+                         "The pot is empty: the lab rests until the house fills it again."
+                         "The pot is empty: nothing builds until someone tops it up.")))
            (write-string (buttons offers "Add to the pot:") out))))
       (spend
        (let* ((used (or (gethash "credits_used" spend) 0))
               (free (or (gethash "credits_free" spend) 0))
               (balance (gethash "credits_balance" spend))
-              (offers (and (eq (gethash "topup" spend) t)
+              (offers (and (not *free-lab?*) (eq (gethash "topup" spend) t)
                            (offers (gethash "topup_amounts" spend) (gethash "topup_credits" spend)))))
          (with-output-to-string (out)
            (format out "<div class=\"pl-figure\"><b>~:d</b> ~a left</div>"
@@ -577,7 +581,7 @@ not hold."
    (user-mode?-default nil)
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
-   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :wear-skin :upload :adopt
+   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :author :wear-skin :upload :adopt
                            :deploy :undeploy :connect :open-project :push-project :deploy-project))
 
    ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
@@ -789,6 +793,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      (:p :class "pl-line" :style "display:none" :|data-show| "$opened && $closed"
                                          (fmt "Closed source, ~d% monetization fee: deploy it with Monetize, or its source becomes public when the session ends."
                                               (house-fee-percent t)))))
+                              ;; a free public lab says what it is before the first build
+                              (when *free-lab?*
+                                (htm (:p :class "pl-line pl-public"
+                                         "This is the free public lab: everything made here -- your prompts, the model and its code -- is public the moment it is made, in the archive for anyone to read and reuse.  Nothing is sold here; a private lab of your own, where you can sell what you make, is a rung up the ladder.")))
                               (:textarea :id "pl-prompt" :rows "4" :|data-bind:prompt| ""
                                          :|data-attr:placeholder| "$kind == 'app' ? 'Describe the web app, e.g. a page that sizes a shelf bracket from its load and shows it' : 'Describe what to build, e.g. a picnic table with two benches'"
                                          :placeholder "Describe what to build, e.g. a picnic table with two benches")
@@ -1208,7 +1216,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                        (when pot
                                          (htm (:span (fmt "pot ~:d ~a" (max 0 (floor (or (getf pot :credits) 0))) (units)))))
                                        ;; closing the session to watchers, once it has bought credits
-                                       (when (and (the owner?) (or (paid? session) (session-private? session)))
+                                       (when (and (the owner?) (not *free-lab?*) (or (paid? session) (session-private? session)))
                                          (htm (:label :class "pl-private"
                                                       :title "A private session is out of the listings and opens only in the browser that owns it"
                                                       (:input :type "checkbox"
@@ -1303,6 +1311,22 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                       (:div :class "pl-card pl-credits"
                             (:h2 (esc (units-title)))
                             (str (credits-html self (pot) spend))
+                            ;; the AUTHOR KEY (*author-keys?*): one public record across
+                            ;; sessions, what the trust ladder's review reads
+                            (when *author-keys?*
+                              (htm (:div :class "pl-author"
+                                         (:p :class "pl-line" :style "display:none" :|data-show| "$wallet"
+                                             "Your work here is kept under your author key, so it adds up to one public record.  "
+                                             (:a :|data-attr:href| (format nil "'~a?wallet=' + $wallet" *url-prefix*)
+                                                 "Carry it to another browser")
+                                             " (keep that link to yourself: it is your key).")
+                                         (:p :class "pl-line" :style "display:none" :|data-show| "!$wallet"
+                                             "An author key gathers your sessions into one public record: the way up to a private lab of your own.")
+                                         (:div :class "pl-row" :style "display:none" :|data-show| "!$wallet"
+                                               (:button :type "button" :class "pl-download"
+                                                        :|data-attr:disabled| (if *turnstile-site-key* "!$turnstile" "false")
+                                                        :|data-on:click| (the (datastar-action :author :options "{filterSignals: {include: /^(turnstile|owner)$/}}"))
+                                                        "Keep my work under an author key")))))
                             ;; the payment in the page (start-payment!): Stripe's
                             ;; card control and form live in frames the script
                             ;; makes, which a patch must not strip
@@ -1544,6 +1568,29 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                     "error" "")
                                                  s)))))
                   (t (the (tell-error! reason))))))))
+
+   (author
+    (signals)
+    ;; an AUTHOR KEY minted for this browser (page.lisp mint-author!); the
+    ;; session the visitor owns, with no wallet yet, takes it too
+    (let ((session (the session))
+          (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
+      (multiple-value-bind (id reason) (mint-author! token (client-address *datastar-request*))
+        (cond (id
+               (when (and session (the owner?) (null (session-wallet session)))
+                 (setf (session-wallet session) id)
+                 (save-session! session))
+               (sheet-send! self
+                            (datastar-script-event
+                             (format nil "try{localStorage.setItem('prompt-lab-wallet',~a)}catch(e){}" (js-string-literal id)))
+                            (datastar-signals-event
+                             (with-output-to-string (s)
+                               (yason:encode (h "wallet" id
+                                                "notice" "Your author key is kept in this browser; your sessions add up under it from now on."
+                                                "error" "")
+                                             s)))))
+              (t (the (tell-error! reason)))))
+      (the spent-token!)))
 
    (own-session!
     (address wallet &optional closed?)

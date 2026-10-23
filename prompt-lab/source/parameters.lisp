@@ -367,6 +367,28 @@ from check_model's numbers -- the visitor has the live viewer anyway.")
 page's Monetize button, the deploy door).  Nil shuts the doors; what is
 already deployed stays on disk and is not served.")
 
+(defparameter *free-lab?* nil
+  "Boolean. A FREE PUBLIC LAB: nothing for sale and nothing private, the
+first rungs of the trust ladder.  Its builds draw on the house's pot at
+the gate; everything made in it -- the prompts, the model and its code --
+is public in the archive the moment it is made, and the page says so.
+publish-prompt-lab! then shuts every money path: no Monetize or deploy
+(*deployments?*), no tolls or payouts (*toll-provider*), no closed-source
+sessions, no hosting, no priced files, no pot slider; and the pot's
+top-up doors, the privacy switch and the agent's charging rules go too.
+A private, monetizable lab is reached up the ladder, not here.")
+
+(defparameter *author-keys?* nil
+  "Boolean. Whether a visitor may ask for an AUTHOR KEY: a wallet with no
+credits minted at the gate (its <path>/author door), kept in the browser
+and sent with every build, so the sessions made under it are one
+author's public record -- what the trust ladder's review reads.  Minting
+wants the human check where Turnstile is on, and is capped per address
+(*max-authors-per-address*).")
+
+(defparameter *max-authors-per-address* 2
+  "Integer. Author keys an address may have minted in a UTC day.")
+
 (defparameter *deployed-root*
   (namestring (merge-pathnames "prompt-lab-deployed/"
                                (uiop:pathname-parent-directory-pathname (pathname *workspace-root*))))
