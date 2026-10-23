@@ -338,7 +338,7 @@ SESSION's balance -- or nil."
 .code-editor .tok-string,.code-editor .tok-string2{color:#2a6e2f;color:var(--pl-code-string,color-mix(in srgb,#2e9d38 50%,var(--pl-ink)))}
 .code-editor .tok-punctuation{color:var(--pl-code-paren,var(--pl-ink-dimmer))}.code-editor .tok-invalid{color:var(--pl-status-fail)}
 .pl-buy,.pl-download,.pl-source-head button{font:inherit;font-size:.85em;padding:.2rem .6rem;border:var(--pl-rule,1px) solid var(--pl-line,#ccc);border-radius:var(--pl-radius,4px);background:var(--pl-panel,#fff);color:var(--pl-link,#1550a8);cursor:pointer}
-.pl-buy:disabled{opacity:.4;cursor:default}
+.pl-buy:disabled,.pl-download:disabled{opacity:.4;cursor:default}
 .pl-downloads .pl-download{margin:0 .3rem .3rem 0}
 .pl-figure{font-size:.9em;color:var(--pl-ink-dim,#555)}.pl-figure b{font-size:1.8rem;color:var(--pl-ink,#111);margin-right:.3rem;font-variant-numeric:tabular-nums}
 .pl-figure.pl-out b{color:var(--pl-status-fail,#b00)}
@@ -700,7 +700,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', dpot: 0, dbalance: false, kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; and of its last staged hosting (hosting.lisp)
@@ -1085,7 +1085,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                          (if (eq *toll-provider* :stripe)
                                              (esc "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  Its users pay by card on Stripe's page, in dollars at a cent a rivet; the house keeps the monetization fee and the rest is transferred to your own Stripe account with each payment.  A model's priced files are sold on its page the same way.")
                                              (esc "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  No money moves yet: a web app's tolls are taken as test payments, booked and marked as tests, and a model's priced downloads open only to you.")))
-                                     (:label (if (eq *toll-provider* :stripe) "Your email, for your Stripe account and your share" "Where to reach you about your share (email)")
+                                     ;; esc: a form's value is written only when said so (cl-who), and
+                                     ;; a bare (if ...) here left the field with no label at all
+                                     (:label (esc (if (eq *toll-provider* :stripe) "Your email, for your Stripe account and your share" "Where to reach you about your share (email)"))
                                              (:input :type "email" :maxlength "200" :|data-bind:dpayee| ""
                                                      ;; the address this browser last set payouts up with
                                                      :|data-init| "try{$dpayee=localStorage.getItem('prompt-lab-payee')||$dpayee}catch(e){}"))
@@ -1098,7 +1100,12 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                   (:button :type "button" :class "pl-download"
                                                            :|data-attr:disabled| "!$dpayee.includes('@')"
                                                            :|data-on:click| (the (datastar-action :connect :options "{filterSignals: {include: /^(dpayee|owner|turnstile)$/}}"))
-                                                           "Set up payouts with Stripe"))))
+                                                           "Set up payouts with Stripe"))
+                                            ;; the button's answer beside it: why it waits, or that it is done
+                                            ;; (the notice above the card is out of sight down here)
+                                            (:p :class "pl-line" :|data-show| "!$dpayee.includes('@')"
+                                                "Type your email above, then set up payouts.")
+                                            (:p :class "pl-line pl-notice" :|data-show| "$payouts" :|data-text| "$payouts")))
                                      (:p :class "pl-line"
                                          (if (eq *toll-provider* :stripe)
                                              (esc "Each payment is split at Stripe: your share is transferred to your account at once, the card cost taken off the top and shared, and Stripe pays it out on its schedule.  ")
@@ -1659,7 +1666,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                          (cond (ready?
                                 (sheet-send! self (datastar-signals-event
                                                    (with-output-to-string (s)
-                                                     (yason:encode (h "notice" (format nil "Payouts are set up for ~a: deploy away." email)) s)))))
+                                                     (yason:encode (h "notice" (format nil "Payouts are set up for ~a: deploy away." email)
+                                                                      "payouts" (format nil "Payouts are set up for ~a.  Deploy when ready." email))
+                                                                   s)))))
                                ((stringp url)
                                 (sheet-send! self (datastar-script-event
                                                    (format nil "try{localStorage.setItem('prompt-lab-payee',~a)}catch(e){};location.href=~a"
