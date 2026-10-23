@@ -389,6 +389,10 @@ wants the human check where Turnstile is on, and is capped per address
 (defparameter *max-authors-per-address* 2
   "Integer. Author keys an address may have minted in a UTC day.")
 
+(defparameter *max-private-opens-per-address* 20
+  "Integer. Private-session requests an address may make at the private
+front (private.lisp) in a UTC day.")
+
 (defparameter *deployed-root*
   (namestring (merge-pathnames "prompt-lab-deployed/"
                                (uiop:pathname-parent-directory-pathname (pathname *workspace-root*))))

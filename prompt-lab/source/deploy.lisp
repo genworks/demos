@@ -283,7 +283,9 @@ the same session under the same name replaces the copy and the terms."
          (values nil "Give it a name for its address: 3 to 40 lower-case letters, digits and hyphens, a letter first."))
         ;; a name that is a host of its own under a per-deployment origin
         ;; must not be one the house uses (the preview's, www)
-        ((member name *reserved-deployment-names* :test #'string=)
+        ((or (member name *reserved-deployment-names* :test #'string=)
+             ;; a private session's host is pl-<id> under the same domain (private.lisp)
+             (and (>= (length name) 3) (string= "pl-" name :end2 3)))
          (values nil (format nil "The name ~a is reserved; choose another." name)))
         ((and existing (not (equal (gethash "owner" existing) (session-owner session))))
          (values nil (format nil "The name ~a is taken; choose another." name)))

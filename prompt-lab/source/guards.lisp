@@ -68,7 +68,8 @@ through the addresses of one allocation."
     (:sessions *max-sessions-per-address*)
     (:prompts *max-prompts-per-address*)
     (:automated *max-automated-prompts-per-address*)
-    (:authors *max-authors-per-address*)))
+    (:authors *max-authors-per-address*)
+    (:private-opens *max-private-opens-per-address*)))
 
 (defun address-record (key)
   "Today's record for KEY (fresh when there is none or it is yesterday's)."
