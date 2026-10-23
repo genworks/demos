@@ -248,18 +248,28 @@ must be present and the verifier must answer {\"success\": true}."
 (defparameter *unlock-cookie* "prompt-lab-key")
 
 (defun unlock-token-file ()
-  "Where the token lives: beside *password-file*, so every room reading
-that password (the free lab and the solids lab on one ship) admits the
-same cookie, and the cookie outlives a restart."
-  (and *password-file*
-       (namestring (make-pathname :name "prompt-lab-unlock-token" :type nil
-                                  :defaults (pathname *password-file*)))))
+  "Where the token lives: beside *password-file* when one is named, so
+every room reading that password (the free lab and the solids lab on
+one ship) admits the same cookie and the cookie outlives a restart;
+else on the state shelf (*unlock-token-file*), where a lab opened by
+naming no password file still finds -- and removes -- the token a
+locked one minted."
+  (if *password-file*
+      (namestring (make-pathname :name "prompt-lab-unlock-token" :type nil
+                                 :defaults (pathname *password-file*)))
+      *unlock-token-file*))
 
 (defun load-password! ()
   "Read *password-file*'s first line into *password* when the file is
 there and no password is set yet, and load or mint the token (kept in
 unlock-token-file; delete it with the password to turn every cookie
-away).  Returns whether the lab is locked."
+away).  An OPEN lab (no password) deletes a token file left behind, so
+a door elsewhere that reads it -- the proxy's :unlock on the
+workshop's console -- lifts its lock with the lab's: left standing, it
+demanded a cookie this lab no longer set and bounced every visitor to
+an unlock door that sent them straight back (2026-10-23).  A host's
+labs share the file, so an open lab opens every door reading it.
+Returns whether the lab is locked."
   (flet ((first-line (file)
            (with-open-file (in file :if-does-not-exist nil)
              (let ((line (and in (read-line in nil))))
@@ -268,17 +278,23 @@ away).  Returns whether the lab is locked."
                       (and (plusp (length trimmed)) trimmed)))))))
     (when (and (null *password*) *password-file*)
       (setf *password* (first-line *password-file*)))
-    (when (and *password* (null *unlock-token*))
-      (let ((file (unlock-token-file)))
-        (setf *unlock-token*
-              (or (and file (first-line file))
-                  (let ((token (new-owner-key)))
-                    (when file
-                      (ignore-errors
-                       (with-open-file (out file :direction :output :if-exists :supersede
-                                                 :if-does-not-exist :create)
-                         (write-line token out))))
-                    token))))))
+    (cond (*password*
+           (when (null *unlock-token*)
+             (let ((file (unlock-token-file)))
+               (setf *unlock-token*
+                     (or (and file (first-line file))
+                         (let ((token (new-owner-key)))
+                           (when file
+                             (ignore-errors
+                              (with-open-file (out file :direction :output :if-exists :supersede
+                                                        :if-does-not-exist :create)
+                                (write-line token out))))
+                           token))))))
+          (t
+           (let ((file (unlock-token-file)))
+             (when (and file (probe-file file))
+               (ignore-errors (delete-file file))))
+           (setf *unlock-token* nil))))
   (locked?))
 
 (defun locked? ()

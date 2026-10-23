@@ -90,6 +90,16 @@ the workspace root: /state/prompt-lab-password on the public workshop,
 /projects/.state/prompt-lab-password on a dev ship.  Read by
 load-password! when *password* is nil; absent, the lab is open.")
 
+(defparameter *unlock-token-file* (namestring (merge-pathnames "prompt-lab-unlock-token"
+                                                               (uiop:pathname-parent-directory-pathname
+                                                                (pathname *workspace-root*))))
+  "String. Where the cookie token lives when no *password-file* is named
+(else beside it; guards.lisp unlock-token-file): the state shelf, where
+a locked lab's default puts it, so a lab opened by naming no password
+file (the public workshop's init, 2026-10-23) still finds and removes
+the token a locked one left, and a door elsewhere reading it -- the
+proxy's :unlock on the console -- follows the lab's lock.")
+
 (defparameter *console-base* nil
   "String or nil. URL prefix of the host's browser terminal (ttyd behind the
 reverse proxy): \"/console\" on the public workshop, \"/ttyd\" on a dev
