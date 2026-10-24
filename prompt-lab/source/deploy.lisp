@@ -1361,13 +1361,16 @@ time or FORCE?.  Answers the number registered, or nil."
 (made when CREATE? and there is none).  Values: the account's id or nil,
 an onboarding URL when the gate gave one (RETURN-URL and REFRESH-URL
 asked for it), whether it is ready to be paid (details submitted and
-charges enabled), and the reason when it is not."
+charges enabled), and the reason when it is not.  A private session asks
+through its front (*deploy-front*), which relays the gate's answer: the
+gate's connect door answers its registrar alone."
   (multiple-value-bind (answer status)
-      (gate-post "connect" (h "email" email
-                              "create" (if create? t 'yason:false)
-                              "return_url" (or return-url "")
-                              "refresh_url" (or refresh-url "")
-                              "lab" (monocle:house-lab-name (lab-house))))
+      (let ((object (h "email" email
+                       "create" (if create? t 'yason:false)
+                       "return_url" (or return-url "")
+                       "refresh_url" (or refresh-url "")
+                       "lab" (monocle:house-lab-name (lab-house)))))
+        (if *deploy-front* (front-post "connect" object) (gate-post "connect" object)))
     (let* ((account (and answer (gethash "account" answer)))
            (url (and answer (let ((url (gethash "url" answer)))
                               (and (stringp url) (plusp (length url)) url))))
@@ -1572,12 +1575,15 @@ Nil: no feed here.")
 
 (defun deployment-stamp (name)
   "A short text that changes whenever deployment NAME is deployed again:
-the record's deployed time and the model file's write date and length."
+the record's deployed time and the model file's write date and length --
+and once more when a record from before keys is given its key at the gate
+(-k), so the hangar takes the record up again and its machine holds it."
   (let* ((record (deployment-record name))
          (file (merge-pathnames "model.lisp" (deployment-directory name)))
          (date (or (ignore-errors (file-write-date file)) 0))
          (length (or (ignore-errors (with-open-file (in file :element-type '(unsigned-byte 8)) (file-length in))) 0)))
-    (format nil "~a-~a-~a" (or (and record (gethash "deployed" record)) 0) date length)))
+    (format nil "~a-~a-~a~:[~;-k~]" (or (and record (gethash "deployed" record)) 0) date length
+            (and record (monocle:record-gate-key record)))))
 
 (defun hangar-deployments-door (req ent)
   "GET <prefix>/api/hangar/deployments, the hangar's token: this engine's
@@ -1636,6 +1642,14 @@ the page can say what is left; cleared when it serves again.")
 
 (defun deployment-lab-name () (monocle:house-lab-name (lab-house)))
 
+(defun hosting-ask (door name &rest plist)
+  "Ask the gate's hosting DOOR about deployment NAME with PLIST, naming the
+lab and the deployment and carrying the deployment's key, which a gate
+that registers keys wants from whatever speaks for it.  Values as
+gate-post's."
+  (gate-post door (apply #'h "lab" (deployment-lab-name) "deployment" name
+                         (append plist (monocle:deployment-key-plist (lab-house) name)))))
+
 (defun meter-deployment! (name kind symbols)
   "Report to the gate that deployment NAME did KIND (:compile or :run)
 over SYMBOLS symbols, against its author's hosting.  Values: true when
@@ -1646,9 +1660,9 @@ so the caller pauses the deployment."
       t
       (handler-case
           (multiple-value-bind (json status)
-              (gate-post "host-meter" (h "lab" (deployment-lab-name) "deployment" name
-                                         "kind" (string-downcase (symbol-name kind))
-                                         "symbols" symbols "engine" (engine-name)))
+              (hosting-ask "host-meter" name
+                           "kind" (string-downcase (symbol-name kind))
+                           "symbols" symbols "engine" (engine-name))
             (cond ((eql status 429)
                    (setf (gethash name *stopped*) (or json (h)))
                    (values nil json))
@@ -1666,7 +1680,7 @@ run of it is metered at; 0 when it is not running."
 (defun hosting-balance (name)
   "The deployment's hosting as the gate says it, a hash table, or nil."
   (ignore-errors
-   (multiple-value-bind (json status) (gate-post "host-balance" (h "lab" (deployment-lab-name) "deployment" name))
+   (multiple-value-bind (json status) (hosting-ask "host-balance" name)
      (and (eql status 200) (hash-table-p json) json))))
 
 (defun hosting-offers (balance)
@@ -1721,11 +1735,11 @@ for a deployment at the gate and go to Stripe's page."
           ((not (integerp amount)) (refuse req ent "Say how much."))
           (t
            (multiple-value-bind (answer status)
-               (gate-post "host-topup" (h "lab" (deployment-lab-name) "deployment" name
-                                          "title" (or (gethash "title" record) name)
-                                          "amount_cents" amount
-                                          "success_url" (format nil "~a~a?deployed=~a" origin (deployment-door-url name "host-return") name)
-                                          "cancel_url" (format nil "~a~a" origin (deployment-path name))))
+               (hosting-ask "host-topup" name
+                            "title" (or (gethash "title" record) name)
+                            "amount_cents" amount
+                            "success_url" (format nil "~a~a?deployed=~a" origin (deployment-door-url name "host-return") name)
+                            "cancel_url" (format nil "~a~a" origin (deployment-path name)))
              (let ((url (and answer (gethash "url" answer))))
                (if (and (eql status 200) (stringp url))
                    (redirect-to req ent url)
@@ -1747,7 +1761,7 @@ gate credits the deployment's hosting once and the deployment runs again."
           ((not (payment-id? checkout)) (refuse req ent "No checkout named."))
           (t
            (multiple-value-bind (answer status)
-               (gate-post "host-confirm" (h "lab" (deployment-lab-name) "deployment" name "checkout" checkout))
+               (hosting-ask "host-confirm" name "checkout" checkout)
              (let ((outcome (and answer (gethash "outcome" answer))))
                (when (member outcome '("credited" "already") :test #'equal)
                  (remhash name *stopped*))
@@ -1815,7 +1829,7 @@ door, or a runtime without books."
             (when (and (stringp name) (stringp checkout) (realp opened)
                        (> (- (get-universal-time) opened) 600))
               (multiple-value-bind (confirm status)
-                  (gate-post "host-confirm" (h "lab" (deployment-lab-name) "deployment" name "checkout" checkout))
+                  (hosting-ask "host-confirm" name "checkout" checkout)
                 (when (and (eql status 200) (hash-table-p confirm) (equal (gethash "outcome" confirm) "credited"))
                   (remhash name *stopped*)
                   (book-hosting-line! name checkout confirm))))))

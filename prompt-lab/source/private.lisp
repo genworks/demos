@@ -221,8 +221,11 @@ and token (the hangar has said it is up), or nil."
   (remove-if-not #'(lambda (record) (equal (gethash "author" record) wallet)) (deployment-records)))
 
 (defun private-deployment-row (record)
-  "RECORD as the author's own session reads it: the whole record and its address."
+  "RECORD as the author's own session reads it: the whole record and its
+address, less the deployment's key at the gate (the machine serving it
+holds that, never the session that made it)."
   (let ((row (alexandria:copy-hash-table record)))
+    (remhash "gate_key" row)
     (setf (gethash "url" row) (private-deployment-url (gethash "name" record)))
     row))
 
@@ -339,6 +342,38 @@ taken down; the books keep what it earned, and the hangar retires its disk."
                                                                   (private-author-deployments (gethash "wallet" request)))
                                                           'vector))))))))
 
+(defun private-vm-connect-door (req ent)
+  "POST <prefix>/api/vm/connect {id, token, email, create?, return_url?,
+refresh_url?}: the author of a live monetizing session sets up payouts.
+The gate's connect door answers its registrar alone -- a session's machine
+runs its author's code, and could otherwise look up any address's account
+or ask its onboarding link -- so the front asks it and relays the answer
+and its status."
+  (let* ((json (request-json req))
+         (request (private-session-request json))
+         (wallet (and request (gethash "wallet" request))))
+    (cond
+      ((not (private-deploys?)) (refuse req ent net.aserve:*response-not-found* "No private deployments here."))
+      ((null request) (refuse req ent net.aserve:*response-forbidden* "No such session."))
+      ((not (eq (gethash "monetize" (or (ignore-errors (gate-post "author" (h "wallet" wallet))) (h))) t))
+       (refuse req ent net.aserve:*response-forbidden*
+               "Payouts are set up from a private lab at the monetizing rung."))
+      (t
+       (flet ((field (name) (let ((value (gethash name json))) (if (stringp value) value ""))))
+         (multiple-value-bind (answer status)
+             (gate-post "connect" (h "email" (field "email")
+                                     "create" (if (eq (gethash "create" json) t) t 'yason:false)
+                                     "return_url" (field "return_url")
+                                     "refresh_url" (field "refresh_url")
+                                     "lab" *private-lab-name*))
+           (respond-json req ent (or answer (h "error" (h "message" "The gate did not answer about payouts.")))
+                         (case status
+                           (200 net.aserve:*response-ok*)
+                           (400 net.aserve:*response-bad-request*)
+                           (403 net.aserve:*response-forbidden*)
+                           (404 net.aserve:*response-not-found*)
+                           (t net.aserve:*response-service-unavailable*)))))))))
+
 (defvar *private-sweeper* nil "The thread that keeps the private root's books.")
 
 (defun private-sweep! ()
@@ -434,6 +469,7 @@ given, for that host alone).  Needs *private-spool* and the gate (*messages-url*
     ;; through the ship's proxy at whatever address it has for it
     (net.aserve:publish :path (format nil "~a/api/vm/deploy" *private-prefix*) :server server :function #'private-vm-deploy-door)
     (net.aserve:publish :path (format nil "~a/api/vm/undeploy" *private-prefix*) :server server :function #'private-vm-undeploy-door)
-    (net.aserve:publish :path (format nil "~a/api/vm/deployments" *private-prefix*) :server server :function #'private-vm-deployments-door))
+    (net.aserve:publish :path (format nil "~a/api/vm/deployments" *private-prefix*) :server server :function #'private-vm-deployments-door)
+    (net.aserve:publish :path (format nil "~a/api/vm/connect" *private-prefix*) :server server :function #'private-vm-connect-door))
   (when *private-deployed-root* (start-private-sweeper!))
   *private-prefix*)
