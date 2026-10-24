@@ -142,6 +142,7 @@ The file's header already sets the session package.")) t)))
           (values (list (text-result "Refused: the source defines ~{~a~^, ~}, which ~:[is a name~;are names~] Lisp, Gendl or GWL already ~:*~:[has~;have~].  Give your own objects and functions names of their own."
                                      foreign (rest foreign)))
                   t)))))
+  (watch-source! session source)
   (let ((file (session-model-file session))
         (package-name (session-package-name session)))
     (with-open-file (out file :direction :output :if-exists :supersede

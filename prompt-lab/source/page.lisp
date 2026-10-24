@@ -461,6 +461,7 @@ has credit or has put more into the pot than it has drawn."
               *response-too-many-requests*)
       (let ((session (make-session :address address :wallet (and (wallet-id? wallet) wallet))))
         (count-address! address :sessions)
+        (watch-event! :session-open session :address address :detail (session-id session))
         (log-event session :note "Session ~a opened.  Describe what to build." (session-id session))
         (when (and closed? *closed-source?* *deployments?*)
           (close-session-source! session)
@@ -517,8 +518,9 @@ value, where it belongs -- a plist of :engine, :reason and :url."
                     (when route
                       (return-from begin-prompt!
                         (values nil (getf route :reason) *response-conflict* route)))))
-                 ((not (start-prompt! session (string-trim '(#\space #\tab #\newline #\return) prompt)
-                                      :kind (parse-kind kind)))
+                 ((not (progn (watch-prompt! session prompt address)
+                              (start-prompt! session (string-trim '(#\space #\tab #\newline #\return) prompt)
+                                             :kind (parse-kind kind))))
                   (values nil "Still working on the previous request." net.aserve:*response-bad-request*))
                  (t (count-address! address :prompts)
                     (when (eq lane :automated)
@@ -1213,4 +1215,5 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
   (register-session-recovery!)
   (start-reaper!)
   (start-thumbnailer!)
+  (start-watch!)
   *url-prefix*)
