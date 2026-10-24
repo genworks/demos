@@ -396,6 +396,7 @@ the same session under the same name replaces the copy and the terms."
            (ensure-directories-exist directory)
            (write-text-file (model-body session) (merge-pathnames "model.lisp" directory))
            (monocle:save-record! (lab-house) record)
+           (register-deployment! name)
            (drop-deployed! name)
            (let ((saved (deployment-record name)))
              (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee~@[ and ~a% goes to the community pot~]~:[~;; paid by card through Stripe to your account~]."
@@ -421,6 +422,7 @@ nil and the reason.  The books keep what it earned."
                                    "The private front did not answer; try again in a moment.")))))
             (t (drop-deployed! name)
                (monocle:delete-deployment! (lab-house) name)
+               (deregister-deployment! name)
                t)))))
 
 
@@ -1310,6 +1312,49 @@ lack (a visitor who paid and never came back), and tell the gate.
 Nothing without the :stripe provider."
   (when (eq *toll-provider* :stripe)
     (monocle:settle-unbooked! (lab-house))))
+
+;;
+;; The terms at the gate.  A deployment served in a machine of its own
+;; runs its author's code there, and that machine opens its tolls; so the
+;; gate charges at the terms THIS lab registered (monocle
+;; register-deployment!), never at what the machine sends.  The lab
+;; registers when it deploys and takes down, and its whole set again at
+;; its start and every *register-sweep-seconds* on the reaper's thread;
+;; the private front does the same for its root.  Only a lab holding the
+;; registrar's token registers (*gate-registrar-token-file*), and only the
+;; runtime that keeps the books.
+;;
+
+(defun registers? () (and *books?* (registrar-token) t))
+
+(defun register-deployment! (name)
+  "Register deployment NAME's terms at the gate; nothing where this lab
+registers nothing.  A refusal is logged and the deploy stands: the next
+sweep tries again."
+  (when (registers?)
+    (multiple-value-bind (ok why) (ignore-errors (monocle:register-deployment! (lab-house) name))
+      (unless ok (format *error-output* "~&prompt-lab: terms of ~a not registered: ~a~%" name why))
+      ok)))
+
+(defun deregister-deployment! (name)
+  (when (registers?)
+    (ignore-errors (monocle:deregister-deployment! (lab-house) name))))
+
+(defvar *registered-at* (make-hash-table :test #'equal)
+  "Lab name -> when its whole set of terms was last registered.")
+
+(defun register-deployments! (&key force?)
+  "Register the terms of every deployment of this lab (the house as it
+stands: the private front binds its own) at the gate, replacing what the
+gate held for it, when *register-sweep-seconds* have passed since the last
+time or FORCE?.  Answers the number registered, or nil."
+  (when (registers?)
+    (let ((lab (deployment-lab-name)) (now (get-universal-time)))
+      (when (or force? (>= (- now (gethash lab *registered-at* 0)) *register-sweep-seconds*))
+        (multiple-value-bind (count why) (ignore-errors (monocle:register-deployments! (lab-house)))
+          (cond (count (setf (gethash lab *registered-at*) now))
+                (t (format *error-output* "~&prompt-lab: terms of ~a not registered: ~a~%" lab why)))
+          count)))))
 
 (defun author-account (email &key create? return-url refresh-url)
   "The author's Stripe account for EMAIL, from the gate's connect door

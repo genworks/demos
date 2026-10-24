@@ -303,6 +303,8 @@ private session, into the private deployed root.  Answers {deployment} or
                         (ensure-directories-exist (deployment-directory name))
                         (write-text-file model (merge-pathnames "model.lisp" (deployment-directory name)))
                         (monocle:save-record! (lab-house) record)
+                        ;; the terms just written, at the gate: the VM that will serve it cannot steer them
+                        (register-deployment! name)
                         (respond-json req ent (h "deployment" (private-deployment-row (deployment-record name)))))))))))))))
 
 (defun private-vm-undeploy-door (req ent)
@@ -322,6 +324,7 @@ taken down; the books keep what it earned, and the hangar retires its disk."
              (if (not (and record (equal (gethash "author" record) wallet)))
                  (refuse req ent net.aserve:*response-not-found* "There is no such deployment of yours.")
                  (progn (monocle:delete-deployment! (lab-house) name)
+                        (deregister-deployment! name)
                         (respond-json req ent (h "ok" t)))))))))))
 
 (defun private-vm-deployments-door (req ent)
@@ -344,7 +347,9 @@ and hosting bought -- that the books lack: the VMs that serve them book
 nothing (*books?* nil there)."
   (with-private-house
     (ignore-errors (sweep-toll-payments!))
-    (ignore-errors (sweep-hosting!))))
+    (ignore-errors (sweep-hosting!))
+    ;; and the root's terms at the gate: at the front's start, then every *register-sweep-seconds*
+    (ignore-errors (register-deployments!))))
 
 (defun start-private-sweeper! ()
   (unless (and *private-sweeper* (bt:thread-alive-p *private-sweeper*))

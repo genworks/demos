@@ -281,10 +281,22 @@ the page's editor shows, and what write-model takes back."
 (defun gate-door-url (name)
   (format nil "~a/~a" (string-right-trim "/" *messages-url*) name))
 
+(defun registrar-token ()
+  "The first line of *gate-registrar-token-file*, or nil."
+  (and (stringp *gate-registrar-token-file*)
+       (ignore-errors
+        (with-open-file (in *gate-registrar-token-file* :if-does-not-exist nil)
+          (and in (let ((line (read-line in nil nil)))
+                    (and (stringp line) (plusp (length (string-trim " " line))) (string-trim " " line))))))))
+
 (defun gate-post (name object &key (seconds *gate-seconds*))
-  "POST OBJECT (a hash table) as JSON to the gate's side door NAME.
-Values: the parsed answer (a hash table, or nil) and the status."
-  (multiple-value-bind (status text) (post-json (gate-door-url name) (encode object) :seconds seconds)
+  "POST OBJECT (a hash table) as JSON to the gate's side door NAME, with
+the registrar's token when this lab holds one.  Values: the parsed answer
+(a hash table, or nil) and the status."
+  (multiple-value-bind (status text)
+      (post-json (gate-door-url name) (encode object) :seconds seconds
+                 :headers (let ((token (registrar-token)))
+                            (and token (list (cons "X-LLM-Gate-Registrar" token)))))
     (let ((json (ignore-errors (yason:parse text))))
       (values (and (hash-table-p json) json) status))))
 

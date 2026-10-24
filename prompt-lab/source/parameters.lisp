@@ -484,6 +484,21 @@ word, books nothing and marks nothing; the lab's own sweep, on the
 reaper's thread, books what the gate settled, as it does for a payer who
 never came back (deploy.lisp sweep-toll-payments!, sweep-hosting!).")
 
+(defvar *gate-registrar-token-file* nil
+  "String or nil. The file whose first line proves this lab to the gate as
+the registrar of its deployments' terms (sent as X-LLM-Gate-Registrar on
+every gate call): the house's percent and the author's account the gate
+then charges at, whatever the runtime serving a deployment sends.  Name
+it only where strangers' code never runs in the same image -- never in a
+hosted runtime, never in a free public lab.  Nil: this lab registers
+nothing (deploy.lisp register-deployments!).")
+
+(defparameter *register-sweep-seconds* 600
+  "Integer. How often the lab, and the private front, register their whole
+set of deployments' terms at the gate again (the reaper's thread and the
+front's sweeper), so a gate that was away or was replaced is brought up
+to date.")
+
 (defparameter *pot-percent-least* 0
   "Number or nil. The least an author adds of every payment to the lab's
 community pot, in percentage points on top of the monetization
