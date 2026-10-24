@@ -48,12 +48,78 @@
 (defun deployment-directory (name) (monocle:deployment-directory (lab-house) name))
 
 (defun deployment-record (name)
-  "The record of deployment NAME on this engine, a hash table, or nil."
-  (monocle:deployment-record (lab-house) name))
+  "The record of deployment NAME on this engine, a hash table, or nil.  In
+a session that deploys through the private front (*deploy-front*), the
+front's record of this author's deployment NAME."
+  (if *deploy-front*
+      (find name (front-deployments) :key #'(lambda (record) (gethash "name" record)) :test #'equal)
+      (monocle:deployment-record (lab-house) name)))
 
 (defun deployment-records ()
-  "Every deployment of this engine, the newest first."
-  (monocle:deployment-records (lab-house)))
+  "Every deployment of this engine, the newest first; through the private
+front, this author's."
+  (if *deploy-front*
+      (front-deployments)
+      (monocle:deployment-records (lab-house))))
+
+;;
+;; A private session at the monetizing rung deploys through the private
+;; front (private.lisp, *deploy-front*): its own disk keeps no deployment.
+;; The front checks the author's standing at the gate, keeps the deployment
+;; in the private deployed root, which the hangar flies, and keeps that
+;; root's books.  The session's id and token are its credentials there.
+;;
+
+(defun front-post (door object)
+  "POST OBJECT (a hash table) as JSON to the private front's session door
+DOOR, with this session's id and token.  Values: the parsed answer (a hash
+table, or nil) and the status."
+  (setf (gethash "id" object) (getf *deploy-front* :id)
+        (gethash "token" object) (getf *deploy-front* :token))
+  (multiple-value-bind (status text)
+      (post-json (format nil "~a/~a" (string-right-trim "/" (getf *deploy-front* :url)) door)
+                 (encode object) :seconds *gate-seconds*)
+    (let ((json (ignore-errors (yason:parse text))))
+      (values (and (hash-table-p json) json) status))))
+
+(defvar *front-deployments* nil
+  "(universal-time . records): the private front's last word on this
+author's deployments.")
+
+(defun front-deployments (&key fresh?)
+  "The deployments the private front keeps for this session's author, the
+newest first (hash tables, each with its \"url\").  Asked again when the
+last answer is five seconds old, or FRESH?; the last answer stands while
+the front does not answer."
+  (let ((kept *front-deployments*))
+    (if (and kept (not fresh?) (< (- (get-universal-time) (car kept)) 5))
+        (cdr kept)
+        (multiple-value-bind (answer status) (ignore-errors (front-post "deployments" (h)))
+          (if (and (eql status 200) answer)
+              (let ((records (coerce (or (gethash "deployments" answer) #()) 'list)))
+                (setq *front-deployments* (cons (get-universal-time) records))
+                records)
+              (cdr kept))))))
+
+(defun deploy-through-front! (session &key name title blurb payee closed? pot-percent balance?)
+  "Hand what SESSION built to the private front as deployment NAME.  The
+front writes the terms itself; this sends the author's choices and the
+model file.  Values: the record the front kept, or nil and the reason."
+  (multiple-value-bind (answer status)
+      (ignore-errors
+       (front-post "deploy" (h "name" name "title" (or title "") "blurb" (or blurb "") "payee" payee
+                               "closed" (if closed? t 'yason:false)
+                               "pot_percent" (if (realp pot-percent) pot-percent 0)
+                               "balance" (if balance? t 'yason:false)
+                               "kind" (kind-name (session-kind session))
+                               "session" (session-id session)
+                               "owner" (session-owner session)
+                               "model" (model-body session))))
+    (cond ((and (eql status 200) answer (hash-table-p (gethash "deployment" answer)))
+           (front-deployments :fresh? t)
+           (gethash "deployment" answer))
+          ((and answer (stringp (gethash "error" answer))) (values nil (gethash "error" answer)))
+          (t (values nil "The private front did not answer; try again in a moment.")))))
 
 (defun session-deployment (session)
   "The deployment made from SESSION, its record, or nil."
@@ -73,9 +139,10 @@ https://<name>.gen.works/ -- the proxy's root rule sends that host's
 root on to deployment-path; a model, and every deployment where apps
 share one apps host or the lab's own address, is at deployment-path."
   (let ((record (deployment-record name)))
-    (if (and (app-origin-pattern?) record (equal (gethash "kind" record) "app"))
-        (format nil "~a/" (app-origin-base name))
-        (deployment-path name))))
+    (cond ((and *deploy-front* record (stringp (gethash "url" record))) (gethash "url" record))
+          ((and (app-origin-pattern?) record (equal (gethash "kind" record) "app"))
+           (format nil "~a/" (app-origin-base name)))
+          (t (deployment-path name)))))
 
 (defun deployment-door-url (name door)
   "The address of DOOR -- toll-pay, toll-return, app-file, host-topup or
@@ -279,6 +346,8 @@ the same session under the same name replaces the copy and the terms."
          (values nil (if app?
                          "This app charges for nothing yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download', 'a day pass for $5 unlocks the results' -- and Monetize opens when it has written the tollbooths."
                          "This model charges for nothing yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download' -- and Monetize opens when it has written that in.")))
+        ((and *deploy-front* (not app?))
+         (values nil "From a private lab, web apps deploy for now: ask the agent for a web app around the model."))
         ((not (deployment-name? name))
          (values nil "Give it a name for its address: 3 to 40 lower-case letters, digits and hyphens, a letter first."))
         ;; a name that is a host of its own under a per-deployment origin
@@ -298,6 +367,16 @@ the same session under the same name replaces the copy and the terms."
          (values nil "Say where your share is to be paid: an email address we can reach you at."))
         ((and (eq *toll-provider* :stripe) (null account))
          (values nil (or account-problem "Set up payouts with Stripe first: the button beside your email.")))
+        (*deploy-front*
+         (multiple-value-bind (saved reason)
+             (deploy-through-front! session :name name :title title :blurb blurb :payee payee
+                                            :closed? closed? :pot-percent pot-percent :balance? balance?)
+           (if (null saved)
+               (values nil reason)
+               (progn
+                 (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee; paid by card through Stripe to your account."
+                            name (gethash "url" saved) closed? (gethash "fee_percent" saved))
+                 saved))))
         (t
          (let* ((directory (deployment-directory name))
                 ;; the terms as they stand today, what it runs on (revenue
@@ -333,6 +412,13 @@ nil and the reason.  The books keep what it earned."
       (cond ((null record) (values nil "There is no such deployment."))
             ((not (and (stringp owner-key) (equal (gethash "owner" record) owner-key)))
              (values nil "Only its owner may take a deployment down."))
+            (*deploy-front*
+             (multiple-value-bind (answer status) (ignore-errors (front-post "undeploy" (h "name" name)))
+               (front-deployments :fresh? t)
+               (if (eql status 200)
+                   t
+                   (values nil (or (and answer (gethash "error" answer))
+                                   "The private front did not answer; try again in a moment.")))))
             (t (drop-deployed! name)
                (monocle:delete-deployment! (lab-house) name)
                t)))))

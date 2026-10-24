@@ -18,6 +18,27 @@
 ;;   <prefix>/api/opened     GET ?id=&wallet=: the hangar's word on it
 ;;   <prefix>/api/close      POST {id, wallet}: end it
 ;;
+;; THE MONETIZING RUNG.  A session whose author the gate holds at the
+;; monetizing standing when it opens is told so (the request's "monetize",
+;; which the hangar carries into the VM) and offers Monetize; its deploy and
+;; undeploy come back here, to the SESSION DOORS, which take the session's
+;; id and token as credentials -- the token is what the front handed the
+;; author's browser and the hangar the VM, and the request must be live:
+;;
+;;   <prefix>/api/vm/deploy       POST {id, token, name, title, blurb, payee,
+;;                                closed, pot_percent, balance, kind, session,
+;;                                owner, model}: a web app deployed
+;;   <prefix>/api/vm/undeploy     POST {id, token, name}: taken down
+;;   <prefix>/api/vm/deployments  POST {id, token}: this author's deployments
+;;
+;; The front asks the gate for the standing again at every deploy, writes
+;; the terms itself (nothing the VM says of fees or accounts is taken), and
+;; keeps the deployment in the PRIVATE DEPLOYED ROOT (*private-deployed-root*,
+;; on the hangar's volume), which the hangar flies at <name>.<domain> under
+;; the private lab's name (*private-lab-name*).  The books of that root are
+;; kept here too: a sweeper books the tolls and hosting the gate settled
+;; for the private lab's deployments, whose VMs book nothing.
+;;
 
 (defparameter *private-spool* nil
   "String or nil.  The hangar's spool directory as this room sees it (a
@@ -36,6 +57,21 @@ the fleet's scanner lists drop every path under /private before any rule.")
 
 (defparameter *private-session-prefix* "/prompt-lab"
   "Where the lab answers inside a session's VM.")
+
+(defparameter *private-deployed-root* nil
+  "String or nil.  The private deployed root as this room sees it (a mount
+of the hangar's $FC_DIR/private-deployed): <root>/<engine>/<name>/ for each
+deployment made from a private session, and that root's books.  Nil: no
+private session deploys.")
+
+(defparameter *private-lab-name* "prompt-lab-private"
+  "String.  The private lab's name at the gate -- the hangar's
+HANGAR_SESSION_LAB, the name its sessions and their deployments report
+under -- and so the name this front keeps their books under.")
+
+(defparameter *private-sweep-seconds* 60
+  "Integer.  How often the front books what the gate settled for the
+private lab's deployments.")
 
 (defun private-file (kind id)
   (format nil "~a/~a/~a.json" (string-right-trim "/" *private-spool*) kind id))
@@ -73,15 +109,21 @@ else nil and the reason in words."
            (values nil "That is not an author key this lab knows."))
           ((equal (gethash "standing" answer) "frozen")
            (values nil "This author key is frozen."))
-          ((eq (gethash "private" answer) t) t)
+          ;; the third value: the gate's answer, whose "monetize" says the rung above
+          ((eq (gethash "private" answer) t) (values t nil answer))
           (t (values nil (format nil "Your author key is at the ~a rung.  Private labs open at the trusted rung, granted on review of the work you make in the public lab."
                                  (gethash "standing" answer)))))))
 
-(defun write-private-request! (id wallet token)
+(defun write-private-request! (id wallet token &key monetize?)
+  "File request ID in the spool.  MONETIZE? (the author's standing is the
+monetizing rung, and this front keeps a private deployed root) has the
+hangar open the session with Monetize."
   (let ((final (private-file "requests" id))
         (tmp (format nil "~a/requests/.~a.json" (string-right-trim "/" *private-spool*) id)))
     (with-open-file (out tmp :direction :output :if-exists :supersede :if-does-not-exist :create)
-      (write-string (encode (h "id" id "wallet" wallet "token" token "created" (get-universal-time))) out))
+      (write-string (encode (h "id" id "wallet" wallet "token" token "created" (get-universal-time)
+                               "monetize" (if (and monetize? *private-deployed-root*) t 'yason:false)))
+                    out))
     (rename-file tmp final)
     final))
 
@@ -100,7 +142,7 @@ yes.  Answers {id, token, unlock, next} or {error}."
           ((address-over-limit? address :private-opens)
            (refuse req ent net.aserve:*response-forbidden* "That is enough requests from this address for today."))
           (t
-           (multiple-value-bind (ok? reason) (private-standing wallet)
+           (multiple-value-bind (ok? reason answer) (private-standing wallet)
              (if (not ok?)
                  (refuse req ent net.aserve:*response-forbidden* "~a" reason)
                  (let* ((live (private-live-request wallet))
@@ -108,7 +150,7 @@ yes.  Answers {id, token, unlock, next} or {error}."
                         (token (if live (gethash "token" live) (new-owner-key))))
                    (unless live
                      (count-address! address :private-opens)
-                     (write-private-request! id wallet token))
+                     (write-private-request! id wallet token :monetize? (eq (gethash "monetize" answer) t)))
                    (respond-json req ent (h "id" id "token" token
                                             "unlock" (format nil "~a/api/unlock" (private-session-url id))
                                             "next" (format nil "~a?wallet=~a" *private-session-prefix* wallet))))))))))
@@ -141,6 +183,177 @@ the session on its next pass (the author's disk stays)."
            (refuse req ent net.aserve:*response-not-found* "No such session."))
           (t (ignore-errors (delete-file (private-file "requests" id)))
              (respond-json req ent (h "ok" t))))))
+
+;;
+;; The session doors: a monetizing author's deployments.
+;;
+
+(defmacro with-private-house (&body body)
+  "BODY with the lab's house standing for the private deployed root: its
+deployments and books there, under the private lab's name, tolls taken by
+card through the gate."
+  `(let ((*deployed-root* *private-deployed-root*)
+         (*lab-name* *private-lab-name*)
+         (*toll-provider* :stripe)
+         (*deployment-payments?* t)
+         (*books?* t)
+         (*hosting-meter?* t)
+         (*deploy-front* nil))
+     ,@body))
+
+(defun private-session-request (json)
+  "The spool request of the LIVE private session that JSON names by its id
+and token (the hangar has said it is up), or nil."
+  (let* ((id (and json (gethash "id" json)))
+         (token (and json (gethash "token" json)))
+         (request (and (private-id? id) (stringp token) (= (length token) 32)
+                       (ignore-errors (read-record (private-file "requests" id)))))
+         (answer (and (hash-table-p request) (private-answer id))))
+    (and answer (equal (gethash "state" answer) "up")
+         (equal (gethash "token" request) token)
+         request)))
+
+(defun private-deployment-url (name)
+  (format nil "~a://~a.~a/" *private-session-scheme* name *private-session-domain*))
+
+(defun private-author-deployments (wallet)
+  "WALLET's deployments in the private root (hash tables, the newest first)."
+  (remove-if-not #'(lambda (record) (equal (gethash "author" record) wallet)) (deployment-records)))
+
+(defun private-deployment-row (record)
+  "RECORD as the author's own session reads it: the whole record and its address."
+  (let ((row (alexandria:copy-hash-table record)))
+    (setf (gethash "url" row) (private-deployment-url (gethash "name" record)))
+    row))
+
+(defun private-feed-names ()
+  "The names the hangar flies from a lab's feed (spool/feed-names.json, which
+it writes every pass): taken, since every deployment's host is <name>.<domain>."
+  (let ((names (ignore-errors (yason:parse (uiop:read-file-string
+                                            (format nil "~a/feed-names.json" (string-right-trim "/" *private-spool*)))))))
+    ;; yason reads a JSON array as a list unless told otherwise
+    (remove-if-not #'stringp (cond ((listp names) names)
+                                   ((vectorp names) (coerce names 'list))))))
+
+(defun private-deploys? ()
+  "Whether this front takes deployments from private sessions."
+  (and *private-spool* *private-deployed-root* t))
+
+(defun private-vm-deploy-door (req ent)
+  "POST <prefix>/api/vm/deploy: a monetizing author's web app, from their
+private session, into the private deployed root.  Answers {deployment} or
+{error}."
+  (let* ((json (request-json req))
+         (request (private-session-request json))
+         (wallet (and request (gethash "wallet" request))))
+    (cond
+          ((not (private-deploys?)) (refuse req ent net.aserve:*response-not-found* "No private deployments here."))
+          ((null request) (refuse req ent net.aserve:*response-forbidden* "No such session."))
+          ((not (eq (gethash "monetize" (or (ignore-errors (gate-post "author" (h "wallet" wallet))) (h))) t))
+           (refuse req ent net.aserve:*response-forbidden*
+                   "Deploying from a private lab opens at the monetizing rung: a trusted author with payouts set up, on review."))
+          (t
+           (with-private-house
+             (bt:with-lock-held (*deploy-lock*)
+               (let* ((name (let ((name (gethash "name" json))) (and (stringp name) (string-downcase (string-trim " " name)))))
+                      (existing (and (deployment-name? name) (deployment-record name)))
+                      (session-id (gethash "session" json))
+                      (mine (find session-id (private-author-deployments wallet)
+                                  :key #'(lambda (record) (gethash "session" record)) :test #'equal))
+                      (model (gethash "model" json))
+                      (payee (clip-line (gethash "payee" json) 200))
+                      (closed? (eq (gethash "closed" json) t)))
+                 (multiple-value-bind (account url ready? why) (and (find #\@ payee) (author-account payee))
+                   (declare (ignore url))
+                   (cond
+                     ((not (equal (gethash "kind" json) "app"))
+                      (refuse req ent "From a private lab, web apps deploy for now."))
+                     ((not (deployment-name? name))
+                      (refuse req ent "Give it a name for its address: 3 to 40 lower-case letters, digits and hyphens, a letter first."))
+                     ((or (member name *reserved-deployment-names* :test #'string=)
+                          (string= "pl-" name :end2 3))
+                      (refuse req ent "The name ~a is reserved; choose another." name))
+                     ((or (member name (private-feed-names) :test #'string=)
+                          (and existing (not (equal (gethash "author" existing) wallet))))
+                      (refuse req ent "The name ~a is taken; choose another." name))
+                     ((and mine (not (equal (gethash "name" mine) name)))
+                      (refuse req ent "This session is deployed as ~a: deploy under that name again, or take it down first."
+                              (gethash "name" mine)))
+                     ((and (null existing) (>= (length (deployment-records)) *max-deployments*))
+                      (refuse req ent "The private labs hold all the deployments they take."))
+                     ((not (and (stringp model) (plusp (length model)) (< (length model) 1000000)))
+                      (refuse req ent "There is no model file to deploy."))
+                     ((not (and (find #\@ payee) (> (length payee) 5)))
+                      (refuse req ent "Say where your share is to be paid: an email address we can reach you at."))
+                     ((not (and account ready?))
+                      (refuse req ent "~a" (or why "Set up payouts with Stripe first: the button beside your email.")))
+                     (t
+                      (let ((record (monocle:make-record
+                                     (lab-house)
+                                     :name name :title (gethash "title" json) :blurb (gethash "blurb" json)
+                                     :owner (let ((owner (gethash "owner" json))) (and (stringp owner) (clip-line owner 64)))
+                                     :payee payee :closed? closed? :existing existing
+                                     :pot-percent (let ((pot (gethash "pot_percent" json))) (and (realp pot) pot))
+                                     :fields (list "session" (and (stringp session-id) (clip-line session-id 64))
+                                                   "kind" "app"
+                                                   "author" wallet
+                                                   "private" t
+                                                   "connect_account" account
+                                                   "balance" (if (eq (gethash "balance" json) t) t 'yason:false)))))
+                        (ensure-directories-exist (deployment-directory name))
+                        (write-text-file model (merge-pathnames "model.lisp" (deployment-directory name)))
+                        (monocle:save-record! (lab-house) record)
+                        (respond-json req ent (h "deployment" (private-deployment-row (deployment-record name)))))))))))))))
+
+(defun private-vm-undeploy-door (req ent)
+  "POST <prefix>/api/vm/undeploy {id, token, name}: the author's deployment
+taken down; the books keep what it earned, and the hangar retires its disk."
+  (let* ((json (request-json req))
+         (request (private-session-request json))
+         (wallet (and request (gethash "wallet" request)))
+         (name (and json (gethash "name" json))))
+    (cond
+      ((not (private-deploys?)) (refuse req ent net.aserve:*response-not-found* "No private deployments here."))
+      ((null request) (refuse req ent net.aserve:*response-forbidden* "No such session."))
+      (t
+       (with-private-house
+         (bt:with-lock-held (*deploy-lock*)
+           (let ((record (and (deployment-name? name) (deployment-record name))))
+             (if (not (and record (equal (gethash "author" record) wallet)))
+                 (refuse req ent net.aserve:*response-not-found* "There is no such deployment of yours.")
+                 (progn (monocle:delete-deployment! (lab-house) name)
+                        (respond-json req ent (h "ok" t)))))))))))
+
+(defun private-vm-deployments-door (req ent)
+  "POST <prefix>/api/vm/deployments {id, token}: the author's deployments."
+  (let* ((json (request-json req))
+         (request (private-session-request json)))
+    (cond
+      ((not (private-deploys?)) (refuse req ent net.aserve:*response-not-found* "No private deployments here."))
+      ((null request) (refuse req ent net.aserve:*response-forbidden* "No such session."))
+      (t (with-private-house
+           (respond-json req ent (h "deployments" (coerce (mapcar #'private-deployment-row
+                                                                  (private-author-deployments (gethash "wallet" request)))
+                                                          'vector))))))))
+
+(defvar *private-sweeper* nil "The thread that keeps the private root's books.")
+
+(defun private-sweep! ()
+  "Book what the gate settled for the private lab's deployments -- tolls,
+and hosting bought -- that the books lack: the VMs that serve them book
+nothing (*books?* nil there)."
+  (with-private-house
+    (ignore-errors (sweep-toll-payments!))
+    (ignore-errors (sweep-hosting!))))
+
+(defun start-private-sweeper! ()
+  (unless (and *private-sweeper* (bt:thread-alive-p *private-sweeper*))
+    (setq *private-sweeper*
+          (bt:make-thread #'(lambda ()
+                              (do () (nil)
+                                (when *private-deployed-root* (private-sweep!))
+                                (sleep *private-sweep-seconds*)))
+                          :name "prompt-lab private books"))))
 
 (defun private-page (req ent)
   "The front's page: an author key in, a private lab out."
@@ -211,5 +424,11 @@ given, for that host alone).  Needs *private-spool* and the gate (*messages-url*
     (net.aserve:publish :path (format nil "~a/" *private-prefix*) :server server :host host :function #'private-page)
     (net.aserve:publish :path (format nil "~a/api/open" *private-prefix*) :server server :host host :function #'private-open-door)
     (net.aserve:publish :path (format nil "~a/api/opened" *private-prefix*) :server server :host host :function #'private-opened-door)
-    (net.aserve:publish :path (format nil "~a/api/close" *private-prefix*) :server server :host host :function #'private-close-door))
+    (net.aserve:publish :path (format nil "~a/api/close" *private-prefix*) :server server :host host :function #'private-close-door)
+    ;; the session doors: not host-scoped, since a session's VM reaches them
+    ;; through the ship's proxy at whatever address it has for it
+    (net.aserve:publish :path (format nil "~a/api/vm/deploy" *private-prefix*) :server server :function #'private-vm-deploy-door)
+    (net.aserve:publish :path (format nil "~a/api/vm/undeploy" *private-prefix*) :server server :function #'private-vm-undeploy-door)
+    (net.aserve:publish :path (format nil "~a/api/vm/deployments" *private-prefix*) :server server :function #'private-vm-deployments-door))
+  (when *private-deployed-root* (start-private-sweeper!))
   *private-prefix*)

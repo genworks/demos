@@ -399,6 +399,15 @@ wants the human check where Turnstile is on, and is capped per address
 (defparameter *max-authors-per-address* 2
   "Integer. Author keys an address may have minted in a UTC day.")
 
+(defparameter *deploy-front* nil
+  "Plist or nil.  A PRIVATE SESSION whose author is at the monetizing rung
+deploys through the private front (private.lisp) rather than into its own
+disk: (:url <the front's session doors> :id <the session's id> :token <its
+token>).  Its deploy and undeploy go to the front, which checks the
+author's standing at the gate and keeps the deployment, and its books,
+under the private lab's name; the deployments it lists are the front's.
+Nil: deployments are kept here (deploy.lisp).")
+
 (defparameter *max-private-opens-per-address* 20
   "Integer. Private-session requests an address may make at the private
 front (private.lisp) in a UTC day.")
