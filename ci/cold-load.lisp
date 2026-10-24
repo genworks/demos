@@ -395,6 +395,17 @@ loaded) its page too."
                      (and (eq (gethash "model_defined" state) t)
                           (eq (gethash "editable" state) t)
                           (search "define-object model" (gethash "model_source" state))))))
+          ;; the reviewer pass over the archive's authors (author-review.lisp):
+          ;; a dry run reads and calls nothing; each recommendation's rung
+          (smoke "prompt-lab reviewer pass: a dry run reads the archive, and the ladder's moves"
+                 (lambda ()
+                   (progv (list (lab '#:*author-review-root*))
+                       (list (namestring (merge-pathnames "author-review-smoke/" (uiop:temporary-directory))))
+                     (and (listp (uiop:symbol-call :prompt-lab :review-authors! :dry-run? t))
+                          (equal (uiop:symbol-call :prompt-lab :author-review-target "author" "promote" "pass") "trusted")
+                          (equal (uiop:symbol-call :prompt-lab :author-review-target "trusted" "promote" "pass") "monetizing")
+                          (equal (uiop:symbol-call :prompt-lab :author-review-target "trusted" "demote" "fail") "frozen")
+                          (null (uiop:symbol-call :prompt-lab :author-review-target "monetizing" "promote" "pass"))))))
           ;; a visitor's files (uploads.lisp): refused without the
           ;; declaration of rights and when the lab cannot read the kind,
           ;; kept and listed otherwise, fetched back byte for byte as a

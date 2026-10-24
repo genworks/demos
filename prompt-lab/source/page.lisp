@@ -1216,4 +1216,6 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
   (start-reaper!)
   (start-thumbnailer!)
   (start-watch!)
+  ;; the daily reviewer pass over the public archive's authors (author-review.lisp)
+  (start-author-review!)
   *url-prefix*)

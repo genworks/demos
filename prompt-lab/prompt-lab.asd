@@ -20,4 +20,5 @@
   (:file "source/project") (:file "source/review")
   (:file "source/hosting") (:file "source/routing")
   (:file "source/deploy") (:file "source/private")
-  (:file "source/watch") (:file "source/external")))
+  (:file "source/watch") (:file "source/author-review")
+  (:file "source/external")))

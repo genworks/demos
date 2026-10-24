@@ -910,6 +910,7 @@ every few seconds."
         ((query-value req "deployed") (model-toll-return req ent))
         (t
          (multiple-value-bind (app key toll) (toll-app req)
+           (declare (ignore toll))
            (let ((payment (query-value req "payment")))
              (cond ((null app) (refuse req ent net.aserve:*response-not-found* "~a" key))
                    ((not (payment-id? payment)) (refuse req ent "No payment named."))
