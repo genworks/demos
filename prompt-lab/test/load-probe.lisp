@@ -34,48 +34,58 @@
 ;; aserve client in process, as the lab's own calls are.
 ;;
 
-(defun load-probe-request (url &key (method :get) body (seconds 60))
+(defun load-probe-request (url &key (method :get) body (seconds 60) binary?)
   "One request; values: the status (0 for no answer), the body's length,
-and the seconds it took."
-  (let ((start (get-internal-real-time)))
+the seconds it took, and the body's text.  BINARY? reads the body as
+octets (a PNG is not text, and the client would try to decode it)."
+  (let ((start (get-internal-real-time))
+        ;; https wants the server's name on the handshake (SNI), as the
+        ;; lab's own post-json sends it
+        (ssl-args (and (string= "https://" url :end2 (min 8 (length url)))
+                       (let* ((from (length "https://"))
+                              (end (or (position #\/ url :start from) (length url))))
+                         (list :server-name (subseq url from end))))))
     (handler-case
         (multiple-value-bind (text status)
             (bt:with-timeout (seconds)
               (net.aserve.client:do-http-request url :method method
                                                      :content body
                                                      :content-type (and body "application/json")
-                                                     :headers '(("Accept" . "*/*"))))
+                                                     :headers '(("Accept" . "*/*"))
+                                                     :ssl-args ssl-args
+                                                     :format (if binary? :binary :text)))
           (values (or status 0) (length (or text ""))
-                  (/ (- (get-internal-real-time) start) (float internal-time-units-per-second))))
-      (error () (values 0 0 (/ (- (get-internal-real-time) start) (float internal-time-units-per-second)))))))
+                  (/ (- (get-internal-real-time) start) (float internal-time-units-per-second))
+                  (if (stringp text) text "")))
+      (error () (values 0 0 (/ (- (get-internal-real-time) start) (float internal-time-units-per-second)) "")))))
 
 (defun load-probe-ids (base ids)
   "The newest IDS archived session ids of BASE's lab that left a model."
-  (let ((status (load-probe-request (format nil "~a/api/archive" base))))
-    (unless (eql status 200) (error "The archive door of ~a answered ~a." base status)))
-  (let* ((text (net.aserve.client:do-http-request (format nil "~a/api/archive" base)))
-         (json (yason:parse text))
+  (multiple-value-bind (status length seconds text) (load-probe-request (format nil "~a/api/archive" base))
+    (declare (ignore length seconds))
+    (unless (eql status 200) (error "The archive door of ~a answered ~a." base status))
+  (let* ((json (yason:parse text))
          (sessions (and (hash-table-p json) (gethash "sessions" json))))
     (loop for s across (coerce sessions 'vector)
           when (and (hash-table-p s) (eq (gethash "model" s) t) (stringp (gethash "id" s)))
             collect (gethash "id" s) into found
           when (>= (length found) ids) do (return found)
-          finally (return found))))
+          finally (return found)))))
 
 (defun load-probe-visitor (base ids rounds seconds record)
   "One visitor: ROUNDS rounds over IDS, each the four requests, timed into
 RECORD (a function of kind, status and seconds)."
   (dotimes (round rounds)
     (let ((id (nth (mod round (length ids)) ids)))
-      (flet ((ask (kind url &key (method :get) body)
-               (multiple-value-bind (status length took) (load-probe-request url :method method :body body :seconds seconds)
+      (flet ((ask (kind url &key (method :get) body binary?)
+               (multiple-value-bind (status length took) (load-probe-request url :method method :body body :seconds seconds :binary? binary?)
                  (declare (ignore length))
                  (funcall record kind status took))))
         (ask "archive listing" (format nil "~a/api/archive" base))
         (ask "archived record" (format nil "~a/api/archived?id=~a" base id))
         (ask "replay (compile)" (format nil "~a/api/replay" base) :method :post
              :body (format nil "{\"id\":~s}" id))
-        (ask "png download (build + raster)" (format nil "~a/api/download?replay=~a&format=png" base id))))))
+        (ask "png download (build + raster)" (format nil "~a/api/download?replay=~a&format=png" base id) :binary? t)))))
 
 (defun load-probe-percentile (sorted fraction)
   (if (null sorted) 0
@@ -118,11 +128,11 @@ report as a string, and prints it."
                                  (if times (car (last times)) 0)
                                  (and (plusp failed)
                                       (let ((seen nil))
-                                        (dolist (row rows (nreverse seen))
+                                        (dolist (row rows)
                                           (unless (eql (car row) 200)
                                             (let ((entry (assoc (car row) seen)))
                                               (if entry (incf (cdr entry)) (push (cons (car row) 1) seen)))))
-                                        (mapcar (lambda (e) (format nil "~a x~d" (car e) (cdr e))) seen))))))
+                                        (mapcar (lambda (e) (format nil "~a x~d" (car e) (cdr e))) (reverse seen)))))))
                      (format out "  ~d requests, ~,2f a second~%" total (if (plusp wall) (/ total wall) 0)))))
       (write-string report)
       report)))
