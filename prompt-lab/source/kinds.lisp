@@ -335,13 +335,17 @@ the lab's unit at *unit-cents*) in *toll-currency*."
   (money-text (* (monocle:toll-price toll) *unit-cents*)))
 
 (defun source-offer-script (name)
-  "For an open deployment NAME, a script that puts the offer of its source
-at the foot of the page -- the GNU Affero General Public License asks
-that the people who use it be offered it; the page itself is the
-author's.  Nil for a closed deployment, or none."
+  "For a deployment NAME, a script that puts a foot line on the page: for
+an open deployment the offer of its source -- the GNU Affero General
+Public License asks that the people who use it be offered it -- and for
+every deployment a way to report a problem (the deployment's report
+door, deploy.lisp), since the author is not always reachable and the
+house hosts the page.  The page itself is the author's: the line names
+nobody until it is followed.  Nil for no deployment."
   (let ((record (deployment-record name)))
-    (when (and record (not (truthy? (gethash "closed" record))))
-      (format nil "<script>document.addEventListener('DOMContentLoaded',function(){var p=document.createElement('p');p.style.cssText='margin:2rem 0 1rem;text-align:center;font-size:.8rem;color:#6b7280';p.innerHTML='<a href=\"~a/source\" style=\"color:inherit;text-decoration:underline\">Source</a>, under the GNU Affero General Public License.';document.body.appendChild(p)});</script>"
+    (when record
+      (format nil "<script>document.addEventListener('DOMContentLoaded',function(){var p=document.createElement('p');p.style.cssText='margin:2rem 0 1rem;text-align:center;font-size:.8rem;color:#6b7280';p.innerHTML='~@[<a href=\"~a/source\" style=\"color:inherit;text-decoration:underline\">Source</a>, under the GNU Affero General Public License. ~]<a href=\"~a/report\" style=\"color:inherit;text-decoration:underline\">Report a problem</a>';document.body.appendChild(p)});</script>"
+              (and (not (truthy? (gethash "closed" record))) (deployment-path name))
               (deployment-path name)))))
 
 (defun charge-toll! (app toll)

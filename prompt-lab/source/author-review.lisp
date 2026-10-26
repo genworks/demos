@@ -55,6 +55,19 @@ wait for the next pass, their sessions still new.")
 (defparameter *author-review-max-grant* 2000
   "Integer.  The most rivets a review may recommend granting.")
 
+(defparameter *author-review-grant-rivets* 500
+  "Integer.  The house's standard grant (the user's ruling, 2026-10-26): what
+a grant recommendation carries.  Exceptional work (merit 5) may carry the
+model's own figure, up to *author-review-max-grant*.")
+
+(defparameter *author-review-promote-thresholds* '(:merit 3 :sessions 3 :key-age-days 14)
+  "Plist.  What a promotion takes beyond the model's word (the user's ruling,
+2026-10-26): merit at least :merit, at least :sessions sessions in the
+window the pass reads (*author-review-days*), the key at least
+:key-age-days old, and good faith a clear pass.  A promote that falls
+short is a stay, with the shortfall said in the summary; the house still
+approves every promotion by hand.")
+
 (defparameter *author-review-max-tokens* 8000
   "Integer.  max_tokens of one review's call, its thinking included.")
 
@@ -305,6 +318,24 @@ the model declined to read it -- the refusal's category (or t)."
                (let ((at (position standing rungs :test #'equal)))
                  (and at (plusp at) (nth (1- at) rungs))))))))
 
+(defun author-review-shortfall (review facts)
+  "Why REVIEW's promote recommendation falls short of
+*author-review-promote-thresholds* for an author with FACTS, in words; nil
+when it does not."
+  (let ((merit (gethash "merit" review))
+        (sessions (gethash "sessions_in_window" facts))
+        (age (gethash "key_age_days" facts))
+        (least-merit (getf *author-review-promote-thresholds* :merit))
+        (least-sessions (getf *author-review-promote-thresholds* :sessions))
+        (least-age (getf *author-review-promote-thresholds* :key-age-days)))
+    (cond ((not (equal (gethash "good_faith" review) "pass")) "good faith is not a clear pass")
+          ((and (integerp merit) (< merit least-merit))
+           (format nil "merit ~a is under ~a" merit least-merit))
+          ((or (not (integerp sessions)) (< sessions least-sessions))
+           (format nil "~a session~:p in the window, ~a wanted" (if (integerp sessions) sessions 0) least-sessions))
+          ((or (not (integerp age)) (< age least-age))
+           (format nil "the key is ~a day~:p old, ~a wanted" (if (integerp age) age 0) least-age)))))
+
 (defun author-review-command (key review)
   "The house's command that carries REVIEW's recommendation out for KEY, or
 nil for stay (or a move the ladder has no rung for)."
@@ -346,10 +377,21 @@ Keeps the review on the shelf and answers it, or nil and why."
       (if (null review)
           (values nil why)
           (let* ((standing (gethash "standing" facts))
+                 ;; the house's standard grant; exceptional work may carry
+                 ;; the model's own figure, up to the cap
                  (grant (let ((n (gethash "grant_rivets" review)))
-                          (if (and (integerp n) (equal (gethash "recommendation" review) "grant"))
-                              (max 0 (min n *author-review-max-grant*))
-                              0))))
+                          (cond ((not (equal (gethash "recommendation" review) "grant")) 0)
+                                ((and (integerp n) (eql (gethash "merit" review) 5))
+                                 (max *author-review-grant-rivets* (min n *author-review-max-grant*)))
+                                (t *author-review-grant-rivets*))))
+                 (shortfall (and (equal (gethash "recommendation" review) "promote")
+                                 (author-review-shortfall review facts))))
+            ;; a promotion the thresholds refuse is a stay that says why
+            (when shortfall
+              (setf (gethash "recommendation" review) "stay"
+                    (gethash "shortfall" review) shortfall
+                    (gethash "summary" review) (format nil "Promote recommended but short of the thresholds (~a).  ~a"
+                                                        shortfall (or (gethash "summary" review) ""))))
             (setf (gethash "author" review) key
                   (gethash "day" review) (day-key)
                   (gethash "time" review) (get-universal-time)

@@ -81,6 +81,14 @@ lists for yason."
       (setf (session-log session)
             (append (session-log session) (list (list (get-universal-time) kind text)))))
     (session-changed! session)
+    ;; the funnel's tally (archive.lisp): a replay's or a thumbnail's
+    ;; events are nobody's
+    (unless (session-replay? session)
+      (case kind
+        (:prompt (funnel-count! "prompts"))
+        (:done (funnel-count! "builds-done"))
+        (:stopped (funnel-count! "builds-stopped"))
+        (:tool-error (funnel-count! "tool-errors"))))
     text))
 
 

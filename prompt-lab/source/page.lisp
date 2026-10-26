@@ -473,6 +473,7 @@ has credit or has put more into the pot than it has drawn."
               *response-too-many-requests*)
       (let ((session (make-session :address address :wallet (and (wallet-id? wallet) wallet))))
         (count-address! address :sessions)
+        (funnel-count! "sessions")
         (watch-event! :session-open session :address address :detail (session-id session))
         (log-event session :note "Session ~a opened.  Describe what to build." (session-id session))
         (when (and closed? *closed-source?* *deployments?*)
@@ -636,7 +637,7 @@ nil and the reason."
                  (values nil (or reason "Complete the human check first."))
                  (let* ((answer (ignore-errors (gate-post "author" (h))))
                         (id (and (hash-table-p answer) (gethash "wallet" answer))))
-                   (cond ((wallet-id? id) (count-address! address :authors) id)
+                   (cond ((wallet-id? id) (count-address! address :authors) (funnel-count! "author-keys") id)
                          (t (values nil "No author key could be made just now; try again in a moment.")))))))))
 
 (defun author-door (req ent)
@@ -1230,4 +1231,6 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
   (start-watch!)
   ;; the daily reviewer pass over the public archive's authors (author-review.lisp)
   (start-author-review!)
+  ;; and the daily funnel digest (funnel.lisp)
+  (start-funnel!)
   *url-prefix*)

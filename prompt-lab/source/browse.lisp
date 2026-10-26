@@ -223,6 +223,7 @@ as it last was or its Nth version, and whether a replay can draw it."
                   (log (loop for entry in (gethash "log" json)
                              when (and (listp entry) (= (length entry) 3) (integerp (first entry)))
                                collect entry)))
+             (funnel-count! "archive-visits")
              (respond-json req ent
                            (h "id" id
                               "archived" t
@@ -328,6 +329,7 @@ compiled again, if it is not already -- and answer the viewer's URL."
           ((not (and record (record-visible? record (request-owner-key req json))))
            (refuse req ent net.aserve:*response-not-found* "No such archived session."))
           (t (multiple-value-bind (replay text) (ensure-replay id)
+               (when replay (funnel-count! "replays"))
                (if (null replay)
                    (refuse req ent "This session left no model to draw.")
                    (respond-json req ent (h "ok" (if (model-defined? replay) t 'yason:false)

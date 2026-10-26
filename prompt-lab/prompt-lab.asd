@@ -6,7 +6,7 @@
  "The Gendl™ The Gendl™ Prompt lab: a visitor's prompt becomes a parametric Gendl model -- sessions, the modeling agent's tools, the agent loop, and the page with its viewer."
  :author "Genworks International" :license
  "Affero Gnu Public License (http://www.gnu.org/licenses/)" :serial t
- :version "20261023" :depends-on
+ :version "20261026" :depends-on
  (:gwl-graphics :yason :alexandria :babel :demos-common :monocle)
  :around-compile "gendl-asdf:around-compile" :components
  ((:file "source/package") (:file "source/parameters")
@@ -21,4 +21,4 @@
   (:file "source/hosting") (:file "source/routing")
   (:file "source/deploy") (:file "source/private")
   (:file "source/watch") (:file "source/author-review")
-  (:file "source/external")))
+  (:file "source/funnel") (:file "source/external")))

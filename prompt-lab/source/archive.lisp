@@ -43,6 +43,31 @@
   (multiple-value-bind (s m h day month year) (decode-universal-time universal-time 0)
     (format nil "~4,'0d-~2,'0d-~2,'0d ~2,'0d:~2,'0d:~2,'0d UTC" year month day h m s)))
 
+;;
+;; THE FUNNEL'S TALLY (funnel.lisp reads it and keeps it): a count per UTC
+;; day of what happens at the doors -- author keys minted, sessions
+;; opened, prompts, builds done and stopped, archive visits, replays,
+;; uploads, deployments.  Counting is a lock and an increment, nothing
+;; more on a visitor's request; the funnel's thread writes it down.
+;;
+
+(defvar *funnel-tally* (make-hash-table :test #'equal)
+  "day -> (kind -> count)")
+(defvar *funnel-tally-lock* (bt:make-lock "prompt-lab funnel tally"))
+(defvar *funnel-tally-dirty?* nil)
+
+(defun funnel-count! (kind &optional (n 1))
+  "Count N more of KIND (a string) on today's row of the funnel's tally.
+Never signals; answers nil."
+  (ignore-errors
+   (bt:with-lock-held (*funnel-tally-lock*)
+     (let* ((day (utc-day (get-universal-time)))
+            (row (or (gethash day *funnel-tally*)
+                     (setf (gethash day *funnel-tally*) (make-hash-table :test #'equal)))))
+       (incf (gethash kind row 0) n)
+       (setq *funnel-tally-dirty?* t))))
+  nil)
+
 (defun archive-directory-for (id created)
   "The archive directory of session ID opened at CREATED, or nil when
 there is no archive."

@@ -406,6 +406,24 @@ loaded) its page too."
                           (equal (uiop:symbol-call :prompt-lab :author-review-target "trusted" "promote" "pass") "monetizing")
                           (equal (uiop:symbol-call :prompt-lab :author-review-target "trusted" "demote" "fail") "frozen")
                           (null (uiop:symbol-call :prompt-lab :author-review-target "monetizing" "promote" "pass"))))))
+          ;; the funnel (funnel.lisp): the tally counts, the digest reads
+          ;; it with the archive and says the day, kept on its shelf and
+          ;; sent nowhere here
+          (smoke "prompt-lab funnel: the tally counts and the day's digest reads"
+                 (lambda ()
+                   (progv (list (lab '#:*funnel-root*))
+                       (list (namestring (merge-pathnames "funnel-smoke/" (uiop:temporary-directory))))
+                     (uiop:symbol-call :prompt-lab :funnel-count! "sessions")
+                     (uiop:symbol-call :prompt-lab :funnel-count! "prompts" 2)
+                     (uiop:symbol-call :prompt-lab :funnel-write-tally!)
+                     (let* ((day (uiop:symbol-call :prompt-lab :day-key))
+                            (text (nth-value 1 (uiop:symbol-call :prompt-lab :funnel-report! day :send? nil))))
+                       (and (stringp text)
+                            (search day text)
+                            (search "prompts 2" text)
+                            (probe-file (uiop:symbol-call :prompt-lab :funnel-tally-file))
+                            (probe-file (merge-pathnames (format nil "funnel-~a.json" day)
+                                                         (uiop:symbol-call :prompt-lab :funnel-directory))))))))
           ;; a visitor's files (uploads.lisp): refused without the
           ;; declaration of rights and when the lab cannot read the kind,
           ;; kept and listed otherwise, fetched back byte for byte as a

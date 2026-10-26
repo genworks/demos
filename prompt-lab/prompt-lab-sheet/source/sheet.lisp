@@ -1327,6 +1327,15 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                         :|data-attr:disabled| (if *turnstile-site-key* "!$turnstile" "false")
                                                         :|data-on:click| (the (datastar-action :author :options "{filterSignals: {include: /^(turnstile|owner)$/}}"))
                                                         "Keep my work under an author key")))))
+                            ;; the way to the house (launch gaps, item 6): a
+                            ;; mailbox, and the public issue tracker for the code
+                            (when *contact-address*
+                              (htm (:p :class "pl-line pl-contact"
+                                       "A question or a problem: "
+                                       (:a :href (format nil "mailto:~a" *contact-address*) (esc *contact-address*))
+                                       "; a fault in the lab's code, its "
+                                       (:a :href "https://github.com/genworks/demos/issues" :target "_blank" :rel "noopener" "issue tracker")
+                                       ".")))
                             ;; the payment in the page (start-payment!): Stripe's
                             ;; card control and form live in frames the script
                             ;; makes, which a patch must not strip

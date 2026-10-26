@@ -376,6 +376,7 @@ the same session under the same name replaces the copy and the terms."
                (progn
                  (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee; paid by card through Stripe to your account."
                             name (gethash "url" saved) closed? (gethash "fee_percent" saved))
+                 (funnel-count! "deploys")
                  saved))))
         (t
          (let* ((directory (deployment-directory name))
@@ -403,6 +404,7 @@ the same session under the same name replaces the copy and the terms."
                         name (deployment-url name) closed? (house-fee-percent closed?)
                         (let ((pot (gethash "pot_percent" saved))) (and (realp pot) (plusp pot) pot))
                         account)
+             (funnel-count! "deploys")
              saved)))))))
 
 (defun undeploy! (name owner-key)
@@ -1203,6 +1205,16 @@ the same functions as <prefix>/<door>, under the deployment's address
                                      (gethash "title" record) (deployment-url name)
                                      (file-model-body (merge-pathnames "model.lisp" (deployment-directory name))))
                              :attachment (format nil "~a.lisp" name))))
+          ;; a problem with the page, the payment or the author: the way
+          ;; to the house, named here and nowhere on the page itself
+          ((equal what "report")
+           (respond-deployment req ent
+                               (deployment-page (format nil "Report a problem with ~a" (gethash "title" record))
+                                                (list (format nil "This page is hosted for its author by the service at ~a.  A problem with the page, a payment or a download: write to ~a, naming the page (~a) and what happened."
+                                                              (or (ignore-errors (app-origin-host name)) "this address") *contact-address* (deployment-url name))
+                                                      "A fault in the service's own code can be reported on its issue tracker: github.com/genworks/demos/issues.")
+                                                :back (deployment-url name) :back-label "Back to the page")
+                               :type "text/html; charset=utf-8"))
           ;; the deployment's side doors under its own address
           ((and what (assoc what *deployment-doors* :test #'string=))
            (funcall (cdr (assoc what *deployment-doors* :test #'string=)) req ent))

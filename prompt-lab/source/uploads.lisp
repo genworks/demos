@@ -407,6 +407,7 @@ is the caller's."
                      (multiple-value-bind (file reason) (add-upload! session name octets)
                        (when file
                          (touch session)
+                         (funnel-count! "uploads")
                          (log-event session :note "Uploaded ~a (~a, ~a).  The visitor declared the right to use and share it; it is ~:[public with the session~;private with the session~].  It goes to the agent with the next prompt."
                                     (the-object file file-name) (the-object file kind-label)
                                     (the-object file size-label) (session-private? session))

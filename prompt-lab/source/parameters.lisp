@@ -399,6 +399,10 @@ wants the human check where Turnstile is on, and is capped per address
 (defparameter *max-authors-per-address* 2
   "Integer. Author keys an address may have minted in a UTC day.")
 
+(defparameter *contact-address* "lab@genworks.com"
+  "String. Where a visitor or an author reaches the house: the lab's page
+says it, and a deployed page's report door (deploy.lisp) names it.")
+
 (defparameter *deploy-front* nil
   "Plist or nil.  A PRIVATE SESSION whose author is at the monetizing rung
 deploys through the private front (private.lisp) rather than into its own
