@@ -72,10 +72,10 @@ The deploying stack's services-init pushes what it has published.")
         (:html :lang "en"
          (:head (:meta :charset "UTF-8")
                 (:meta :name "viewport" :content "width=device-width, initial-scale=1")
-                (:title "Gendl workshop")
+                (:title "Gendl&trade; workshop")
                 (:style (cl-who:str *portal-style*)))
          (:body
-          (:header (:strong "Gendl workshop")
+          (:header (:strong "Gendl&trade; workshop")
                    (:span "a shared Emacs, a shared Gendl, the demos' live source"))
           (:main :class "index"
            (:h1 "Pick a demo")
@@ -114,11 +114,11 @@ The deploying stack's services-init pushes what it has published.")
           (:html :lang "en"
            (:head (:meta :charset "UTF-8")
                   (:meta :name "viewport" :content "width=device-width, initial-scale=1")
-                  (:title (cl-who:fmt "~a -- Gendl workshop" title))
+                  (:title (cl-who:fmt "~a -- Gendl&trade; workshop" title))
                   (:style (cl-who:str *portal-style*)))
            (:body
             (:header
-             (:a :href "/" "Gendl workshop")
+             (:a :href "/" "Gendl&trade; workshop")
              (:span (cl-who:esc title))
              (:label "demo: "
               (:select :onchange "location.href='/on?demo='+this.value"
