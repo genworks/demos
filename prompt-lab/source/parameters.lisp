@@ -315,11 +315,14 @@ hold the session's thread forever.")
 ;; the gate's meter prices by it -- a solids room's symbols cost a
 ;; multiple, the factor a knob on the gate (:meter-engine-factors in the
 ;; cyclops config, beside the rates).  A room's services-init sets it;
-;; the default reads the image, since the SMLib package is aboard only
-;; on a Genworks GDL workshop.
+;; the default reads the image's :smlib feature, which only a Genworks
+;; GDL image with the SMLib kernel carries (gendl's yayao tests the same).
+;; Not the package: gendl's surf/source/formats.lisp defines an empty
+;; smlib package as a placeholder, and on 2026-10-28 the plain lab on
+;; hack.genworks.com reported itself as the solids room.
 ;;
 
-(defparameter *engine* (if (find-package :smlib) :solid :gendl)
+(defparameter *engine* (if (member :smlib *features*) :solid :gendl)
   "Keyword. The engine behind this lab's sessions: :gendl (open-source
 Gendl -- wireframe and surface primitives, no booleans) or :solid
 (Genworks GDL with the SMLib kernel -- breps, booleans, volumes).  Sent
