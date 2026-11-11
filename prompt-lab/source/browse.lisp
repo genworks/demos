@@ -281,14 +281,18 @@ as it last was or its Nth version, and whether a replay can draw it."
   "The replay of archived session ID, built when there is none: the last
 version of its model file written under a replay header into a package
 of its own, compiled and loaded.  Values: the replay (nil when the
-archive holds no model for ID) and the compiler's text."
+archive holds no model for ID, or one the other engine built) and the
+compiler's text."
   (or (find-replay id)
       (bt:with-lock-held (*replay-build-lock*)
         (or (find-replay id)
             (let* ((directory (archived-directory id))
                    (json (and directory (read-record (merge-pathnames "session.json" directory))))
                    (source (and directory (file-model-body (merge-pathnames "model.lisp" directory)))))
-              (when (and json (plusp (length source)))
+              ;; a replay compiles here, so only on this room's engine: a
+              ;; solids model on the free engine dies asking for a brep
+              (when (and json (plusp (length source))
+                         (equal (or (gethash "engine" json) "gendl") (engine-name)))
                 (make-room-for-replay!)
                 (let* ((keyword (intern (string-upcase (format nil "pl-replay-~a" id)) :keyword))
                        (package (progn (let ((old (find-package keyword))) (when old (delete-package old)))
@@ -328,6 +332,9 @@ compiled again, if it is not already -- and answer the viewer's URL."
     (cond ((not *browsing?*) (browsing-off req ent))
           ((not (and record (record-visible? record (request-owner-key req json))))
            (refuse req ent net.aserve:*response-not-found* "No such archived session."))
+          ((not (equal (or (gethash "engine" record) "gendl") (engine-name)))
+           (refuse req ent "This session was built in the ~a; open it there."
+                   (or (cdr *sibling-lab*) "other lab")))
           (t (multiple-value-bind (replay text) (ensure-replay id)
                (when replay (funnel-count! "replays"))
                (if (null replay)

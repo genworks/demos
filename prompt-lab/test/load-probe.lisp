@@ -60,14 +60,17 @@ octets (a PNG is not text, and the client would try to decode it)."
       (error () (values 0 0 (/ (- (get-internal-real-time) start) (float internal-time-units-per-second)) "")))))
 
 (defun load-probe-ids (base ids)
-  "The newest IDS archived session ids of BASE's lab that left a model."
+  "The newest IDS archived session ids of BASE's lab that left a model
+built on its own engine (a shared archive lists the other lab's too)."
   (multiple-value-bind (status length seconds text) (load-probe-request (format nil "~a/api/archive" base))
     (declare (ignore length seconds))
     (unless (eql status 200) (error "The archive door of ~a answered ~a." base status))
   (let* ((json (yason:parse text))
-         (sessions (and (hash-table-p json) (gethash "sessions" json))))
+         (sessions (and (hash-table-p json) (gethash "sessions" json)))
+         (engine (and (hash-table-p json) (gethash "engine" json))))
     (loop for s across (coerce sessions 'vector)
-          when (and (hash-table-p s) (eq (gethash "model" s) t) (stringp (gethash "id" s)))
+          when (and (hash-table-p s) (eq (gethash "model" s) t) (stringp (gethash "id" s))
+                    (equal (gethash "engine" s) engine))
             collect (gethash "id" s) into found
           when (>= (length found) ids) do (return found)
           finally (return found)))))

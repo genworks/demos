@@ -228,7 +228,13 @@ when one runs, when thumbnails are off, or when there is no rasteriser."
              (not (and *thumb-thread* (bt:thread-alive-p *thumb-thread*))))
     (setf *thumb-thread*
           (bt:make-thread #'(lambda ()
-                              (loop (handler-case (draw-thumbnails!)
+                              (loop ;; the archive listing's summaries read too, so the
+                                    ;; first visitor after a restart does not wait while
+                                    ;; every record is parsed (~13 ms a record, browse.lisp)
+                                    (handler-case (archive-summaries)
+                                      (error (condition)
+                                        (format *error-output* "~&prompt-lab summaries: ~a~%" condition)))
+                                    (handler-case (draw-thumbnails!)
                                       (error (condition)
                                         (format *error-output* "~&prompt-lab thumbnails: ~a~%" condition)))
                                     (sleep *thumb-interval*)))
