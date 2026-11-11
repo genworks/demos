@@ -540,6 +540,12 @@ log, status, credits and downloads sections are recomputed from."
     model-stamp nil :settable)
    ("The model file's text as the editor was last sent it (sheets-hear)."
     shown-source "" :settable)
+   ("Boolean. Whether the browser said it is a desk, wider than a phone (the
+shade-desk action, on load)."
+    desk? nil :settable)
+   ("Boolean. Whether the model's pane has been put in Shaded on a desk
+(shade-if-desk!); once only, so the visitor's own View menu choice stands."
+    shaded? nil :settable)
    ("String or nil. The id of a private session named on the address, which
 the sheet shows only once its owner's key is proven (claim)."
     private-id nil :settable)
@@ -589,11 +595,12 @@ not hold."
    (tabs (list "Prompt" "Model" "Parts" "Code"))
    (head-html (the lab-head-html))
    (body-html (the lab-body-html))
-   ;; on a phone the inspector holds the inputs alone
-   (user-mode?-default nil)
+   ;; the inspector holds the model's inputs alone, on a desk as on a phone;
+   ;; Edit > User Mode shows every slot to whoever wants them
+   (user-mode?-default t)
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
-   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :author :wear-skin :upload :adopt
+   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :author :wear-skin :shade-desk :upload :adopt
                            :deploy :undeploy :connect :open-project :push-project :deploy-project))
 
    ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
@@ -696,6 +703,11 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                     (format nil "$skinPref = (function(){try{return (localStorage.getItem('prompt-lab-skin')||'').toLowerCase()}catch(e){return ''}})(); $skinPref && $skinPref !== ~a && ~a"
                             (js-string-literal (sluice:skin-name (the skin)))
                             (the (datastar-action :wear-skin :options "{filterSignals: {include: /^skinPref$/}}")))))
+            ;; a desk (wider than the phone's layout) sees the model shaded
+            (:span :|data-init|
+                   (escape-string-minimal-plus-quotes
+                    (format nil "window.innerWidth > 760 && ~a"
+                            (the (datastar-action :shade-desk :options "{filterSignals: {include: /^$/}}")))))
             ;; errors and notices as a toast too, seen from any tab
             (:div :id "pl-toast" :class "pl-toast" :style "display:none" :role "status")
             (:span :|data-effect| "$error && window.plToast && plToast($error, 'error')")
@@ -810,7 +822,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               ;; a free public lab says what it is before the first build
                               (when *free-lab?*
                                 (htm (:p :class "pl-line pl-public"
-                                         "This is the free public lab: building here costs you nothing -- each build draws a few rivets from a community pot that Genworks keeps filled.  Everything made here -- your prompts, the model and its code -- is public the moment it is made, in the archive for anyone to read and reuse.  Nothing is sold here; a private lab of your own, where you can sell what you make, is a rung up "
+                                         "This is the free public lab: building here costs you nothing -- each build draws a few rivets from a community pot that Genworks keeps filled.  A build typically draws 15 to 50 rivets; a web app refined over several prompts can draw 100 or more.  Everything made here -- your prompts, the model and its code -- is public the moment it is made, in the archive for anyone to read and reuse.  Nothing is sold here; a private lab of your own, where you can sell what you make, is a rung up "
                                          (:a :href "https://genworks.com/authors/" :target "_blank" :rel "noopener" "the ladder")
                                          ".")))
                               (:textarea :id "pl-prompt" :rows "4" :|data-bind:prompt| ""
@@ -1518,7 +1530,27 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                          *hidden-lines-max-leaves*))
             (ignore-errors (the viewport (set-slot! :hidden-lines :remove))))
           (when (the root-object)
-            (ignore-errors (the viewport (draw-leaves! (the root-object)))))))))
+            (ignore-errors (the viewport (draw-leaves! (the root-object)))))
+          (the shade-if-desk!)))))
+
+   (shade-desk
+    (signals)
+    ;; the page, on load, wider than a phone: a model drawn here opens shaded
+    (declare (ignore signals))
+    (the (set-slot! :desk? t))
+    (the shade-if-desk!))
+
+   (shade-if-desk!
+    ()
+    ;; the model's pane in Shaded (X_ITE) on a desk, so the parts show the
+    ;; colours the agent gave them; once, and only over the wireframe it
+    ;; opened in, so a format the visitor picked is never taken back
+    (let ((session (the session)))
+      (when (and (the desk?) (not (the shaded?)) session
+                 (not (app-staged? session)) (the root-object)
+                 (eq (ignore-errors (the viewport image-format)) :svg))
+        (the (set-slot! :shaded? t))
+        (ignore-errors (the viewport (set-slot! :image-format :x-ite))))))
 
    (wear-skin
     (signals)

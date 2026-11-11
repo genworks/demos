@@ -158,10 +158,12 @@ toll, and for a model a download it stands on); the state door answers
 Everything is priced and paid in **rivets**, the lab's own unit, which
 visitors buy in packets.  Of what users pay, the house keeps its
 **monetization fee**: `*house-fee-percents*`, 10% of an open-source
-deployment's takings and 15% of a closed-source one's.  The author may
+deployment's takings and 15% of a closed-source one's.  Where the house's
+gate pours it into the pot as each payment settles, the author may
 give more, to the lab's community pot of rivets that pays for
 everyone's builds: a slider on the Monetize form, from
-`*pot-percent-least*` upwards, in points on top of the fee.  The author
+`*pot-percent-least*` upwards, in points on top of the fee (nil, the
+default, offers no slider).  The author
 is owed the rest, held in rivets and paid out after each quarter at
 that day's rate.  The terms are written into each deployment's record
 on the day.  The records and the books are kept by

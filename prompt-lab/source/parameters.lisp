@@ -506,11 +506,15 @@ set of deployments' terms at the gate again (the reaper's thread and the
 front's sweeper), so a gate that was away or was replaced is brought up
 to date.")
 
-(defparameter *pot-percent-least* 0
+(defparameter *pot-percent-least* nil
   "Number or nil. The least an author adds of every payment to the lab's
 community pot, in percentage points on top of the monetization
 fee; the Monetize tile's slider starts here and goes up.  Nil: no slider,
-and nothing goes to the pot.  The fee itself is the house's.")
+and nothing goes to the pot.  The fee itself is the house's.  Nil by
+default until the gate pours each payment's pot share into the pot as it
+settles (cyclops llm-gate.lisp); before that the share was taken with
+the fee and only booked, so the slider promised what nothing kept.  A
+stack's init sets 0 where its gate does pour.")
 
 (defun house-fee-percents ()
   "The fee rates for this lab's engine: the :open and :closed plist from

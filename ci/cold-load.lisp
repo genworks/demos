@@ -718,6 +718,10 @@ loaded) its page too."
                           (name "ci-smoke-toll"))
                      (json-of :post (door "agent") :headers headers
                               :json (table "event" "stopped" "session" app "text" "Only a test."))
+                     ;; the slider is offered only where the gate pours the share
+                     ;; (parameters.lisp *pot-percent-least*, nil by default): offer
+                     ;; it for the length of this smoke, which checks the books' split
+                     (setf (symbol-value (lab '#:*pot-percent-least*)) 0)
                      (unwind-protect
                           (progn
                             ;; the author's slider: 20 points for the community pot
@@ -767,7 +771,8 @@ loaded) its page too."
                                      (equal (gethash "unit" earned) "rivets")
                                      (zerop (length (gethash "quarters" earned)))
                                      (null (uiop:symbol-call :prompt-lab :revenue-report))))))
-                       (http :post (door "undeploy") :headers headers :json (table "name" name))))))
+                       (http :post (door "undeploy") :headers headers :json (table "name" name))
+                       (setf (symbol-value (lab '#:*pot-percent-least*)) nil)))))
           (setf (symbol-value (lab '#:*external-agent?*)) nil)
           ;; the community pot (page.lisp): what the lab has heard from a
           ;; gate that keeps one is everyone's to see, and an empty pot
