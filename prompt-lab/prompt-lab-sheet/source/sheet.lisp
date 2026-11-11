@@ -565,7 +565,13 @@ not hold."
       (:h2 :class "mb-4 text-center text-xl font-semibold" "Your model appears here.")
       (:p :class "mb-3"
           "Describe it in the box at the left and press Build.  The agent writes it as Gendl source, shown below, and draws it here, with its parts in the tree and its inputs in the inspector, to change by hand.")))
+   ;; and not the sluice's instructions after it, which are for a developer
+   ;; filling the viewport from the tree (a sluice older than the input
+   ;; reads this as a slot of the sheet's own, and says them anyway)
+   (empty-display-list-help? nil)
    (tiles (list (list :object (the prompt-tile) :place :left :tab "Prompt")
+                ;; what was asked and the agent's answer, under the prompt
+                (list :object (the reply-section) :place :left :tab "Prompt")
                 ;; a visitor's own project, from GitLab (project.lisp)
                 (list :object (the project-tile) :place :left :tab "Prompt")
                 (list :object (the app-section) :place :left :tab "Prompt")
@@ -778,7 +784,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              (htm (:label :class "pl-pick"
                                                           (:input :type "radio" :name "pl-kind" :value (kind-name kind)
                                                                   :|data-bind:kind| "")
-                                                          " " (esc (string-downcase (kind-label kind)))))))))
+                                                          " " (esc (string-downcase (kind-label kind))))))))
+                                     (htm (:p :class "pl-line pl-dim" :style "display:none" :|data-show| "$kind == 'app'"
+                                              "A web app is a page of its own around the model -- its inputs as a form, its results and a drawing -- at an address anyone can open and use.")))
                               ;; closed source is chosen here, before the session
                               ;; opens with the first build or upload (deploy.lisp)
                               (when (and *closed-source?* *deployments?*)
@@ -1171,6 +1179,41 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                               (and session (ignore-errors (model-body session)))
                                               "")))))))
 
+   ;; What the visitor last asked and the agent's answer to it, under the
+   ;; prompt box, where a newcomer looks after Build; the Log further down
+   ;; keeps every entry.  While the agent works, what it is writing.
+   (reply-section
+    :type 'base-html-div
+    :inner-html (progn
+                  (the revision)
+                  (let* ((log (if (the archive-id)
+                                  (let ((record (the archive-record)))
+                                    (loop for entry in (and record (gethash "log" record))
+                                          when (and (listp entry) (= (length entry) 3) (integerp (first entry)))
+                                            collect entry))
+                                  (and (the session) (session-log (the session)))))
+                         (kind-of #'(lambda (entry) (string-downcase (string (second entry)))))
+                         (asked (find "prompt" log :key kind-of :test #'string= :from-end t))
+                         (answer (and asked
+                                      (find-if #'(lambda (entry) (member (funcall kind-of entry) '("done" "stopped") :test #'string=))
+                                               (rest (member asked log)) :from-end t))))
+                    (flet ((plain (text)
+                             ;; the reply's markdown emphasis, which the page does not render
+                             (let ((text (copy-seq text)))
+                               (loop for at = (search "**" text) while at
+                                     do (setf text (concatenate 'string (subseq text 0 at) (subseq text (+ at 2)))))
+                               text)))
+                      (with-lhtml-string ()
+                        (when asked
+                          (htm (:div :class "pl-card pl-reply"
+                                     (:p :class "pl-line pl-dim" "You asked: " (esc (third asked)))
+                                     (if answer
+                                         (htm (:div :class "pl-line" :style "white-space:pre-wrap;max-height:24rem;overflow:auto"
+                                                    (esc (plain (third answer)))))
+                                         (htm (:p :class "pl-line" :style "white-space:pre-wrap"
+                                                  (:span :|data-show| "!$live" "The agent is at work on it...")
+                                                  (:span :|data-text| "$live"))))))))))))
+
    (status-section
     :type 'base-html-div
     :inner-html (progn
@@ -1217,10 +1260,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                (htm (:span "No session yet: your first build opens one.")))
                               (t
                                 (let ((usage (session-usage session)) (pot (pot)))
-                                  (htm (:span (fmt "Session ~a" (session-id session)))
+                                  (htm (:span :title (format nil "The model read ~:d tokens and wrote ~:d" (getf usage :input) (getf usage :output))
+                                              (fmt "Session ~a" (session-id session)))
                                        (:span (str (if (session-busy? session) "working" "ready")))
                                        (:span (fmt "~a of ~a prompts" (prompts-used session) *max-prompts-per-session*))
-                                       (:span (fmt "tokens ~:d in, ~:d out" (getf usage :input) (getf usage :output)))
                                        (when pot
                                          (htm (:span (fmt "pot ~:d ~a" (max 0 (floor (or (getf pot :credits) 0))) (units)))))
                                        ;; closing the session to watchers, once it has bought credits
@@ -1462,6 +1505,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                       ((app-defined? session) (app-symbol session))))))
       (when (and symbol (not (eq (the root-object-type) symbol)))
         (the (set-slot! :root-object-type symbol))
+        ;; the sluice names the root in the tree by printing its type; printed
+        ;; from the session's own package it reads MODEL, not PL-<ID>::MODEL
+        (let ((*package* (or (symbol-package symbol) *package*)))
+          (ignore-errors (the root-object)))
         ;; hidden lines removed up to *hidden-lines-max-leaves* leaves
         ;; (quadratic in the edges; a pane's View > Hidden lines turns it on for
         ;; a larger model), and the model's leaves drawn

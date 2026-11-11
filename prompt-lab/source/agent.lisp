@@ -126,7 +126,7 @@ The modelling primer, for an app that shows geometry:
 
 How to work:
 1. From the request, state to yourself the overall envelope in mm (x y z).
-2. write_model: one define-object named MODEL whose input-slot defaults build exactly what was asked, with the key dimensions as inputs; helper objects and functions as needed.  The viewer gives the visitor a live control for every input of MODEL: declare input-controls (ranges, choices) where a bare field would not do.
+2. write_model: one define-object named MODEL whose input-slot defaults build exactly what was asked, with the key dimensions as inputs; helper objects and functions as needed.  The viewer gives the visitor a live control for every input of MODEL: declare input-controls (ranges, choices) where a bare field would not do.  So make an input only what a person would want to change; a placement, a center or any value you set for your own convenience goes in :computed-slots, which keeps it out of their panel.
 3. check_model with expected_size~a.  Fix what is wrong.  Few, deliberate calls: a correct model in three to six calls is the aim.
 4. Finish with a short reply to the visitor: what you built, which inputs they can change in the viewer's Inputs panel, and any limits.  No code in the reply; the code is in their editor.
 
