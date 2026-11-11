@@ -559,6 +559,12 @@ not hold."
   (;; the sluice's inputs
    (title (lab-title))
    (audience :public)
+   ;; the empty viewport speaks to a visitor, not to a Gendl developer
+   (empty-display-list-greeting
+    (with-lhtml-string ()
+      (:h2 :class "mb-4 text-center text-xl font-semibold" "Your model appears here.")
+      (:p :class "mb-3"
+          "Describe it in the box at the left and press Build.  The agent writes it as Gendl source, shown below, and draws it here, with its parts in the tree and its inputs in the inspector, to change by hand.")))
    (tiles (list (list :object (the prompt-tile) :place :left :tab "Prompt")
                 ;; a visitor's own project, from GitLab (project.lisp)
                 (list :object (the project-tile) :place :left :tab "Prompt")
@@ -796,7 +802,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               ;; a free public lab says what it is before the first build
                               (when *free-lab?*
                                 (htm (:p :class "pl-line pl-public"
-                                         "This is the free public lab: everything made here -- your prompts, the model and its code -- is public the moment it is made, in the archive for anyone to read and reuse.  Nothing is sold here; a private lab of your own, where you can sell what you make, is a rung up the ladder.")))
+                                         "This is the free public lab: building here costs you nothing -- each build draws a few rivets from a community pot that Genworks keeps filled.  Everything made here -- your prompts, the model and its code -- is public the moment it is made, in the archive for anyone to read and reuse.  Nothing is sold here; a private lab of your own, where you can sell what you make, is a rung up "
+                                         (:a :href "https://genworks.com/authors/" :target "_blank" :rel "noopener" "the ladder")
+                                         ".")))
                               (:textarea :id "pl-prompt" :rows "4" :|data-bind:prompt| ""
                                          :|data-attr:placeholder| "$kind == 'app' ? 'Describe the web app, e.g. a page that sizes a shelf bracket from its load and shows it' : 'Describe what to build, e.g. a picnic table with two benches'"
                                          :placeholder "Describe what to build, e.g. a picnic table with two benches")
@@ -1073,7 +1081,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                             :max "50" :|data-bind:dpot| ""))
                                             (:p :class "pl-line"
                                                 (:span :|data-text|
-                                                       (format nil "'You receive ' + (($closed ? ~d : ~d) - Number($dpot)) + '% of what its users pay.'"
+                                                       (format nil "'You receive ' + (($closed ? ~d : ~d) - Number($dpot)) + '% of what its users pay, after the card cost.'"
                                                                (- 100 (house-fee-percent t)) (- 100 (house-fee-percent nil)))))))
                                      ;; the author's switch: a prepaid balance per visitor for the
                                      ;; app's tolls (the purse, deploy.lisp), how a toll under
