@@ -165,7 +165,7 @@ for the lab's own pages (a deployed model's viewer)."
 
 (defparameter *deployment-doors*
   '(("toll-pay" . toll-pay-door) ("toll-return" . toll-return-door) ("app-file" . app-file-door)
-    ("host-topup" . host-topup-door) ("host-return" . host-return-door))
+    ("host-topup" . host-topup-door) ("host-settle" . host-settle-door) ("host-return" . host-return-door))
   "Alist, the side doors a deployment's own address carries (deployment-door-url)
 and the functions that answer them.")
 
@@ -1730,17 +1730,24 @@ hosting for it."
               (:body :style "font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5"
                      (:h1 :style "font-size: 1.4rem" (esc (format nil "~a is paused" title)))
                      (let ((due (and balance (gethash "minimum_due" balance))))
-                       (if (and (realp due) (plusp due))
-                           ;; a closed app's monthly minimum unmet (ruling 49)
-                           (htm (:p (esc (format nil "Its monthly minimum of revenue~@[ for ~a~] was not met: ~a is owed to its host.  It runs again when hosting is added for it, which settles that first."
-                                                 (gethash "minimum_month" balance) (money-text due)))))
+                       (if (and (realp due) (plusp due) (not (truthy? (gethash "dues_carried" balance))))
+                           ;; a closed app's monthly minimums unpaid (rulings 49, 61): paid exactly, here
+                           (htm (:p (esc (format nil "Its monthly minimum in fees to its host was not met~@[ (to ~a)~]: ~a is due.  It runs again once that is paid."
+                                                 (gethash "minimum_month" balance) (money-text due))))
+                                (:form :method "post" :action (deployment-door-url name "host-settle")
+                                       (:input :type "hidden" :name "deployed" :value name)
+                                       (:button :type "submit" :style "font:inherit;cursor:pointer;padding:.3rem .8rem"
+                                                (esc (format nil "Pay what is due: ~a" (money-text (max due 50)))))))
                            (htm (:p "Its hosting allowance for the month, and what was added for it, are spent: it runs again when hosting is added."))))
                      (when balance
                        (htm (:p :style "color: #666"
                                 (esc (format nil "This month: ~a of ~a free credits used; ~a bought credits left."
                                              (round (or (gethash "free_used" balance) 0)) (or (gethash "free_credits" balance) 0)
                                              (round (or (gethash "credits" balance) 0)))))))
-                     (when offers
+                     ;; hosting does not settle dues: no packs while dues stop it
+                     (when (and offers
+                                (not (let ((due (and balance (gethash "minimum_due" balance))))
+                                       (and (realp due) (plusp due) (not (truthy? (gethash "dues_carried" balance)))))))
                        (htm (:p "Add hosting for it:")
                             (:p (dolist (offer offers)
                                   (htm (:form :method "post" :action (deployment-door-url name "host-topup") :style "display:inline;margin-right:.6rem"
@@ -1779,9 +1786,36 @@ for a deployment at the gate and go to Stripe's page."
                                        :response net.aserve:*response-service-unavailable*
                                        :type "text/html; charset=utf-8"))))))))
 
+(defun host-settle-door (req ent)
+  "POST <prefix>/host-settle (form: deployed): pay exactly what a closed
+deployment's unpaid monthly minimums come to, at the gate (its
+host-settle, the house's own sale), and go to Stripe's page; back at the
+return door the dues are settled and the app runs again."
+  (let* ((name (query-value req "deployed"))
+         (record (and (stringp name) *deployments?* (deployment-record name)))
+         (origin (request-origin req)))
+    (if (null record)
+        (refuse req ent net.aserve:*response-not-found* "There is no such deployment.")
+        (multiple-value-bind (answer status)
+            (hosting-ask "host-settle" name
+                         "title" (or (gethash "title" record) name)
+                         "success_url" (format nil "~a~a?deployed=~a&settle=1" origin (deployment-door-url name "host-return") name)
+                         "cancel_url" (format nil "~a~a" origin (deployment-path name)))
+          (let ((url (and answer (gethash "url" answer))))
+            (if (and (eql status 200) (stringp url))
+                (redirect-to req ent url)
+                (respond-deployment req ent
+                                    (deployment-page "The minimum could not be paid"
+                                                     (list (or (ignore-errors (gethash "message" (gethash "error" answer)))
+                                                               "The gate did not answer; try again in a moment."))
+                                                     :back (deployment-path name) :back-label (format nil "Back to ~a" (or (gethash "title" record) name)))
+                                    :response net.aserve:*response-service-unavailable*
+                                    :type "text/html; charset=utf-8")))))))
+
 (defun host-return-door (req ent)
-  "GET <prefix>/host-return?deployed=&checkout=: back from Stripe; the
-gate credits the deployment's hosting once and the deployment runs again."
+  "GET <prefix>/host-return?deployed=&checkout=[&settle=1]: back from
+Stripe; the gate credits the deployment's hosting -- or, with settle, its
+unpaid minimums -- once, and the deployment runs again."
   (let* ((name (query-value req "deployed"))
          (record (and (stringp name) *deployments?* (deployment-record name)))
          (checkout (query-value req "checkout")))
@@ -1799,12 +1833,16 @@ gate credits the deployment's hosting once and the deployment runs again."
                  (book-hosting-line! name checkout answer))
                (respond-deployment
                 req ent
-                (deployment-page (cond ((equal outcome "credited") "Hosting added")
+                (deployment-page (cond ((and (query-value req "settle") (member outcome '("credited" "already") :test #'equal))
+                                        "The monthly minimum is paid")
+                                       ((equal outcome "credited") "Hosting added")
                                        ((equal outcome "already") "Hosting was already added")
                                        ((equal outcome "unpaid") "The payment has not completed yet")
                                        ((equal outcome "expired") "The checkout expired unpaid")
                                        (t "Hosting could not be confirmed"))
-                                 (list (cond ((member outcome '("credited" "already") :test #'equal)
+                                 (list (cond ((and (query-value req "settle") (member outcome '("credited" "already") :test #'equal))
+                                              (format nil "~a runs again." (or (gethash "title" record) name)))
+                                             ((member outcome '("credited" "already") :test #'equal)
                                               (format nil "~a has ~a hosting credits now and runs again."
                                                       (or (gethash "title" record) name) (round (or (gethash "credits" answer) 0))))
                                              (t (or (and answer (gethash "text" answer)) (format nil "The gate answered ~a." status)))))
@@ -1839,31 +1877,36 @@ already is not booked twice."
         (error (condition) (format *error-output* "~&prompt-lab: hosting for ~a not booked: ~a~%" name condition) nil)))))
 
 ;;
-;; A CLOSED deployment's monthly minimum (the user's ruling 49,
-;; 2026-11-12: "$10 minimum revenue for the app").  A closed app hosted
-;; here takes at least *closed-minimum-cents* of revenue from its users a
-;; calendar month, or what the house set for it ("minimum_cents", $0
-;; included); an open one owes none (ruling 44).  Once a month, for the
-;; month just ended, its revenue is reckoned from the books -- gross, net of
-;; refunds and disputes, real payments only -- and the house's share of
-;; what fell short (the deployment's fee rate: $1.50 of a missing $10 at
-;; 15%) is told to the gate's host-minimum as due, which stops the
-;; deployment's hosting until hosting bought for it settles it.  A
-;; deployment made during that month is not reckoned.  On the reaper's
-;; thread where the books are kept, and the private front's sweeper.
+;; A CLOSED deployment's monthly minimum (the user's rulings 49 and 61,
+;; 2026-11-12: "$10 of fees to Genworks").  A closed app hosted here
+;; brings the house at least *closed-minimum-cents* of FEES a calendar
+;; month, or what the house set for it ("minimum_cents", $0 included); an
+;; open one owes none (ruling 44).  Once a month, for the month just
+;; ended, its fees are reckoned from the books -- the fee the house keeps,
+;; net of refunds and disputes, real payments only -- and what fell short is
+;; told to the gate's host-minimum as that month's due, with the
+;; deployment's author.  The gate keeps the dues: a monetizing author's
+;; are carried, the app running on, up to three months and $30; anyone
+;; else's, or past those, stop the hosting until paid -- exactly, at the
+;; paused page's 'Pay what is due' (the gate's host-settle).  A deployment
+;; its dues have kept paused *closed-dues-takedown-days* is taken down
+;; (sweep-unpaid-dues!): its code stays its author's and is wiped here.  A
+;; deployment made during the month reckoned is not reckoned.  On the
+;; reaper's thread where the books are kept, and the private front's
+;; sweeper.
 ;;
 
 (defun deployment-minimum (record)
-  "The monthly minimum in cents RECORD's deployment owes, or nil: a closed
-deployment's own, else *closed-minimum-cents*; an open one, none."
+  "The monthly minimum in cents of fees RECORD's deployment owes, or nil: a
+closed deployment's own, else *closed-minimum-cents*; an open one, none."
   (when (truthy? (gethash "closed" record))
     (let ((own (gethash "minimum_cents" record)))
       (if (realp own) own *closed-minimum-cents*))))
 
-(defun deployment-revenue-cents (name from to)
-  "What deployment NAME's users paid from FROM to before TO, gross, net of
+(defun deployment-fees-cents (name from to)
+  "The fees the house kept on deployment NAME from FROM to before TO, net of
 refunds and disputes, real payments only, in cents."
-  (let ((field (monocle::amount-field (lab-house) "gross"))
+  (let ((field (monocle::amount-field (lab-house) "fee"))
         (sum 0))
     (dolist (line (monocle:revenue-lines (lab-house)) sum)
       (let ((at (gethash "time" line)))
@@ -1879,9 +1922,9 @@ refunds and disputes, real payments only, in cents."
 (defun reckon-closed-minimums! (&key (now (get-universal-time)) force?)
   "For the calendar month before NOW's, once (FORCE? again): each closed
 deployment whose fees fell short of its minimum is told to the gate's
-host-minimum with the shortfall.  The month reckoned is kept beside the
-books, so a restart does not reckon it twice (which would undo a part
-settled).  Answers the (name . shortfall-cents) pairs the gate took."
+host-minimum with the shortfall as that month's due, and its author.  The
+month reckoned is kept beside the books, so a restart does not reckon it
+twice.  Answers the (name . due-cents) pairs the gate took."
   (when (and *deployments?* *books?*)
     (multiple-value-bind (s m h d month year) (decode-universal-time now 0)
       (declare (ignore s m h d))
@@ -1897,25 +1940,54 @@ settled).  Answers the (name . shortfall-cents) pairs the gate took."
             (dolist (record (deployment-records))
               (let ((name (gethash "name" record))
                     (minimum (deployment-minimum record))
-                    (deployed (gethash "deployed" record)))
+                    (deployed (gethash "deployed" record))
+                    (author (let ((a (gethash "author" record))) (and (wallet-id? a) a))))
                 (when (and (stringp name) (realp minimum) (plusp minimum) (realp deployed) (< deployed from))
-                  ;; the house's share of the revenue that fell short
-                  (let ((short (ceiling (* (max 0 (- minimum (deployment-revenue-cents name from to)))
-                                           (let ((percent (gethash "fee_percent" record)))
-                                             (if (realp percent) percent (house-fee-percent t)))
-                                           1/100))))
-                    (when (plusp short)
+                  (let ((due (ceiling (max 0 (- minimum (deployment-fees-cents name from to))))))
+                    (when (plusp due)
                       (multiple-value-bind (answer status)
-                          (ignore-errors (hosting-ask "host-minimum" name "due_cents" short "month" key))
+                          (ignore-errors (apply #'hosting-ask "host-minimum" name "due_cents" due "month" key
+                                                (and author (list "author" author))))
                         (declare (ignore answer))
                         (if (eql status 200)
-                            (push (cons name short) reported)
+                            (push (cons name due) reported)
                             (setq failed t))))))))
             ;; a gate that did not take one is asked again at the next pass
             (unless failed
               (ensure-directories-exist file)
               (write-text-file key file))
             (nreverse reported)))))))
+
+(defvar *dues-swept* 0 "When sweep-unpaid-dues! last asked the gate.")
+
+(defun sweep-unpaid-dues! (&key (now (get-universal-time)) force?)
+  "Once a day (FORCE? now): every closed deployment the gate says its dues
+have kept paused *closed-dues-takedown-days* or more is taken down -- its
+code stays its author's, and is wiped here -- and the house is told.
+Answers the names taken down."
+  (when (and *deployments?* *books?* (or force? (> (- now *dues-swept*) 86400)))
+    (setq *dues-swept* now)
+    (let ((down nil))
+      (dolist (record (deployment-records))
+        (let ((name (gethash "name" record)))
+          (when (and (stringp name) (deployment-minimum record))
+            (multiple-value-bind (answer status) (ignore-errors (hosting-ask "host-balance" name))
+              (let ((due (and (eql status 200) (hash-table-p answer) (gethash "minimum_due" answer)))
+                    (since (and (hash-table-p answer) (gethash "stopped_since" answer))))
+                (when (and (realp due) (plusp due) (not (truthy? (gethash "dues_carried" answer)))
+                           (realp since) (plusp since)
+                           (> (- now since) (* *closed-dues-takedown-days* 86400)))
+                  (bt:with-lock-held (*deploy-lock*)
+                    (drop-deployed! name)
+                    (monocle:delete-deployment! (lab-house) name)
+                    (deregister-deployment! name))
+                  (ignore-errors
+                   (gate-post "alert" (h "title" "Prompt lab: a closed app taken down for unpaid dues"
+                                         "text" (format nil "~a (~a lab): paused ~d days for ~a of unpaid monthly minimums; taken down, its code wiped here."
+                                                        name (engine-name) (floor (- now since) 86400) (money-text due))
+                                         "priority" "default" "tags" "wastebasket")))
+                  (push name down)))))))
+      (nreverse down))))
 
 (defun set-deployment-minimum! (name cents)
   "The house sets deployment NAME's own monthly minimum to CENTS (0 waives

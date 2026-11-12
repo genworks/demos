@@ -447,13 +447,18 @@ days are left.")
 names it.")
 
 (defparameter *closed-minimum-cents* 1000
-  "Number or nil.  The least REVENUE a CLOSED deployment hosted here must
-take from its users each calendar month (cents; the user's ruling 49:
-$10), unless the house sets its own (the deployment's \"minimum_cents\",
-$0 included).  Short of it at the month's end, the house's share of the
-shortfall -- at the deployment's fee rate, $1.50 of a missing $10 at 15% --
-is due, and its hosting stops until hosting bought for it settles that.
-Nil: no minimum anywhere.")
+  "Number or nil.  The least a CLOSED deployment hosted here must bring the
+house in FEES each calendar month (cents; the user's rulings 49 and 61:
+$10 of fees), unless the house sets its own (the deployment's
+\"minimum_cents\", $0 included).  What falls short is due: the gate keeps
+the dues, carries a monetizing author's for up to three months and $30
+with the app running, and otherwise stops the hosting until they are paid
+exactly (deploy.lisp).  Nil: no minimum anywhere.")
+
+(defparameter *closed-dues-takedown-days* 90
+  "Integer.  Days a closed deployment may stay paused for unpaid monthly
+minimums before it is taken down, its code left with its author and wiped
+here (sweep-unpaid-dues!).")
 
 (defparameter *house-token-file* nil
   "Pathname or nil.  A file whose first line is the token the house's doors

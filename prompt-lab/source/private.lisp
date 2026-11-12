@@ -402,6 +402,7 @@ nothing (*books?* nil there)."
     (ignore-errors (sweep-hosting!))
     ;; closed deployments' monthly minimums, once a month (deploy.lisp)
     (ignore-errors (reckon-closed-minimums!))
+    (ignore-errors (sweep-unpaid-dues!))
     ;; and the root's terms at the gate: at the front's start, then every *register-sweep-seconds*
     (ignore-errors (register-deployments!))))
 

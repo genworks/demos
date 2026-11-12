@@ -1031,10 +1031,11 @@ loaded) its page too."
                                   (let* ((prev-month (if (= month 1) 12 (1- month)))
                                          (prev-year (if (= month 1) (1- year) year))
                                          (mid (encode-universal-time 0 0 12 15 prev-month prev-year 0)))
-                                    ;; $4 of revenue against a $10 minimum
+                                    ;; $4 of revenue, its fee at the closed rate, against $10 of fees
                                     (uiop:symbol-call :monocle :book-revenue! house name 400 :toll "ci" :reference "ci-minimum")
-                                    (unless (eql 400 (call :deployment-revenue-cents name (- now 60) (+ now 60)))
-                                      (error "the booked payment's revenue does not read 400"))
+                                    (unless (= (call :deployment-fees-cents name (- now 60) (+ now 60))
+                                               (* 400 (call :house-fee-percent t) 1/100))
+                                      (error "the booked payment's fee does not read the closed rate's share of 400"))
                                     (let ((moved (with-output-to-string (out)
                                                    (with-input-from-string (in (uiop:read-file-string books))
                                                      (loop for l = (read-line in nil) while l
@@ -1046,21 +1047,36 @@ loaded) its page too."
                                                                           out))))))
                                       (with-open-file (out books :direction :output :if-exists :supersede)
                                         (write-string moved out)))))
-                                ;; the gate is stubbed: what would be told, caught
+                                ;; the gate is stubbed: what would be told, caught; its balance
+                                ;; says the app has been paused 91 days for 940 cents of dues, and
+                                ;; its settle door names a page of this lab to go to
                                 (setf (fdefinition (lab '#:hosting-ask))
                                       (lambda (door dname &rest plist)
                                         (push (list* door dname plist) asked)
-                                        (values (make-hash-table :test #'equal) 200)))
+                                        (let ((answer (make-hash-table :test #'equal)))
+                                          (cond ((equal door "host-balance")
+                                                 (setf (gethash "minimum_due" answer) 940
+                                                       (gethash "stopped_since" answer) (- (get-universal-time) (* 91 86400))))
+                                                ((equal door "host-settle")
+                                                 (setf (gethash "url" answer) (format nil "http://127.0.0.1:~a~a/api/config" (http-port) prefix))))
+                                          (values answer 200))))
                                 (let* ((reported (call :reckon-closed-minimums! :force? t))
                                        (mine (assoc name reported :test #'equal)))
-                                  ;; the house's share of the $6 that fell short, at the closed rate
-                                  (unless (and mine (eql (cdr mine)
-                                                         (ceiling (* 600 (call :house-fee-percent t) 1/100))))
-                                    (error "the shortfall was not reckoned from the revenue: ~s" reported))
+                                  ;; what the fees fell short of $10 by
+                                  (unless (and mine (eql (cdr mine) (ceiling (- 1000 (* 400 (call :house-fee-percent t) 1/100)))))
+                                    (error "the shortfall was not reckoned from the fees: ~s" reported))
                                   (unless (find-if (lambda (a) (and (equal (first a) "host-minimum") (equal (second a) name))) asked)
                                     (error "the gate was not told")))
                                 (when (assoc name (call :reckon-closed-minimums!) :test #'equal)
                                   (error "the same month was reckoned twice"))
+                                ;; the paused page's 'Pay what is due' goes to the gate's checkout:
+                                ;; a 302 (this client follows no redirect after a POST), the gate asked
+                                (multiple-value-bind (body status)
+                                    (http :post (format nil "~a/host-settle?deployed=~a" prefix name))
+                                  (declare (ignore body))
+                                  (unless (and (member status '(302 303))
+                                               (find-if (lambda (a) (and (equal (first a) "host-settle") (equal (second a) name))) asked))
+                                    (error "the settle door did not send the payer to the gate's checkout (~a)" status)))
                                 ;; the house's own minimum: $0 waives it
                                 (let ((url (format nil "~a?name=~a&cents=0" (door "house/minimum") name)))
                                   (unless (eql 404 (nth-value 1 (http :post url)))
@@ -1074,6 +1090,14 @@ loaded) its page too."
                                     (error "the house's $0 minimum was not kept")))
                                 (when (assoc name (call :reckon-closed-minimums! :force? t) :test #'equal)
                                   (error "a deployment the house waived was reckoned"))
+                                ;; paused 91 days for dues: taken down.  (The house's $0 above
+                                ;; leaves it owing nothing new; the gate's word on old dues stands.)
+                                (setf (symbol-value (lab '#:*closed-minimum-cents*)) 1000)
+                                (call :set-deployment-minimum! name nil)
+                                (unless (member name (call :sweep-unpaid-dues! :force? t) :test #'equal)
+                                  (error "a deployment paused 91 days for its dues was not taken down"))
+                                (when (call :deployment-record name)
+                                  (error "the deployment taken down is still on the books' list"))
                                 t)
                            (setf (fdefinition (lab '#:hosting-ask)) real-ask
                                  (symbol-value (lab '#:*closed-minimum-cents*)) saved-minimum

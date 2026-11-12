@@ -419,7 +419,9 @@ a no-op when one is running."
                                                          ;; closed works whose time ran out, opened (closed.lisp)
                                                          (sweep-closed-works!)
                                                          ;; closed deployments' monthly minimums (deploy.lisp)
-                                                         (reckon-closed-minimums!))
+                                                         (reckon-closed-minimums!)
+                                                         ;; and those their dues kept paused too long, taken down
+                                                         (sweep-unpaid-dues!))
                                       (error (condition)
                                         (format *error-output* "~&prompt-lab reaper: ~a~%" condition)))))
                           :name "prompt-lab reaper")))
