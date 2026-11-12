@@ -374,6 +374,12 @@ FORCE?.  Answers the ids opened."
        (and line (let ((token (string-trim '(#\space #\tab #\return) line)))
                    (and (>= (length token) 16) token)))))))
 
+(defun house-request? (req)
+  "True when REQ carries the house's token (X-Prompt-Lab-House, or token=)."
+  (let ((token (house-token))
+        (given (or (net.aserve:header-slot-value req :x-prompt-lab-house) (query-value req "token"))))
+    (and token (stringp given) (string= given token))))
+
 (defun extend-closed-work! (id days &key (now (get-universal-time)))
   "Give work ID DAYS more closed time, from its deadline or from now,
 whichever is later.  Answers the new deadline, or nil when ID is no closed
@@ -397,12 +403,10 @@ work here."
   "POST <prefix>/api/closed-extend?work=<id>&days=<n> with the house's token
 (X-Prompt-Lab-House, or token=): more closed time for a work.  404 where
 there is no house token, 403 for a wrong one."
-  (let ((token (house-token))
-        (given (or (net.aserve:header-slot-value req :x-prompt-lab-house) (query-value req "token")))
-        (id (query-value req "work"))
+  (let ((id (query-value req "work"))
         (days (ignore-errors (parse-integer (or (query-value req "days") "")))))
-    (cond ((null token) (refuse req ent net.aserve:*response-not-found* "Not here."))
-          ((not (and (stringp given) (string= given token))) (refuse req ent net.aserve:*response-forbidden* "Not yours."))
+    (cond ((null (house-token)) (refuse req ent net.aserve:*response-not-found* "Not here."))
+          ((not (house-request? req)) (refuse req ent net.aserve:*response-forbidden* "Not yours."))
           ((not (and (integerp days) (< 0 days 3651))) (refuse req ent "Say how many days, 1 to 3650."))
           (t (let ((until (and (session-id? id) (extend-closed-work! id days))))
                (if until

@@ -265,8 +265,11 @@ private session, into the private deployed root.  Answers {deployment} or
                                   :key #'(lambda (record) (gethash "session" record)) :test #'equal))
                       (model (gethash "model" json))
                       (payee (clip-line (gethash "payee" json) 200))
-                      (closed? (eq (gethash "closed" json) t)))
-                 (multiple-value-bind (account url ready? why) (and (find #\@ payee) (author-account payee))
+                      (closed? (eq (gethash "closed" json) t))
+                      ;; open and charging nothing: hosted free at the house's
+                      ;; discretion (rulings 44, 50); a closed one always charges
+                      (free? (and (not closed?) (eq (gethash "free" json) t))))
+                 (multiple-value-bind (account url ready? why) (and (not free?) (find #\@ payee) (author-account payee))
                    (declare (ignore url))
                    (cond
                      ((not (equal (gethash "kind" json) "app"))
@@ -286,9 +289,9 @@ private session, into the private deployed root.  Answers {deployment} or
                       (refuse req ent "The private labs hold all the deployments they take."))
                      ((not (and (stringp model) (plusp (length model)) (< (length model) 1000000)))
                       (refuse req ent "There is no model file to deploy."))
-                     ((not (and (find #\@ payee) (> (length payee) 5)))
+                     ((and (not free?) (not (and (find #\@ payee) (> (length payee) 5))))
                       (refuse req ent "Say where your share is to be paid: an email address we can reach you at."))
-                     ((not (and account ready?))
+                     ((and (not free?) (not (and account ready?)))
                       (refuse req ent "~a" (or why "Set up payouts with Stripe first: the button beside your email.")))
                      (t
                       (let ((record (monocle:make-record
@@ -302,6 +305,7 @@ private session, into the private deployed root.  Answers {deployment} or
                                                    "author" wallet
                                                    "private" t
                                                    "connect_account" account
+                                                   "free" (if free? t 'yason:false)
                                                    "balance" (if (eq (gethash "balance" json) t) t 'yason:false)))))
                         (ensure-directories-exist (deployment-directory name))
                         (write-text-file model (merge-pathnames "model.lisp" (deployment-directory name)))
@@ -470,6 +474,10 @@ given, for that host alone).  Needs *private-spool* and the gate (*messages-url*
     (net.aserve:publish :path (format nil "~a/api/vm/deploy" *private-prefix*) :server server :function #'private-vm-deploy-door)
     (net.aserve:publish :path (format nil "~a/api/vm/undeploy" *private-prefix*) :server server :function #'private-vm-undeploy-door)
     (net.aserve:publish :path (format nil "~a/api/vm/deployments" *private-prefix*) :server server :function #'private-vm-deployments-door)
-    (net.aserve:publish :path (format nil "~a/api/vm/connect" *private-prefix*) :server server :function #'private-vm-connect-door))
+    (net.aserve:publish :path (format nil "~a/api/vm/connect" *private-prefix*) :server server :function #'private-vm-connect-door)
+    ;; the house's withdrawal of a private lab's free deployment (deploy.lisp),
+    ;; behind the house's token (*house-token-file*)
+    (net.aserve:publish :path (format nil "~a/api/house/withdraw" *private-prefix*) :server server :host host
+                        :function #'(lambda (req ent) (with-private-house (house-withdraw-door req ent)))))
   (when *private-deployed-root* (start-private-sweeper!))
   *private-prefix*)

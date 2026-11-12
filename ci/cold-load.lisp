@@ -766,13 +766,35 @@ loaded) its page too."
                             (status (path) (nth-value 1 (http :get path))))
                        (unwind-protect
                             (progn
-                              ;; nothing is deployed that charges for nothing
+                              ;; open source that charges nothing is hosted free, with
+                              ;; no payee asked (rulings 44 and 50); the house may
+                              ;; withdraw it, through a door that wants its token
                               (json-of :post (door "model") :headers headers
                                        :json (table "session" tolled "source" *smoke-model*))
-                              (unless (eql 400 (nth-value 1 (http :post (door "deploy") :headers headers
-                                                                  :json (table "session" tolled "name" name
-                                                                               "payee" "owner@example.com"))))
-                                (error "a model with no tolls was deployed"))
+                              (let ((free (json-of :post (door "deploy") :headers headers
+                                                   :json (table "session" tolled "name" name))))
+                                (unless (equal (gethash "url" free) address)
+                                  (error "an open model that charges nothing was not deployed free"))
+                                (unless (uiop:symbol-call :prompt-lab :truthy? (gethash "free" (uiop:symbol-call :prompt-lab :deployment-record name)))
+                                  (error "the free deployment's record does not say free")))
+                              (let ((withdraw (format nil "~a?name=~a" (door "house/withdraw") name))
+                                    (token-file (merge-pathnames "ci-house-token-2" (uiop:temporary-directory)))
+                                    (saved (symbol-value (lab '#:*house-token-file*))))
+                                (unless (eql 404 (nth-value 1 (http :post withdraw)))
+                                  (error "the house's withdrawal answered without a token file"))
+                                (with-open-file (out token-file :direction :output :if-exists :supersede)
+                                  (write-line "ci-house-token-abcdefghijk" out))
+                                (setf (symbol-value (lab '#:*house-token-file*)) token-file)
+                                (unwind-protect
+                                     (progn
+                                       (unless (eql 403 (nth-value 1 (http :post withdraw :headers '(("X-Prompt-Lab-House" . "not-the-house-token-xyz")))))
+                                         (error "the house's withdrawal took a wrong token"))
+                                       (unless (eql 200 (nth-value 1 (http :post withdraw :headers '(("X-Prompt-Lab-House" . "ci-house-token-abcdefghijk")))))
+                                         (error "the house's withdrawal refused its token"))
+                                       (unless (eql 404 (status address))
+                                         (error "a withdrawn free deployment is still served")))
+                                  (setf (symbol-value (lab '#:*house-token-file*)) saved)
+                                  (ignore-errors (delete-file token-file))))
                               (json-of :post (door "model") :headers headers
                                        :json (table "session" tolled
                                                     "source" "(define-object model (box)
@@ -827,6 +849,15 @@ loaded) its page too."
    (file-tolls (list :svg :drawing))))"))
                      (unless (eql 403 (nth-value 1 (http :get (format nil "~a?session=~a" (door "state") closed))))
                        (error "a closed-source session showed itself to a stranger"))
+                     ;; a closed deployment always charges: one that charges nothing is refused
+                     (let ((plain (json-of :post (door "session") :json (table "closed" t))))
+                       (json-of :post (door "model") :headers (list (cons "X-Prompt-Lab-Owner" (gethash "owner" plain)))
+                                :json (table "session" (gethash "session" plain) "source" *smoke-model*))
+                       (unless (eql 400 (nth-value 1 (http :post (door "deploy")
+                                                           :headers (list (cons "X-Prompt-Lab-Owner" (gethash "owner" plain)))
+                                                           :json (table "session" (gethash "session" plain) "name" "ci-smoke-closed-free"
+                                                                        "payee" "owner@example.com"))))
+                         (error "a closed deployment that charges nothing was taken")))
                      (unwind-protect
                           (let ((deployment (json-of :post (door "deploy") :headers headers
                                                      :json (table "session" closed "name" name

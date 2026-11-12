@@ -101,7 +101,7 @@ the front does not answer."
                 records)
               (cdr kept))))))
 
-(defun deploy-through-front! (session &key name title blurb payee closed? pot-percent balance?)
+(defun deploy-through-front! (session &key name title blurb payee closed? pot-percent balance? free?)
   "Hand what SESSION built to the private front as deployment NAME.  The
 front writes the terms itself; this sends the author's choices and the
 model file.  Values: the record the front kept, or nil and the reason."
@@ -111,6 +111,8 @@ model file.  Values: the record the front kept, or nil and the reason."
                                "closed" (if closed? t 'yason:false)
                                "pot_percent" (if (realp pot-percent) pot-percent 0)
                                "balance" (if balance? t 'yason:false)
+                               ;; open and charging nothing (the front still wants it open)
+                               "free" (if free? t 'yason:false)
                                "kind" (kind-name (session-kind session))
                                "session" (session-id session)
                                "owner" (session-owner session)
@@ -300,9 +302,13 @@ the same session under the same name replaces the copy and the terms."
                        (file-prices tolls file-tolls))))
            (payee (clip-line payee 200))
            (symbol (ignore-errors (built-symbol session)))
+           ;; FREE: open source that charges nothing, hosted at the house's
+           ;; discretion within the hosting allowance (the user's rulings 44
+           ;; and 50, 2026-11-12); a closed deployment always charges
+           (free? (and (not closed?) (not (ignore-errors (monetizable? session)))))
            (account nil) (account-problem nil))
       ;; the author's account, where the gate takes the money
-      (when (and (eq *toll-provider* :stripe) (find #\@ payee))
+      (when (and (not free?) (eq *toll-provider* :stripe) (find #\@ payee))
         (multiple-value-bind (id url ready? why) (author-account payee)
           (declare (ignore url))
           (setq account (and ready? id)
@@ -311,10 +317,10 @@ the same session under the same name replaces the copy and the terms."
         ((not *deployments?*) (values nil "This lab deploys nothing."))
         ((not (and symbol (find-class symbol nil)))
          (values nil (format nil "There is nothing to deploy yet: build a ~:[model~;web app~] first." app?)))
-        ((not (monetizable? session))
+        ((and closed? (not (monetizable? session)))
          (values nil (if app?
-                         "This app charges for nothing yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download', 'a day pass for $5 unlocks the results' -- and Monetize opens when it has written the tollbooths."
-                         "This model charges for nothing yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download' -- and Monetize opens when it has written that in.")))
+                         "A closed-source app hosted here charges its users, and this one charges for nothing yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download', 'a day pass for $5 unlocks the results' -- and deploy when it has written the tollbooths."
+                         "A closed-source model hosted here charges its users, and this one charges for nothing yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download' -- and deploy when it has written that in.")))
         ((and *deploy-front* (not app?))
          (values nil "From a private lab, web apps deploy for now: ask the agent for a web app around the model."))
         ((not (deployment-name? name))
@@ -332,19 +338,23 @@ the same session under the same name replaces the copy and the terms."
                              (gethash "name" mine))))
         ((and (null existing) (>= (length (deployment-records)) *max-deployments*))
          (values nil "This lab holds all the deployments it takes."))
-        ((not (and (find #\@ payee) (> (length payee) 5)))
+        ((and (not free?) (not (and (find #\@ payee) (> (length payee) 5))))
          (values nil "Say where your share is to be paid: an email address we can reach you at."))
-        ((and (eq *toll-provider* :stripe) (null account))
+        ((and (not free?) (eq *toll-provider* :stripe) (null account))
          (values nil (or account-problem "Set up payouts with Stripe first: the button beside your email.")))
         (*deploy-front*
          (multiple-value-bind (saved reason)
              (deploy-through-front! session :name name :title title :blurb blurb :payee payee
-                                            :closed? closed? :pot-percent pot-percent :balance? balance?)
+                                            :closed? closed? :pot-percent pot-percent :balance? balance?
+                                            :free? free?)
            (if (null saved)
                (values nil reason)
                (progn
-                 (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee; paid by card through Stripe to your account."
-                            name (gethash "url" saved) closed? (gethash "fee_percent" saved))
+                 (if free?
+                     (log-event session :note "Deployed as ~a: ~a, open source, charging nothing: hosted free, at the house's discretion, within the monthly hosting allowance."
+                                name (gethash "url" saved))
+                     (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee; paid by card through Stripe to your account."
+                                name (gethash "url" saved) closed? (gethash "fee_percent" saved)))
                  (funnel-count! "deploys")
                  saved))))
         (t
@@ -361,6 +371,8 @@ the same session under the same name replaces the copy and the terms."
                                              :fields (append (list "session" (session-id session)
                                                                    "kind" (kind-name (session-kind session)))
                                                              (when account (list "connect_account" account))
+                                                             ;; open and charging nothing: hosted free
+                                                             (when free? (list "free" t))
                                                              ;; the author's switch: a prepaid balance for the app's tolls
                                                              (list "balance" (if balance? t 'yason:false))))))
            (ensure-directories-exist directory)
@@ -369,12 +381,42 @@ the same session under the same name replaces the copy and the terms."
            (register-deployment! name)
            (drop-deployed! name)
            (let ((saved (deployment-record name)))
-             (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee~@[ and ~a% goes to the community pot~]~:[~;; paid by card through Stripe to your account~]."
-                        name (deployment-url name) closed? (house-fee-percent closed?)
-                        (let ((pot (gethash "pot_percent" saved))) (and (realp pot) (plusp pot) pot))
-                        account)
+             (if free?
+                 (log-event session :note "Deployed as ~a: ~a, open source, charging nothing: hosted free, at the house's discretion, within the monthly hosting allowance."
+                            name (deployment-url name))
+                 (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee~@[ and ~a% goes to the community pot~]~:[~;; paid by card through Stripe to your account~]."
+                            name (deployment-url name) closed? (house-fee-percent closed?)
+                            (let ((pot (gethash "pot_percent" saved))) (and (realp pot) (plusp pot) pot))
+                            account))
              (funnel-count! "deploys")
              saved)))))))
+
+(defun withdraw-free-deployment! (name)
+  "The house withdraws free hosting from deployment NAME: an open
+deployment that charges nothing is taken down (the user's ruling 50, the
+house's discretion).  The books keep whatever it booked.  Values: true, or
+nil and the reason."
+  (bt:with-lock-held (*deploy-lock*)
+    (let ((record (and (deployment-name? name) (deployment-record name))))
+      (cond ((null record) (values nil "There is no such deployment."))
+            ((not (truthy? (gethash "free" record)))
+             (values nil "That deployment is not hosted free; it charges its users."))
+            (t (drop-deployed! name)
+               (monocle:delete-deployment! (lab-house) name)
+               (deregister-deployment! name)
+               t)))))
+
+(defun house-withdraw-door (req ent)
+  "POST <prefix>/api/house/withdraw?name=<deployment> with the house's token
+(X-Prompt-Lab-House, or token=): free hosting withdrawn, the deployment
+taken down.  404 where there is no house token, 403 for a wrong one."
+  (let ((name (query-value req "name")))
+    (cond ((null (house-token)) (refuse req ent net.aserve:*response-not-found* "Not here."))
+          ((not (house-request? req)) (refuse req ent net.aserve:*response-forbidden* "Not yours."))
+          (t (multiple-value-bind (ok? reason) (withdraw-free-deployment! name)
+               (if ok?
+                   (respond-json req ent (h "withdrawn" name))
+                   (refuse req ent "~a" reason)))))))
 
 (defun undeploy! (name owner-key)
   "Take deployment NAME down for the holder of OWNER-KEY.  Values: true, or

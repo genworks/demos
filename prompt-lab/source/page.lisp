@@ -1285,6 +1285,8 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
     (net.aserve:publish :path (door-path "royalty") :server server :host host :function #'royalty-door)
     ;; the house's grant of more closed time (closed.lisp), behind its own token
     (net.aserve:publish :path (door-path "closed-extend") :server server :host host :function #'closed-extend-door)
+    ;; the house's withdrawal of a free deployment (deploy.lisp), behind the same token
+    (net.aserve:publish :path (door-path "house/withdraw") :server server :host host :function #'house-withdraw-door)
     (net.aserve:publish :path (format nil "~a/royalty" *url-prefix*) :server server :host host :function #'royalty-page)
     ;; the hangar's feed of this lab's deployments (deploy.lisp): behind
     ;; the hangar's token, not the lab's lock

@@ -1088,15 +1088,17 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      ;; greyed until what was built charges for something:
                                      ;; the visitor says what, the agent writes the tollbooths
                                      (:button :type "button" :class "pl-build pl-monetize-button"
-                                              :data-doc "Deploy what this session built at an address of its own, for others to pay to use.  It opens once the agent has written what it charges for."
-                                              :|data-attr:disabled| "!$story"
+                                              :data-doc "Deploy what this session built at an address of its own.  Open source may be hosted free; closed source opens once the agent has written what it charges for."
+                                              :|data-attr:disabled| "!($story || !$closed)"
                                               :|data-on:click| "$monetize = !$monetize"
                                               "Monetize")
                                      (:a :class "pl-open-app" :target "_blank" :rel "noopener"
                                          :|data-show| "$deployed" :|data-attr:href| "$deployed" :|data-text| "$deployed"))
-                               (:p :class "pl-line" :|data-show| "!$story"
-                                   "Nothing here charges yet.  Tell the agent what should cost money -- 'charge $3 for each STEP download', 'a pass for $5 unlocks the results' -- and Monetize opens when it has written that in.")
-                               (:div :class "pl-deploy" :|data-show| "$monetize && $story"
+                               (:p :class "pl-line" :|data-show| "!$story && $closed"
+                                   "Nothing here charges yet.  A closed-source deployment charges its users: tell the agent what should cost money -- 'charge $3 for each STEP download', 'a pass for $5 unlocks the results' -- and Monetize opens when it has written that in.")
+                               (:p :class "pl-line" :|data-show| "!$story && !$closed"
+                                   "Nothing here charges.  As open source it may be hosted free, at the house's discretion, within the monthly hosting allowance -- or tell the agent what should cost money first.")
+                               (:div :class "pl-deploy" :|data-show| "$monetize && ($story || !$closed)"
                                      (:p :class "pl-line"
                                          "Deploy what you built at an address of its own.  A model gets a page where others change its inputs and download its files; a web app is served as it is.  It is a copy: deploy again to update it.")
                                      (:label "Name in the address"
