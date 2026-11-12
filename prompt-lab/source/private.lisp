@@ -387,6 +387,8 @@ nothing (*books?* nil there)."
   (with-private-house
     (ignore-errors (sweep-toll-payments!))
     (ignore-errors (sweep-hosting!))
+    ;; closed deployments' monthly minimums, once a month (deploy.lisp)
+    (ignore-errors (reckon-closed-minimums!))
     ;; and the root's terms at the gate: at the front's start, then every *register-sweep-seconds*
     (ignore-errors (register-deployments!))))
 
@@ -478,6 +480,8 @@ given, for that host alone).  Needs *private-spool* and the gate (*messages-url*
     ;; the house's withdrawal of a private lab's free deployment (deploy.lisp),
     ;; behind the house's token (*house-token-file*)
     (net.aserve:publish :path (format nil "~a/api/house/withdraw" *private-prefix*) :server server :host host
-                        :function #'(lambda (req ent) (with-private-house (house-withdraw-door req ent)))))
+                        :function #'(lambda (req ent) (with-private-house (house-withdraw-door req ent))))
+    (net.aserve:publish :path (format nil "~a/api/house/minimum" *private-prefix*) :server server :host host
+                        :function #'(lambda (req ent) (with-private-house (house-minimum-door req ent)))))
   (when *private-deployed-root* (start-private-sweeper!))
   *private-prefix*)

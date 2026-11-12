@@ -435,6 +435,13 @@ days are left.")
   "Integer.  The days the house's one-line grant gives, as the request
 names it.")
 
+(defparameter *closed-minimum-cents* nil
+  "Number or nil.  The least a CLOSED deployment hosted here must bring the
+house in fees each calendar month (cents), unless the house sets its own
+(the deployment's \"minimum_cents\", $0 included); short of it at the
+month's end, its hosting stops until hosting bought for it settles the
+shortfall.  Nil: no minimum anywhere until the house names one.")
+
 (defparameter *house-token-file* nil
   "Pathname or nil.  A file whose first line is the token the house's doors
 want (closed.lisp's closed-extend); nil, those doors answer 404.  Private,

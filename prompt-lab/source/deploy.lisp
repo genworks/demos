@@ -1729,7 +1729,12 @@ hosting for it."
                      (:title (esc (format nil "~a is paused" title))))
               (:body :style "font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5"
                      (:h1 :style "font-size: 1.4rem" (esc (format nil "~a is paused" title)))
-                     (:p "Its hosting allowance for the month, and what was added for it, are spent: it runs again when hosting is added.")
+                     (let ((due (and balance (gethash "minimum_due" balance))))
+                       (if (and (realp due) (plusp due))
+                           ;; a closed app's monthly minimum unmet (ruling 49)
+                           (htm (:p (esc (format nil "Its monthly minimum~@[ for ~a~] was not met: ~a short.  It runs again when hosting is added for it, which settles that first."
+                                                 (gethash "minimum_month" balance) (money-text due)))))
+                           (htm (:p "Its hosting allowance for the month, and what was added for it, are spent: it runs again when hosting is added."))))
                      (when balance
                        (htm (:p :style "color: #666"
                                 (esc (format nil "This month: ~a of ~a free credits used; ~a bought credits left."
@@ -1832,6 +1837,110 @@ already is not booked twice."
             (gate-post "host-booked" (h "lab" (deployment-lab-name) "deployment" name "checkout" checkout))
             t)
         (error (condition) (format *error-output* "~&prompt-lab: hosting for ~a not booked: ~a~%" name condition) nil)))))
+
+;;
+;; A CLOSED deployment's monthly minimum (the user's ruling 49,
+;; 2026-11-12).  A closed app hosted here collects at least
+;; *closed-minimum-cents* of house fees a calendar month, or what the house
+;; set for it ("minimum_cents", $0 included); an open one owes none (ruling
+;; 44).  Once a month, for the month just ended, the shortfall is reckoned
+;; from the books -- fees net of refunds, real payments only -- and told to
+;; the gate's host-minimum, which stops the deployment's hosting until
+;; hosting bought for it (its paused page) settles the shortfall.  A
+;; deployment made during that month is not reckoned.  On the reaper's
+;; thread where the books are kept, and the private front's sweeper.
+;;
+
+(defun deployment-minimum (record)
+  "The monthly minimum in cents RECORD's deployment owes, or nil: a closed
+deployment's own, else *closed-minimum-cents*; an open one, none."
+  (when (truthy? (gethash "closed" record))
+    (let ((own (gethash "minimum_cents" record)))
+      (if (realp own) own *closed-minimum-cents*))))
+
+(defun deployment-fees-cents (name from to)
+  "The house fees booked for deployment NAME from FROM to before TO, net of
+refunds and disputes, real payments only, in cents."
+  (let ((field (monocle::amount-field (lab-house) "fee"))
+        (sum 0))
+    (dolist (line (monocle:revenue-lines (lab-house)) sum)
+      (let ((at (gethash "time" line)))
+        (when (and (equal (gethash "name" line) name)
+                   (not (truthy? (gethash "test" line)))
+                   (or (monocle::payment-line? line) (monocle::refund-line? line))
+                   (realp at) (<= from at) (< at to))
+          (incf sum (* (or (gethash field line) 0) *unit-cents*)))))))
+
+(defun minimums-file ()
+  (merge-pathnames (format nil "minimums-reckoned-~a.txt" (engine-name)) *deployed-root*))
+
+(defun reckon-closed-minimums! (&key (now (get-universal-time)) force?)
+  "For the calendar month before NOW's, once (FORCE? again): each closed
+deployment whose fees fell short of its minimum is told to the gate's
+host-minimum with the shortfall.  The month reckoned is kept beside the
+books, so a restart does not reckon it twice (which would undo a part
+settled).  Answers the (name . shortfall-cents) pairs the gate took."
+  (when (and *deployments?* *books?*)
+    (multiple-value-bind (s m h d month year) (decode-universal-time now 0)
+      (declare (ignore s m h d))
+      (let* ((prev-year (if (= month 1) (1- year) year))
+             (prev-month (if (= month 1) 12 (1- month)))
+             (key (format nil "~4,'0d-~2,'0d" prev-year prev-month))
+             (from (encode-universal-time 0 0 0 1 prev-month prev-year 0))
+             (to (encode-universal-time 0 0 0 1 month year 0))
+             (file (minimums-file))
+             (done (ignore-errors (string-trim '(#\Space #\Newline) (uiop:read-file-string file)))))
+        (unless (and (not force?) (equal done key))
+          (let ((reported nil) (failed nil))
+            (dolist (record (deployment-records))
+              (let ((name (gethash "name" record))
+                    (minimum (deployment-minimum record))
+                    (deployed (gethash "deployed" record)))
+                (when (and (stringp name) (realp minimum) (plusp minimum) (realp deployed) (< deployed from))
+                  (let ((short (ceiling (- minimum (deployment-fees-cents name from to)))))
+                    (when (plusp short)
+                      (multiple-value-bind (answer status)
+                          (ignore-errors (hosting-ask "host-minimum" name "due_cents" short "month" key))
+                        (declare (ignore answer))
+                        (if (eql status 200)
+                            (push (cons name short) reported)
+                            (setq failed t))))))))
+            ;; a gate that did not take one is asked again at the next pass
+            (unless failed
+              (ensure-directories-exist file)
+              (write-text-file key file))
+            (nreverse reported)))))))
+
+(defun set-deployment-minimum! (name cents)
+  "The house sets deployment NAME's own monthly minimum to CENTS (0 waives
+it), or back to the default with nil.  Answers the record, or nil."
+  (bt:with-lock-held (*deploy-lock*)
+    (let ((record (and (deployment-name? name) (deployment-record name))))
+      (when record
+        (if (realp cents)
+            (setf (gethash "minimum_cents" record) cents)
+            (remhash "minimum_cents" record))
+        (monocle:save-record! (lab-house) record)
+        record))))
+
+(defun house-minimum-door (req ent)
+  "POST <prefix>/api/house/minimum?name=<deployment>&cents=<n|default> with
+the house's token: a closed deployment's own monthly minimum, $0 included,
+or back to the house's default.  404 where there is no house token, 403 for
+a wrong one."
+  (let* ((name (query-value req "name"))
+         (given (query-value req "cents"))
+         (cents (cond ((equal given "default") nil)
+                      (t (ignore-errors (parse-integer (or given "")))))))
+    (cond ((null (house-token)) (refuse req ent net.aserve:*response-not-found* "Not here."))
+          ((not (house-request? req)) (refuse req ent net.aserve:*response-forbidden* "Not yours."))
+          ((not (or (equal given "default") (and (integerp cents) (>= cents 0))))
+           (refuse req ent "Say cents=N (0 or more) or cents=default."))
+          (t (let ((record (set-deployment-minimum! name cents)))
+               (if record
+                   (respond-json req ent (h "name" name "minimum_cents" (deployment-minimum record)
+                                            "closed" (if (truthy? (gethash "closed" record)) t 'yason:false)))
+                   (refuse req ent net.aserve:*response-not-found* "There is no deployment ~a here." name)))))))
 
 (defun sweep-hosting! ()
   "Confirm the hosting checkouts the gate still holds pending for this lab

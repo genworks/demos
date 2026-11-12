@@ -867,6 +867,106 @@ loaded) its page too."
                                       (uiop:symbol-call :prompt-lab :house-fee-percent t))
                                  (eql 404 (nth-value 1 (http :get (format nil "~a/d/~a/source" prefix name))))))
                        (http :post (door "undeploy") :headers headers :json (table "name" name))))))
+          ;; a closed deployment's monthly minimum (ruling 49): reckoned from
+          ;; the books for the month just ended, the shortfall told to the
+          ;; gate (caught here: there is no gate); an open one owes none; the
+          ;; house sets a deployment's own, $0 included, behind its token.
+          ;; monocle is loaded after this file is read: its names by symbol-call
+          (smoke "prompt-lab closed deployment's monthly minimum: reckoned from the books, told to the gate, set by the house"
+                 (lambda ()
+                   (let* ((opened (json-of :post (door "session") :json (table "closed" t)))
+                          (id (gethash "session" opened))
+                          (headers (list (cons "X-Prompt-Lab-Owner" (gethash "owner" opened))))
+                          (name "ci-smoke-minimum")
+                          (asked nil)
+                          (real-ask (fdefinition (lab '#:hosting-ask)))
+                          (saved-minimum (symbol-value (lab '#:*closed-minimum-cents*)))
+                          (saved-token (symbol-value (lab '#:*house-token-file*)))
+                          (token-file (merge-pathnames "ci-house-token-3" (uiop:temporary-directory))))
+                     (flet ((call (fn &rest args) (apply #'uiop:symbol-call :prompt-lab fn args)))
+                       (json-of :post (door "model") :headers headers
+                                :json (table "session" id
+                                             "source" "(define-object model (box)
+  :input-slots ((length 30) (width 20) (height 10))
+  :computed-slots
+  ((tolls (list (list :key :drawing :label \"SVG drawing\" :rivets 500)))
+   (file-tolls (list :svg :drawing))))"))
+                       (json-of :post (door "deploy") :headers headers
+                                :json (table "session" id "name" name "payee" "owner@example.com"))
+                       ;; the books as they were, put back after: this test books a real
+                       ;; line, and the smokes after it count the books' lines
+                       (let* ((house (call :lab-house))
+                              (books (uiop:symbol-call :monocle :revenue-file house))
+                              (books-before (and (probe-file books) (uiop:read-file-string books))))
+                         (unwind-protect
+                              (let ((record (call :deployment-record name))
+                                    (now (get-universal-time)))
+                                (unless record (error "the closed deployment was not made"))
+                                ;; made long before last month, so last month is reckoned
+                                (setf (gethash "deployed" record) (- now (* 70 86400)))
+                                (uiop:symbol-call :monocle :save-record! house record)
+                                (setf (symbol-value (lab '#:*closed-minimum-cents*)) 1000)
+                                (unless (eql (call :deployment-minimum record) 1000)
+                                  (error "a closed deployment does not owe the default minimum"))
+                                (when (call :deployment-minimum (let ((open (make-hash-table :test #'equal)))
+                                                                  (setf (gethash "closed" open) nil) open))
+                                  (error "an open deployment owes a minimum"))
+                                ;; a real payment, moved into last month
+                                (multiple-value-bind (s m h d month year) (decode-universal-time now 0)
+                                  (declare (ignore s m h d))
+                                  (let* ((prev-month (if (= month 1) 12 (1- month)))
+                                         (prev-year (if (= month 1) (1- year) year))
+                                         (mid (encode-universal-time 0 0 12 15 prev-month prev-year 0)))
+                                    (uiop:symbol-call :monocle :book-revenue! house name 4000 :toll "ci" :reference "ci-minimum")
+                                    (unless (plusp (call :deployment-fees-cents name (- now 60) (+ now 60)))
+                                      (error "the booked payment carries no fee"))
+                                    (let ((moved (with-output-to-string (out)
+                                                   (with-input-from-string (in (uiop:read-file-string books))
+                                                     (loop for l = (read-line in nil) while l
+                                                           do (write-line (if (search "ci-minimum" l)
+                                                                              (let ((j (yason:parse l)))
+                                                                                (setf (gethash "time" j) mid)
+                                                                                (with-output-to-string (s) (yason:encode j s)))
+                                                                              l)
+                                                                          out))))))
+                                      (with-open-file (out books :direction :output :if-exists :supersede)
+                                        (write-string moved out)))))
+                                ;; the gate is stubbed: what would be told, caught
+                                (setf (fdefinition (lab '#:hosting-ask))
+                                      (lambda (door dname &rest plist)
+                                        (push (list* door dname plist) asked)
+                                        (values (make-hash-table :test #'equal) 200)))
+                                (let* ((reported (call :reckon-closed-minimums! :force? t))
+                                       (mine (assoc name reported :test #'equal)))
+                                  (unless (and mine (< 0 (cdr mine) 1000))
+                                    (error "the shortfall was not reckoned from the fees: ~s" reported))
+                                  (unless (find-if (lambda (a) (and (equal (first a) "host-minimum") (equal (second a) name))) asked)
+                                    (error "the gate was not told")))
+                                (when (assoc name (call :reckon-closed-minimums!) :test #'equal)
+                                  (error "the same month was reckoned twice"))
+                                ;; the house's own minimum: $0 waives it
+                                (let ((url (format nil "~a?name=~a&cents=0" (door "house/minimum") name)))
+                                  (unless (eql 404 (nth-value 1 (http :post url)))
+                                    (error "the house's minimum door answered without a token file"))
+                                  (with-open-file (out token-file :direction :output :if-exists :supersede)
+                                    (write-line "ci-house-token-minimum-123" out))
+                                  (setf (symbol-value (lab '#:*house-token-file*)) token-file)
+                                  (unless (eql 200 (nth-value 1 (http :post url :headers '(("X-Prompt-Lab-House" . "ci-house-token-minimum-123")))))
+                                    (error "the house's minimum door refused its token"))
+                                  (unless (eql 0 (call :deployment-minimum (call :deployment-record name)))
+                                    (error "the house's $0 minimum was not kept")))
+                                (when (assoc name (call :reckon-closed-minimums! :force? t) :test #'equal)
+                                  (error "a deployment the house waived was reckoned"))
+                                t)
+                           (setf (fdefinition (lab '#:hosting-ask)) real-ask
+                                 (symbol-value (lab '#:*closed-minimum-cents*)) saved-minimum
+                                 (symbol-value (lab '#:*house-token-file*)) saved-token)
+                           (ignore-errors (delete-file token-file))
+                           (if books-before
+                               (with-open-file (out books :direction :output :if-exists :supersede)
+                                 (write-string books-before out))
+                               (ignore-errors (delete-file books)))
+                           (http :post (door "undeploy") :headers headers :json (table "name" name))))))))
           ;; a web app's tollbooth (kinds.lisp): declared by the app, paid
           ;; by its visitor -- here as a test payment -- and booked
           (smoke "prompt-lab web app takes a toll: unpaid, paid, and a test line in the books"
