@@ -132,25 +132,57 @@ status instead: (refuse req ent *response-forbidden* \"No.\")."
          (value (and balance (gethash name balance))))
     (and (realp value) value)))
 
+;;
+;; THE STANDING, NOT A PURCHASE.  Development is free on every rung and
+;; nothing is sold to a developer, so what lifts the free caps, opens a
+;; private session and raises the upload caps is no longer having bought
+;; credits: it is the author's standing at the gate (the trust ladder),
+;; trusted or monetizing.  The lab asks the gate's author door for the
+;; standing of the session's key, and keeps the answer a while.
+;;
+
+(defparameter *standing-seconds* 300
+  "Integer. How long the lab keeps what the gate said of a key's standing.")
+
+(defparameter *lifting-standings* '("trusted" "monetizing")
+  "List of strings. The standings whose authors build past the free caps,
+may make a session private and are indexed by search engines.")
+
+(defvar *standings* (make-hash-table :test #'equal)
+  "author key -> (universal time asked . standing or nil)")
+
+(defvar *standings-lock* (bt:make-lock "prompt-lab standings"))
+
+(defun wallet-standing (wallet)
+  "WALLET's standing at the gate (author, trusted, monetizing, frozen), a
+string, or nil when WALLET is no key or the gate does not say; kept
+*standing-seconds*."
+  (when (wallet-id? wallet)
+    (let ((now (get-universal-time))
+          (kept (bt:with-lock-held (*standings-lock*) (gethash wallet *standings*))))
+      (if (and kept (< (- now (car kept)) *standing-seconds*))
+          (cdr kept)
+          (let* ((answer (ignore-errors (gate-post "author" (h "wallet" wallet))))
+                 (standing (and (hash-table-p answer) (stringp (gethash "standing" answer))
+                                (string-downcase (gethash "standing" answer)))))
+            (bt:with-lock-held (*standings-lock*)
+              (setf (gethash wallet *standings*) (cons now standing)))
+            standing)))))
+
+(defun trusted-wallet? (wallet)
+  "True when WALLET's author stands at one of *lifting-standings*."
+  (and (member (wallet-standing wallet) *lifting-standings* :test #'equal) t))
+
 (defun paying? (session)
-  "True when the session's wallet holds credit: the free-use caps (prompts
-a session, prompts and sessions an address a day) step aside, and the
-gate's budgets are what bind.  Where the gate keeps a community pot
-nobody holds credit of their own; there it is true while the wallet has
-put more into the pot than its sessions have drawn from it."
-  (let ((credits (session-credits session))
-        (left (balance-number session "contribution_left_cents")))
-    (or (and (realp credits) (plusp credits))
-        (and left (plusp left)))))
+  "True when the free-use caps (prompts a session, prompts and sessions an
+address a day) step aside for SESSION: its author is trusted.  (Named for
+when this was bought; the standing decides since development is free.)"
+  (trusted-wallet? (session-wallet session)))
 
 (defun paid? (session)
-  "True once the session's wallet has bought credits -- credit on it now,
-credits already drawn from it here, or a top-up of the community pot:
-what makes a session eligible to be made private."
-  (or (paying? session)
-      (let ((charged (session-charged session))) (and (realp charged) (plusp charged)))
-      (let ((contributed (balance-number session "contributed_cents")))
-        (and contributed (plusp contributed)))))
+  "True when SESSION may be made private and takes the larger upload caps:
+its author is trusted.  (Named for when a purchase decided it.)"
+  (trusted-wallet? (session-wallet session)))
 
 
 ;;
@@ -759,7 +791,7 @@ nobody else may look.  Values: true, or nil and the reason."
   (cond ((and private? *free-lab?*)
          (values nil "Everything made in the free public lab is public; private sessions are a rung up the ladder."))
         ((and private? (not (paid? session)))
-         (values nil (unit-text "A session becomes private once it has bought {units}.")))
+         (values nil "A session may be made private once its author is trusted: a rung up the ladder from an author key."))
         (t (unless (session-owner session) (setf (session-owner session) (new-owner-key)))
            (unless (eq private? (session-private? session))
              (setf (session-private? session) private?)

@@ -738,7 +738,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
             (json-boolean (let ((session (the session)))
                             (and session (not (session-replay? session)) (not (session-busy? session))
                                  (ignore-errors (monetizable? session)))))
-            ;; a session that has topped up is not public unless it says
+            ;; a trusted author's session is not public unless it says
             ;; so: its uploads want no acknowledgement
             (json-boolean (and (the session) (ignore-errors (paid? (the session)))))
             ;; Monetize (deploy.lisp): whether there is something to deploy,
@@ -847,7 +847,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                   (htm (:div :class "pl-upload"
                                              ;; a file is public with its session: said and
                                              ;; acknowledged, except where the session is not
-                                             ;; public -- closed source, or one that has topped up
+                                             ;; public -- closed source, or a trusted author's
                                              (:label :class "pl-rights" :|data-show| "!($closed || $closedPick || $paidUp)"
                                                      :title "A file you upload is public with this session, here and in the archive, and you have the right to share it"
                                                      (:input :type "checkbox" :id "pl-rights")
@@ -1278,7 +1278,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                        (:span (fmt "~a of ~a prompts" (prompts-used session) *max-prompts-per-session*))
                                        (when pot
                                          (htm (:span (fmt "pot ~:d ~a" (max 0 (floor (or (getf pot :credits) 0))) (units)))))
-                                       ;; closing the session to watchers, once it has bought credits
+                                       ;; closing the session to watchers, once its author is trusted
                                        (when (and (the owner?) (not *free-lab?*) (or (paid? session) (session-private? session)))
                                          (htm (:label :class "pl-private"
                                                       :title "A private session is out of the listings and opens only in the browser that owns it"
@@ -1910,7 +1910,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
             ((and (the session) (not (the owner?)))
              (the (tell-error! "This session is someone else's; start your own to upload.")))
             ;; a file is public with its session, and that is acknowledged
-            ;; first -- unless the session is closed-source or has topped up
+            ;; first -- unless the session is closed-source or its author trusted
             ((not (or (eq (gethash "rights" signals) t)
                       (let ((session (the session)))
                         (if session

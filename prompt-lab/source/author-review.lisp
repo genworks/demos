@@ -88,7 +88,7 @@ GOOD FAITH, which vetoes everything else.  Fail it for any clear attempt at the 
 
 MERIT, 0 to 5.  0: nothing built, or only noise.  1: trivial or abandoned attempts.  2: something that builds and runs.  3: real models or apps that do something useful, with some iteration.  4: substantial work, refined over several sessions, that someone might reuse or pay for.  5: exceptional work.
 
-TRUST, in a short note: what the record shows of time and commitment -- the key's age, the days active, credits bought or used well, whether the work comes back and improves.
+TRUST, in a short note: what the record shows of time and commitment -- the key's age, the days active, credits used well, whether the work comes back and improves.
 
 Then recommend one thing.  stay: no change.  promote: one standing up -- to trusted for an author whose good faith passes and whose merit is 3 or more over more than one session; to monetizing only for a trusted author with sustained merit 4 or more (they must also set up payouts, which the operator checks).  grant: a number of rivets (credits) that would let a promising author keep building; say how many in grant_rivets, at most a few thousand.  demote: one standing down, or freezing, when good faith fails.  When unsure, recommend stay.  grant_rivets is 0 unless you recommend a grant.
 
