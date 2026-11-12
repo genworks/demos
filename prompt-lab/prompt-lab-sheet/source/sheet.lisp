@@ -651,9 +651,23 @@ not hold."
    ;; waiting for its owner's key
    (shown-id (or (and (the session) (session-id (the session))) (the private-id)))
 
+   ;; Search engines index the lab's own front door and a trusted
+   ;; author's work; every other session, archived session or private
+   ;; page says noindex, so the public archive is no free host for
+   ;; anybody's text (page.lisp trusted-wallet?).
+   (lab-robots (cond ((not (or (the archive-id) (the session) (the private-id))) nil)
+                     ((and (null (the private-id))
+                           (trusted-wallet? (if (the archive-id)
+                                                (let ((record (the archive-record)))
+                                                  (and record (gethash "wallet" record)))
+                                                (session-wallet (the session)))))
+                      nil)
+                     (t "noindex")))
+
    (lab-head-html
     (with-lhtml-string ()
       (:meta :name "viewport" :content "width=device-width, initial-scale=1")
+      (when (the lab-robots) (htm (:meta :name "robots" :content (the lab-robots))))
       (when *turnstile-site-key*
         (htm (:script :src "https://challenges.cloudflare.com/turnstile/v0/api.js" :async "async" :defer "defer")
              (:script "window.plTurnstile=function(t){var e=document.getElementById('pl-turnstile');if(e){e.value=t;e.dispatchEvent(new Event('input',{bubbles:true}))}};")))
@@ -2109,6 +2123,10 @@ var n=name(q||s||house);if(skins[n])l.setAttribute('href',skins[n])})();"
    (additional-header-content
     (with-lhtml-string ()
       (:meta :name "viewport" :content "width=device-width, initial-scale=1")
+      ;; the listings carry every session's first prompt as its title: kept
+      ;; out of the index, their links followed to the pages that say for
+      ;; themselves whether they may be indexed
+      (:meta :name "robots" :content "noindex, follow")
       (:link :rel "stylesheet" :href (tokens-url))
       (:style (str *sheet-css*))
       (:link :id "pl-skin-link" :rel "stylesheet")
