@@ -600,7 +600,7 @@ not hold."
    (user-mode?-default t)
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
-   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :author :wear-skin :shade-desk :upload :adopt
+   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :author :author-name :wear-skin :shade-desk :upload :adopt
                            :deploy :undeploy :connect :open-project :push-project :deploy-project))
 
    ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
@@ -742,7 +742,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, archived: ~a, live: '', skinPref: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; and of its last staged hosting (hosting.lisp)
@@ -1397,6 +1397,22 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              (:a :|data-attr:href| (format nil "'~a?wallet=' + $wallet" *url-prefix*)
                                                  "Carry it to another browser")
                                              " (keep that link to yourself: it is your key).")
+                                         ;; the name on the copyright line of the author's code,
+                                         ;; kept with the key at the gate; asked for once the
+                                         ;; browser holds a key (data-init), typing kept from patches
+                                         (:div :class "pl-row pl-author-name" :style "display:none" :|data-show| "$wallet"
+                                               :|data-ignore-morph| ""
+                                               :|data-init| (escape-string-minimal-plus-quotes
+                                                             (format nil "$wallet && ($asave = false, ~a)"
+                                                                     (the (datastar-action :author-name :options "{filterSignals: {include: /^(wallet|aname|asave)$/}}"))))
+                                               (:input :type "text" :maxlength "80" :|data-bind:aname| ""
+                                                       :placeholder "Your name, for the copyright line"
+                                                       :data-doc "The name on the copyright line of the code you make here.  It is public, in every file you write.")
+                                               (:button :type "button" :class "pl-download"
+                                                        :|data-on:click| (escape-string-minimal-plus-quotes
+                                                                          (format nil "$asave = true; ~a"
+                                                                                  (the (datastar-action :author-name :options "{filterSignals: {include: /^(wallet|aname|asave)$/}}"))))
+                                                        "Keep my name"))
                                          (:p :class "pl-line" :style "display:none" :|data-show| "!$wallet"
                                              "An author key gathers your sessions into one public record: the way up to a private lab of your own.")
                                          (:div :class "pl-row" :style "display:none" :|data-show| "!$wallet"
@@ -1713,6 +1729,29 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              s)))))
               (t (the (tell-error! reason)))))
       (the spent-token!)))
+
+   (author-name
+    (signals)
+    ;; the name the author goes by, kept with the key at the gate (page.lisp
+    ;; set-author-name!): with asave the typed name is kept, else the kept
+    ;; one is read back into the field.  The key is the browser's own.
+    (let ((wallet (gethash "wallet" signals))
+          (save? (eq (gethash "asave" signals) t)))
+      (if save?
+          (multiple-value-bind (name reason) (set-author-name! wallet (or (gethash "aname" signals) ""))
+            (if name
+                (sheet-send! self (datastar-signals-event
+                                   (with-output-to-string (s)
+                                     (yason:encode (h "aname" name "asave" 'yason:false "error" ""
+                                                      "notice" (if (plusp (length name))
+                                                                    (format nil "Your code's copyright line will say ~a." name)
+                                                                    "No name kept: your code's copyright line names its session."))
+                                                   s))))
+                (the (tell-error! reason))))
+          (when (wallet-id? wallet)
+            (sheet-send! self (datastar-signals-event
+                               (with-output-to-string (s)
+                                 (yason:encode (h "aname" (or (author-name wallet) "")) s))))))))
 
    (own-session!
     (address wallet &optional closed?)

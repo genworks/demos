@@ -402,7 +402,26 @@ loaded) its page too."
                    (let* ((found (uiop:symbol-call :prompt-lab :find-session session))
                           (text (uiop:read-file-string (uiop:symbol-call :prompt-lab :session-model-file found))))
                      (and (search "SPDX-License-Identifier: AGPL-3.0-or-later" text)
+                          ;; no name kept (no gate here): the line names the session
+                          (search (format nil "the author of prompt-lab session ~a." session) text)
                           (not (search "SPDX" (uiop:symbol-call :prompt-lab :model-body found)))))))
+          ;; the author's name, kept with the key at the gate, goes on the
+          ;; line; here the gate's word is put in by hand
+          (smoke "prompt-lab copyright line carries the author's kept name"
+                 (lambda ()
+                   (let* ((found (uiop:symbol-call :prompt-lab :find-session session))
+                          (key "cccccccccccccccccccccc01")
+                          (old (uiop:symbol-call :prompt-lab :session-wallet found)))
+                     (unwind-protect
+                          (progn
+                            (eval `(setf (,(lab '#:session-wallet) ',found) ,key))
+                            (uiop:symbol-call :prompt-lab :note-author-answer key
+                                              (table "standing" "author" "name" "Grace Hopper"))
+                            (let ((header (uiop:symbol-call :prompt-lab :license-header found)))
+                              (and (search "Copyright (C) " header)
+                                   (search " Grace Hopper." header)
+                                   (search "AGPL-3.0-or-later" header))))
+                       (eval `(setf (,(lab '#:session-wallet) ',found) ',old))))))
           ;; the author takes their own source at any time; nobody else does
           (smoke "prompt-lab source download: the owner's file, a stranger's 404"
                  (lambda ()

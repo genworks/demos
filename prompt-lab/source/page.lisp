@@ -162,12 +162,42 @@ string, or nil when WALLET is no key or the gate does not say; kept
           (kept (bt:with-lock-held (*standings-lock*) (gethash wallet *standings*))))
       (if (and kept (< (- now (car kept)) *standing-seconds*))
           (cdr kept)
-          (let* ((answer (ignore-errors (gate-post "author" (h "wallet" wallet))))
-                 (standing (and (hash-table-p answer) (stringp (gethash "standing" answer))
-                                (string-downcase (gethash "standing" answer)))))
-            (bt:with-lock-held (*standings-lock*)
-              (setf (gethash wallet *standings*) (cons now standing)))
-            standing)))))
+          (let ((answer (ignore-errors (gate-post "author" (h "wallet" wallet)))))
+            (note-author-answer wallet answer now))))))
+
+(defvar *author-names* (make-hash-table :test #'equal)
+  "author key -> the name its author goes by, as the gate last said (\"\" for none).")
+
+(defun note-author-answer (wallet answer &optional (now (get-universal-time)))
+  "Keep what the gate's author door ANSWER said of WALLET: its standing,
+kept *standing-seconds*, and the name its author goes by.  Answers the
+standing."
+  (let ((standing (and (hash-table-p answer) (stringp (gethash "standing" answer))
+                       (string-downcase (gethash "standing" answer))))
+        (name (and (hash-table-p answer) (gethash "name" answer))))
+    (bt:with-lock-held (*standings-lock*)
+      (setf (gethash wallet *standings*) (cons now standing))
+      (when (stringp name) (setf (gethash wallet *author-names*) name)))
+    standing))
+
+(defun author-name (wallet)
+  "The name WALLET's author goes by, as the gate keeps it with the key (the
+user's ruling, 2026-11-12: typed by the author), or nil when there is none."
+  (when (wallet-id? wallet)
+    (wallet-standing wallet)
+    (let ((name (bt:with-lock-held (*standings-lock*) (gethash wallet *author-names*))))
+      (and (stringp name) (plusp (length name)) name))))
+
+(defun set-author-name! (wallet name)
+  "Have the gate keep NAME as the name WALLET's author goes by (\"\" clears
+it).  Values: the name as kept (\"\" for none), or nil and the reason."
+  (cond ((not (wallet-id? wallet)) (values nil "There is no author key in this browser yet."))
+        ((not (stringp name)) (values nil "Say the name."))
+        (t (let ((answer (ignore-errors (gate-post "author" (h "wallet" wallet "name" name)))))
+             (if (and (hash-table-p answer) (stringp (gethash "name" answer)))
+                 (progn (note-author-answer wallet answer)
+                        (gethash "name" answer))
+                 (values nil "The name could not be kept just now; try again in a moment."))))))
 
 (defun trusted-wallet? (wallet)
   "True when WALLET's author stands at one of *lifting-standings*."

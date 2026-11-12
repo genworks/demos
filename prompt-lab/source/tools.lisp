@@ -128,16 +128,27 @@ that opens a line counts: the words in a comment or a string do not."
                     (and (>= (length text) 11)
                          (string-equal "(in-package" text :end2 11))))))
 
+(defun copyright-holder (session)
+  "Whose name goes on SESSION's copyright line: the name its author goes
+by, typed beside the author key and kept with it at the gate (the user's
+ruling, 2026-11-12), else the author of the session by its id."
+  (or (ignore-errors (author-name (session-wallet session)))
+      (format nil "the author of prompt-lab session ~a" (session-id session))))
+
 (defun license-header (session)
-  "The license lines of SESSION's model file: code made in the lab is
-AGPL-3.0 (or later, as Gendl itself is) unless its session is closed, and
-then the file says nothing of a license until its author decides.  Nil for
-a closed session.  The author's copyright line joins these once the lab
-knows the name to put on it."
-  (unless (session-closed? session)
-    (format nil ";;~%;; SPDX-License-Identifier: AGPL-3.0-or-later~%~
+  "The copyright and license lines of SESSION's model file.  The author's
+name is on the copyright line.  Code made in the lab is AGPL-3.0 (or
+later, as Gendl itself is) unless its session is closed; a closed file
+reserves its rights and names no license until its author decides."
+  (let ((year (nth-value 5 (decode-universal-time (get-universal-time) 0)))
+        (holder (copyright-holder session)))
+    (if (session-closed? session)
+        (format nil ";;~%;; Copyright (C) ~d ~a.  All rights reserved.~%" year holder)
+        (format nil ";;~%;; Copyright (C) ~d ~a.~%;;~%~
+;; SPDX-License-Identifier: AGPL-3.0-or-later~%~
 ;; Free software under the GNU Affero General Public License, version 3 or~%~
-;; (at your option) any later version: <https://www.gnu.org/licenses/agpl-3.0.html>.~%")))
+;; (at your option) any later version: <https://www.gnu.org/licenses/agpl-3.0.html>.~%"
+                year holder))))
 
 (defun write-model (session source)
   (when (in-package-line? source)
