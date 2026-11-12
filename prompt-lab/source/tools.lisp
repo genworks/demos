@@ -128,6 +128,17 @@ that opens a line counts: the words in a comment or a string do not."
                     (and (>= (length text) 11)
                          (string-equal "(in-package" text :end2 11))))))
 
+(defun license-header (session)
+  "The license lines of SESSION's model file: code made in the lab is
+AGPL-3.0 (or later, as Gendl itself is) unless its session is closed, and
+then the file says nothing of a license until its author decides.  Nil for
+a closed session.  The author's copyright line joins these once the lab
+knows the name to put on it."
+  (unless (session-closed? session)
+    (format nil ";;~%;; SPDX-License-Identifier: AGPL-3.0-or-later~%~
+;; Free software under the GNU Affero General Public License, version 3 or~%~
+;; (at your option) any later version: <https://www.gnu.org/licenses/agpl-3.0.html>.~%")))
+
 (defun write-model (session source)
   (when (in-package-line? source)
     (return-from write-model
@@ -150,9 +161,11 @@ The file's header already sets the session package.")) t)))
       (format out ";; Prompt lab session ~a -- the model file.~%~
 ;; Written by the modeling agent; edit it freely.  The object named MODEL~%~
 ;; is what (make-object 'model) builds and the viewer shows~:[.~;;~%~
-;; the object named APP is the web app, a GWL page the lab serves.~]~%~%~
+;; the object named APP is the web app, a GWL page the lab serves.~]~%~
+~@[~a~]~%~
 (in-package ~s)~%~%~a~%"
-              (session-id session) (eq (session-kind session) :app) package-name source))
+              (session-id session) (eq (session-kind session) :app)
+              (license-header session) package-name source))
     (load-model-file session)))
 
 (defun edit-model (session old new)

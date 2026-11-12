@@ -836,7 +836,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               ;; a free public lab says what it is before the first build
                               (when *free-lab?*
                                 (htm (:p :class "pl-line pl-public"
-                                         "This is the free public lab: building here costs you nothing -- each build draws a few rivets from a community pot that Genworks keeps filled.  A build typically draws 15 to 50 rivets; a web app refined over several prompts can draw 100 or more.  Everything made here -- your prompts, the model and its code -- is public the moment it is made, in the archive for anyone to read and reuse.  Nothing is sold here; a private lab of your own, where you can sell what you make, is a rung up "
+                                         "This is the free public lab: building here costs you nothing -- each build draws a few rivets from a community pot that Genworks keeps filled.  A build typically draws 15 to 50 rivets; a web app refined over several prompts can draw 100 or more.  Everything made here -- your prompts, the model and its code -- is public the moment it is made, in the archive for anyone to read and reuse under the GNU Affero General Public License, version 3 or later -- the license of Gendl, which it runs on.  Nothing is sold here; a private lab of your own, where you can sell what you make, is a rung up "
                                          (:a :href "https://genworks.com/authors/" :target "_blank" :rel "noopener" "the ladder")
                                          ".")))
                               (:textarea :id "pl-prompt" :rows "4" :|data-bind:prompt| ""

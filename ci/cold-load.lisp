@@ -395,6 +395,14 @@ loaded) its page too."
                      (and (eq (gethash "model_defined" state) t)
                           (eq (gethash "editable" state) t)
                           (search "define-object model" (gethash "model_source" state))))))
+          ;; code made in the lab is AGPL unless its session is closed: the
+          ;; file says so; the body the page shows does not carry it
+          (smoke "prompt-lab model file of an open session carries the AGPL header"
+                 (lambda ()
+                   (let* ((found (uiop:symbol-call :prompt-lab :find-session session))
+                          (text (uiop:read-file-string (uiop:symbol-call :prompt-lab :session-model-file found))))
+                     (and (search "SPDX-License-Identifier: AGPL-3.0-or-later" text)
+                          (not (search "SPDX" (uiop:symbol-call :prompt-lab :model-body found)))))))
           ;; the reviewer pass over the archive's authors (author-review.lisp):
           ;; a dry run reads and calls nothing; each recommendation's rung
           (smoke "prompt-lab reviewer pass: a dry run reads the archive, and the ladder's moves"
