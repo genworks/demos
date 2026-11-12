@@ -531,6 +531,30 @@ loaded) its page too."
                             t)))
               (ignore-errors (delete-file token-file))
               (dolist (pair saved) (setf (symbol-value (lab (car pair))) (cdr pair)))))
+          ;; the private front's request (private.lisp): a monetizing author's
+          ;; session sells, a trusted author's deploys free open work (ruling 50)
+          (smoke "prompt-lab private front: a request says monetize true, or free, or nothing without a deployed root"
+                 (lambda ()
+                   (let* ((spool (merge-pathnames "ci-spool/" (uiop:temporary-directory)))
+                          (saved (mapcar #'(lambda (name) (cons name (symbol-value (lab name))))
+                                         '(#:*private-spool* #:*private-deployed-root*))))
+                     (ensure-directories-exist (merge-pathnames "requests/" spool))
+                     (unwind-protect
+                          (flet ((written (id monetize)
+                                   (let ((file (uiop:symbol-call :prompt-lab :write-private-request! id "eeeeeeeeeeeeeeeeeeeeee01"
+                                                                 "0123456789abcdef0123456789abcdef" :monetize monetize)))
+                                     (gethash "monetize" (with-open-file (in file) (yason:parse in))))))
+                            (setf (symbol-value (lab '#:*private-spool*)) (namestring spool)
+                                  (symbol-value (lab '#:*private-deployed-root*)) (namestring spool))
+                            (unless (and (eq (written "pl-0000000001" t) t)
+                                         (equal (written "pl-0000000002" :free) "free"))
+                              (error "the request does not carry what the author may deploy"))
+                            (setf (symbol-value (lab '#:*private-deployed-root*)) nil)
+                            (when (written "pl-0000000003" :free)
+                              (error "a front with no deployed root offered deploys"))
+                            t)
+                       (dolist (pair saved) (setf (symbol-value (lab (car pair))) (cdr pair)))
+                       (ignore-errors (uiop:delete-directory-tree spool :validate t))))))
           ;; the reviewer pass over the archive's authors (author-review.lisp):
           ;; a dry run reads and calls nothing; each recommendation's rung
           (smoke "prompt-lab reviewer pass: a dry run reads the archive, and the ladder's moves"

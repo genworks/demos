@@ -114,15 +114,20 @@ else nil and the reason in words."
           (t (values nil (format nil "Your author key is at the ~a rung.  Private labs open at the trusted rung, granted on review of the work you make in the public lab."
                                  (gethash "standing" answer)))))))
 
-(defun write-private-request! (id wallet token &key monetize?)
-  "File request ID in the spool.  MONETIZE? (the author's standing is the
-monetizing rung, and this front keeps a private deployed root) has the
-hangar open the session with Monetize."
+(defun write-private-request! (id wallet token &key monetize)
+  "File request ID in the spool.  MONETIZE t (the author's standing is the
+monetizing rung) has the hangar open the session with Monetize; :FREE (a
+trusted author, the user's ruling 50) with deploys of open work that
+charges nothing only.  Either only where this front keeps a private
+deployed root."
   (let ((final (private-file "requests" id))
         (tmp (format nil "~a/requests/.~a.json" (string-right-trim "/" *private-spool*) id)))
     (with-open-file (out tmp :direction :output :if-exists :supersede :if-does-not-exist :create)
       (write-string (encode (h "id" id "wallet" wallet "token" token "created" (get-universal-time)
-                               "monetize" (if (and monetize? *private-deployed-root*) t 'yason:false)))
+                               "monetize" (cond ((not *private-deployed-root*) 'yason:false)
+                                                 ((eq monetize t) t)
+                                                 ((eq monetize :free) "free")
+                                                 (t 'yason:false))))
                     out))
     (rename-file tmp final)
     final))
@@ -150,7 +155,9 @@ yes.  Answers {id, token, unlock, next} or {error}."
                         (token (if live (gethash "token" live) (new-owner-key))))
                    (unless live
                      (count-address! address :private-opens)
-                     (write-private-request! id wallet token :monetize? (eq (gethash "monetize" answer) t)))
+                     ;; a monetizing author's session sells; a trusted author's may
+                     ;; deploy open work that charges nothing (ruling 50)
+                     (write-private-request! id wallet token :monetize (if (eq (gethash "monetize" answer) t) t :free)))
                    (respond-json req ent (h "id" id "token" token
                                             "unlock" (format nil "~a/api/unlock" (private-session-url id))
                                             "next" (format nil "~a?wallet=~a" *private-session-prefix* wallet))))))))))
@@ -252,9 +259,15 @@ private session, into the private deployed root.  Answers {deployment} or
     (cond
           ((not (private-deploys?)) (refuse req ent net.aserve:*response-not-found* "No private deployments here."))
           ((null request) (refuse req ent net.aserve:*response-forbidden* "No such session."))
-          ((not (eq (gethash "monetize" (or (ignore-errors (gate-post "author" (h "wallet" wallet))) (h))) t))
+          ;; a monetizing author deploys anything; a trusted one, open work
+          ;; that charges nothing, hosted free (the user's ruling 50)
+          ((let ((standing (or (ignore-errors (gate-post "author" (h "wallet" wallet))) (h))))
+             (not (or (eq (gethash "monetize" standing) t)
+                      (and (eq (gethash "private" standing) t)
+                           (not (eq (gethash "closed" json) t))
+                           (eq (gethash "free" json) t)))))
            (refuse req ent net.aserve:*response-forbidden*
-                   "Deploying from a private lab opens at the monetizing rung: a trusted author with payouts set up, on review."))
+                   "From a trusted author's private lab, open work that charges nothing deploys free; deploying what charges its users opens at the monetizing rung, with payouts set up, on review."))
           (t
            (with-private-house
              (bt:with-lock-held (*deploy-lock*)
