@@ -107,13 +107,24 @@ ship.  The page's editor link is <*console-base*>/?arg=<model file>, which
 the terminal's door script hands to emacsclient.  Nil: no link.")
 
 (defparameter *external-agent?* nil
-  "Boolean. True opens the two doors of external.lisp: an agent that runs
-somewhere else (a developer's headless Claude Code, say) is handed the
-lab's system prompt and its tools over MCP, and works on a session in
-place of the lab's own loop, with no call to the gate.  Those doors run
-the tools for whoever holds a session's key, without the caps or the
-human check of the public doors: for a development host, not for an
-instance that serves visitors.")
+  "Nil, t or :authors.  True opens the two doors of external.lisp: an agent
+that runs somewhere else (a developer's headless Claude Code, say) is
+handed the lab's system prompt and its tools over MCP, and works on a
+session in place of the lab's own loop, with no call to the gate.  With t
+those doors run the tools for whoever holds a session's key, without the
+caps or the human check of the public doors: for a development host.  With
+:AUTHORS -- bring your own agent, on a lab that serves visitors -- they
+admit sessions under an author key that is not frozen, opened with the
+session door's caps, each key held to *external-prompts-per-key* and
+*external-calls-per-key* a day, its compiles and runs metered at the gate.")
+
+(defparameter *external-prompts-per-key* 60
+  "Integer or nil.  Prompts an author key's own agent may send a UTC day
+(*external-agent?* :authors).")
+
+(defparameter *external-calls-per-key* 3000
+  "Integer or nil.  MCP messages an author key's own agent may send a UTC
+day (*external-agent?* :authors): a build is a few dozen.")
 
 (defparameter *max-prompts-per-session* 6
   "Integer. Prompts one session may run: a first build and its follow-ups.")

@@ -531,6 +531,55 @@ loaded) its page too."
                             t)))
               (ignore-errors (delete-file token-file))
               (dolist (pair saved) (setf (symbol-value (lab (car pair))) (cdr pair)))))
+          ;; BRING YOUR OWN AGENT (external.lisp, :authors): an author key's
+          ;; sessions alone, opened with the session door's caps, a day's calls
+          ;; per key, a frozen key refused
+          (let ((saved (mapcar #'(lambda (name) (cons name (symbol-value (lab name))))
+                               '(#:*external-agent?* #:*external-calls-per-key*))))
+            (setf (symbol-value (lab '#:*external-agent?*)) :authors)
+            (unwind-protect
+                 (smoke "prompt-lab bring your own agent: an author key's sessions only, a day's calls per key, frozen refused"
+                        (lambda ()
+                          (let ((key "ffffffffffffffffffffff01"))
+                            (unless (eql 403 (nth-value 1 (http :post (door "agent")
+                                                                :json (table "event" "prompt" "text" "A plate."))))
+                              (error "an agent with no author key was let in"))
+                            (let* ((brief (json-of :post (door "agent")
+                                                   :json (table "event" "prompt" "text" "A plate." "wallet" key)))
+                                   (id (gethash "session" brief))
+                                   (owner (gethash "owner" brief))
+                                   (headers (list (cons "X-Prompt-Lab-Owner" owner)))
+                                   (mcp (format nil "~a/mcp?session=~a" prefix id)))
+                              (unless (and (stringp id) (stringp owner)) (error "no session for an author key's agent: ~s" brief))
+                              (unless (equal (uiop:symbol-call :prompt-lab :session-wallet
+                                                               (uiop:symbol-call :prompt-lab :find-session id))
+                                             key)
+                                (error "the agent's session is not under its key"))
+                              (unless (eql 200 (nth-value 1 (http :post mcp :headers headers
+                                                                  :json (table "jsonrpc" "2.0" "id" 1 "method" "tools/list"))))
+                                (error "the MCP door refused an author key's session"))
+                              (setf (symbol-value (lab '#:*external-calls-per-key*)) 1)
+                              (unless (eql 429 (nth-value 1 (http :post mcp :headers headers
+                                                                  :json (table "jsonrpc" "2.0" "id" 2 "method" "tools/list"))))
+                                (error "the day's calls per key did not bind"))
+                              (setf (symbol-value (lab '#:*external-calls-per-key*)) nil)
+                              (json-of :post (door "agent") :headers headers
+                                       :json (table "event" "stopped" "session" id "text" "Only a test."))
+                              (uiop:symbol-call :prompt-lab :note-author-answer key (table "standing" "frozen"))
+                              (unless (eql 403 (nth-value 1 (http :post mcp :headers headers
+                                                                  :json (table "jsonrpc" "2.0" "id" 3 "method" "tools/list"))))
+                                (error "a frozen key's agent was let in"))
+                              t))))
+              (dolist (pair saved) (setf (symbol-value (lab (car pair))) (cdr pair)))
+              ;; the session it opened came from this address and joined the
+              ;; funnel's tally: given back, as the smokes after it count both
+              (let ((record (gethash (uiop:symbol-call :prompt-lab :address-key "127.0.0.1")
+                                     (symbol-value (lab '#:*address-counts*)))))
+                (when (and record (plusp (or (getf record :sessions) 0)))
+                  (decf (getf record :sessions))))
+              (uiop:symbol-call :prompt-lab :funnel-count! "sessions" -1)
+              (uiop:symbol-call :prompt-lab :funnel-count! "prompts" -1)
+              (uiop:symbol-call :prompt-lab :funnel-count! "builds-stopped" -1)))
           ;; the private front's request (private.lisp): a monetizing author's
           ;; session sells, a trusted author's deploys free open work (ruling 50)
           (smoke "prompt-lab private front: a request says monetize true, or free, or nothing without a deployed root"

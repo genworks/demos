@@ -29,9 +29,49 @@
 ;;                        answer is plain JSON, no stream is offered).
 ;;
 ;; Both name the session (session=) and carry its owner key, like every
-;; other door that changes one.  Neither applies the caps or the human
-;; check of the public doors: whoever turns this on has decided who may
-;; reach it.
+;; other door that changes one.  With *external-agent?* t neither applies
+;; the caps or the human check of the public doors: whoever turns this on
+;; has decided who may reach it (a dev ship).  With :AUTHORS -- BRING YOUR
+;; OWN AGENT on a public lab (the user's ruling 48, 2026-11-12) -- they
+;; admit an AUTHOR KEY alone (not frozen): a new session is opened under
+;; the key with the session door's own caps, each key has a day's prompts
+;; and tool calls (*external-prompts-per-key*, *external-calls-per-key*),
+;; the monitor reads every prompt, and the compiles and runs the tools do
+;; are metered against the key at the gate as the lab's own are.  The
+;; language model's tokens are the agent's own: none pass through here.
+;;
+
+(defvar *external-counts* (make-hash-table :test #'equal)
+  "\"<day>|<key>|<kind>\" -> what an author key's own agent did here that UTC day.")
+
+(defvar *external-counts-lock* (bt:make-lock "prompt-lab external counts"))
+
+(defun external-admits? (wallet)
+  "Whether an agent working for WALLET is let in: anyone with
+*external-agent?* t; with :authors, an author key that is not frozen."
+  (case *external-agent?*
+    ((nil) nil)
+    (:authors (and (wallet-id? wallet) (not (equal (wallet-standing wallet) "frozen")) t))
+    (t t)))
+
+(defun external-over? (wallet kind)
+  "Count one more KIND (:prompts or :calls) for author key WALLET today;
+true when that passes its day's limit (with *external-agent?* :authors only)."
+  (when (eq *external-agent?* :authors)
+    (let ((limit (if (eq kind :prompts) *external-prompts-per-key* *external-calls-per-key*)))
+      (when (and (integerp limit) (wallet-id? wallet))
+        (let ((key (format nil "~a|~a|~(~a~)" (day-key) wallet kind)))
+          (bt:with-lock-held (*external-counts-lock*)
+            ;; yesterday's rows go as today's come
+            (when (> (hash-table-count *external-counts*) 10000)
+              (let ((today (day-key)))
+                (maphash #'(lambda (k v) (declare (ignore v))
+                             (unless (eql 0 (search today k)) (remhash k *external-counts*)))
+                         *external-counts*)))
+            (> (incf (gethash key *external-counts* 0)) limit)))))))
+
+(defun external-refused (req ent why)
+  (refuse req ent net.aserve:*response-forbidden* "~a" why))
 ;;
 
 (defvar *external-locks* (make-hash-table :test #'equal)
@@ -137,12 +177,28 @@ agent's side of one prompt.  The events:
       (cond ((not *external-agent?*) (external-off req ent))
             ((and named (null session)) (no-such-session req ent))
             ((and session (not (owner-request? req session json))) (not-yours req ent))
+            ;; bring your own agent on a public lab: an author key's sessions alone
+            ((not (external-admits? (if session (session-wallet session) (and json (gethash "wallet" json)))))
+             (external-refused req ent "Bringing your own agent here wants an author key: get one on the lab's page, then name it as wallet."))
             ((equal event "prompt")
              (cond ((not (plusp (length (said)))) (refuse req ent "Say what to build."))
                    ((> (length text) *max-prompt-length*)
                     (refuse req ent "A prompt may have ~a characters at most." *max-prompt-length*))
+                   ((external-over? (if session (session-wallet session) (gethash "wallet" json)) :prompts)
+                    (refuse req ent *response-too-many-requests* "This author key has sent its ~a prompts for today; come back tomorrow."
+                            *external-prompts-per-key*))
                    (t (let* ((opened? (null session))
-                             (session (or session (make-session :address (client-address req)))))
+                             (session (or session
+                                          (if (eq *external-agent?* :authors)
+                                              ;; the session door's own caps, under the key
+                                              (multiple-value-bind (opened reason)
+                                                  (open-session! (client-address req) (gethash "wallet" json)
+                                                                 :closed? (eq (gethash "closed" json) t))
+                                                (or opened (return-from agent-door
+                                                             (refuse req ent *response-too-many-requests* "~a" reason))))
+                                              (make-session :address (client-address req))))))
+                        (when (eq *external-agent?* :authors)
+                          (watch-prompt! session (said) (client-address req)))
                         (cond ((not (claim! session))
                                (refuse req ent "Still working on the previous request."))
                               (t (let ((kind (parse-kind (gethash "kind" json))))
@@ -278,6 +334,11 @@ one JSON-RPC message; a request is answered in JSON, a notification with
     (cond ((not *external-agent?*) (external-off req ent))
           ((null session) (no-such-session req ent))
           ((not (owner-request? req session)) (not-yours req ent))
+          ((not (external-admits? (session-wallet session)))
+           (external-refused req ent "Bringing your own agent here wants a session under an author key."))
+          ((external-over? (session-wallet session) :calls)
+           (refuse req ent *response-too-many-requests* "This author key has made its ~a tool calls for today; come back tomorrow."
+                   *external-calls-per-key*))
           ((not (eq (net.aserve:request-method req) :post))
            (refuse req ent net.aserve:*response-method-not-allowed*
                    "POST one JSON-RPC message here; no stream is offered."))
