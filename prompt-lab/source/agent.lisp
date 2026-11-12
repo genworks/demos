@@ -649,8 +649,9 @@ the session busy (start-prompt!)."
                       (return (let ((message (gethash "message" (gethash "error" response))))
                                 (log-event session :stopped "API error: ~a~@[  To ask for more, write to ~a.~]"
                                            message
-                                           ;; the gate's per-key daily cap: say who to ask
-                                           (and (stringp message) (search "midnight UTC" message)
+                                           ;; the gate's per-key AI allowance: say who to ask
+                                           (and (stringp message)
+                                                (or (search "midnight UTC" message) (search "AI allowance" message))
                                                 *contact-address*)))))
                     ;; anything else without a message in it -- a gate's or
                     ;; proxy's own JSON, an error status -- stops here, and

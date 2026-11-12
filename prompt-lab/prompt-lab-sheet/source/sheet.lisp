@@ -1397,6 +1397,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                       (:div :class "pl-card pl-credits"
                             (:h2 (esc (units-title)))
                             (str (credits-html self (pot) spend))
+                            ;; the author's AI allowance this month (the gate's word on the key)
+                            (let ((ai (and session (the owner?) (ignore-errors (author-ai (session-wallet session))))))
+                              (when ai (str (ai-allowance-html ai))))
                             ;; the AUTHOR KEY (*author-keys?*): one public record across
                             ;; sessions, what the trust ladder's review reads
                             (when *author-keys?*

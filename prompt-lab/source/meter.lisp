@@ -26,8 +26,12 @@
 ;; at all, meters nothing and the lab works on.
 ;;
 
-(defparameter *meter?* t
-  "Boolean. Whether compiles and runs are reported to the gate's meter.")
+(defparameter *meter?* nil
+  "Boolean. Whether a session's compiles and runs are reported to the gate's
+meter.  Nil since the ruling that the compile/run meter is not charged in
+development (46b, 2026-11-12): the house's own machines are free while an
+author builds, and only the AI calls count against the key's allowance.  A
+deployment's compute is metered apart (*hosting-meter?*, deploy.lisp).")
 
 (defun form-volume (form)
   "How many symbols FORM holds; NIL and the ends of lists are not counted."

@@ -422,6 +422,34 @@ loaded) its page too."
                                    (search " Grace Hopper." header)
                                    (search "AGPL-3.0-or-later" header))))
                        (eval `(setf (,(lab '#:session-wallet) ',found) ',old))))))
+          ;; the author's AI allowance (rulings 46, 46b): the gate's word on the
+          ;; key, kept with its standing, shown as a bar and about-tokens; past
+          ;; it, the way on is the author's own agent
+          (smoke "prompt-lab shows an author key's AI allowance: percent, tokens, and the way on past it"
+                 (lambda ()
+                   (let ((key "cccccccccccccccccccccc02"))
+                     (uiop:symbol-call :prompt-lab :note-author-answer key
+                                       (table "standing" "author" "ai_month" "2026-11"
+                                              "ai_month_percent" 62 "ai_month_tokens" 6200 "ai_month_cents" 62))
+                     (let ((html (uiop:symbol-call :prompt-lab :ai-allowance-html
+                                                   (uiop:symbol-call :prompt-lab :author-ai key))))
+                       (unless (and (search "62% used" html) (search "about 6.2k tokens" html) (search "width:62%" html)
+                                    (not (search "renews" html)))
+                         (error "the allowance under its cap reads wrong: ~a" html)))
+                     (uiop:symbol-call :prompt-lab :note-author-answer key
+                                       (table "standing" "author" "ai_month" "2026-11"
+                                              "ai_month_percent" 100 "ai_month_tokens" 1400000))
+                     (let ((html (uiop:symbol-call :prompt-lab :ai-allowance-html
+                                                   (uiop:symbol-call :prompt-lab :author-ai key))))
+                       (unless (and (search "100% used" html) (search "1.4M" html) (search "your own agent" html))
+                         (error "the allowance at its cap reads wrong: ~a" html)))
+                     (let ((html (uiop:symbol-call :prompt-lab :ai-allowance-html
+                                                   (table "ai_month" "2026-11" "ai_month_tokens" 900))))
+                       (unless (and (search "about 900 tokens" html) (not (search "%" html)))
+                         (error "with no cap the allowance should show tokens alone: ~a" html)))
+                     (when (symbol-value (lab '#:*meter?*))
+                       (error "development is metered"))
+                     t)))
           ;; the author takes their own source at any time; nobody else does
           (smoke "prompt-lab source download: the owner's file, a stranger's 404"
                  (lambda ()

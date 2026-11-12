@@ -165,6 +165,10 @@ string, or nil when WALLET is no key or the gate does not say; kept
           (let ((answer (ignore-errors (gate-post "author" (h "wallet" wallet)))))
             (note-author-answer wallet answer now))))))
 
+(defvar *author-ai* (make-hash-table :test #'equal)
+  "author key -> the gate's last word on its AI allowance (the author door's
+answer, a hash table with ai_month_cents, ai_month_percent ...).")
+
 (defvar *author-names* (make-hash-table :test #'equal)
   "author key -> the name its author goes by, as the gate last said (\"\" for none).")
 
@@ -177,8 +181,39 @@ standing."
         (name (and (hash-table-p answer) (gethash "name" answer))))
     (bt:with-lock-held (*standings-lock*)
       (setf (gethash wallet *standings*) (cons now standing))
-      (when (stringp name) (setf (gethash wallet *author-names*) name)))
+      (when (stringp name) (setf (gethash wallet *author-names*) name))
+      ;; the AI allowance, for the author's bar (cyclops: the author's AI allowance)
+      (when (and (hash-table-p answer) (gethash "ai_month" answer))
+        (setf (gethash wallet *author-ai*) answer)))
     standing))
+
+(defun author-ai (wallet)
+  "What the gate last said of WALLET's AI allowance this month, a hash
+table, or nil (an older gate says nothing of it)."
+  (when (wallet-id? wallet)
+    (wallet-standing wallet)
+    (bt:with-lock-held (*standings-lock*) (gethash wallet *author-ai*))))
+
+(defun token-text (n)
+  "N tokens, short: 6.2k, 1.4M."
+  (cond ((>= n 1000000) (format nil "~,1fM" (/ n 1000000.0)))
+        ((>= n 1000) (format nil "~,1fk" (/ n 1000.0)))
+        (t (format nil "~d" n))))
+
+(defun ai-allowance-html (ai)
+  "The author's AI allowance this month as the Credits tile shows it: the
+part used of the cap, as a bar, and about how many tokens; with no cap,
+the tokens alone.  Past it, the way on: bring your own agent."
+  (let ((percent (gethash "ai_month_percent" ai))
+        (tokens (gethash "ai_month_tokens" ai)))
+    (with-output-to-string (out)
+      (cond ((realp percent)
+             (format out "<p class=\"pl-line\">Your AI allowance this month: ~d% used~@[ (about ~a tokens)~]</p><div class=\"pl-meter\"><span style=\"width:~d%\"></span></div>"
+                     percent (and (realp tokens) (plusp tokens) (token-text tokens)) (min 100 (max 0 percent)))
+             (when (>= percent 100)
+               (format out "<p class=\"pl-line\">It renews on the 1st (UTC).  Meanwhile your own agent -- Claude Code on your own sign-in, or any MCP client -- can build here under your author key.</p>")))
+            ((and (realp tokens) (plusp tokens))
+             (format out "<p class=\"pl-line\">AI used this month: about ~a tokens</p>" (token-text tokens)))))))
 
 (defun author-name (wallet)
   "The name WALLET's author goes by, as the gate keeps it with the key (the
