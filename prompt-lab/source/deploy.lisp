@@ -1105,7 +1105,7 @@ it -- and the same for its test payments, apart."
                                   "quarters" (quarters real)
                                   ;; test payments included: no money moved for those
                                   "quarters_with_tests" (quarters all)
-                                  "paid_out" (unit-text "Held in {units}, and paid out after a quarter once the share owed has reached the house's minimum, at that day's rate for a {unit}; a smaller sum carries to the next.")))))))))
+                                  "paid_out" "Held through each quarter, and paid out after it once the share owed has reached the house's minimum; a smaller sum carries to the next."))))))))
 
 (defun app-file-door (req ent)
   "GET <prefix>/app-file?iid=<instance>&format=<name>: a web app's model as

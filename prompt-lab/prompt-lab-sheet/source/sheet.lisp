@@ -217,19 +217,21 @@ from a gate that names no credits."
               (most (or (getf pot :max) 0))
               ;; a free public lab sells nothing: the house fills its pot
               (offers (and (topups-offered?) (getf pot :topup?) (offers (getf pot :amounts) (getf pot :credits-sold)))))
+         ;; no unit is named to a developer (the user's ruling 59): the pot as
+         ;; how full it is, the session as the tokens it used
          (with-output-to-string (out)
-           (format out "<div class=\"pl-figure~:[~; pl-out~]\"><b>~:d</b> ~a left in the community pot</div>"
-                   (zerop held) held (units held))
-           (when (plusp most)
-             (format out "<div class=\"pl-meter\"><span style=\"width:~,1f%\"></span></div>"
-                     (* 100 (/ (min held most) most))))
-           ;; what the pot can hold is not said here: a top-up that
-           ;; would overfill it is told so when it is tried
-           (let ((drawn (let ((n (and spend (gethash "credits_used" spend)))) (and n (plusp n) n)))
-                 (added (let ((n (and spend (gethash "contributed" spend)))) (and n (plusp n) n))))
-             (when (or drawn added)
-               (format out "<p class=\"pl-line\">~@[this session has drawn ~:d~]~:[~; &middot; ~]~@[you have added ~:d~]</p>"
-                       drawn (and drawn added) added)))
+           (if (plusp most)
+               (format out "<div class=\"pl-figure~:[~; pl-out~]\"><b>~d%</b> left in the community pot that pays for builds</div><div class=\"pl-meter\"><span style=\"width:~,1f%\"></span></div>"
+                       (zerop held) (round (* 100 (/ (min held most) most))) (* 100 (/ (min held most) most)))
+               (format out "<div class=\"pl-figure~:[~; pl-out~]\">The community pot pays for builds</div>" (zerop held)))
+           (let* ((session (the-object sheet session))
+                  (usage (and session (session-usage session)))
+                  (tokens (and usage (+ (or (getf usage :input) 0) (or (getf usage :output) 0)
+                                        (or (getf usage :cache-read) 0) (or (getf usage :cache-write) 0))))
+                  (added (let ((n (and spend (gethash "contributed" spend)))) (and n (plusp n) n))))
+             (when (or (and tokens (plusp tokens)) added)
+               (format out "<p class=\"pl-line\">~@[this session: about ~a tokens~]~:[~; &middot; ~]~:[~;you have added to the pot~]</p>"
+                       (and tokens (plusp tokens) (token-text tokens)) (and tokens (plusp tokens) added) added)))
            (when (zerop held)
              (format out "<p class=\"pl-begging\">~a</p>"
                      (if (not (topups-offered?))
@@ -243,12 +245,12 @@ from a gate that names no credits."
               (offers (and (topups-offered?) (eq (gethash "topup" spend) t)
                            (offers (gethash "topup_amounts" spend) (gethash "topup_credits" spend)))))
          (with-output-to-string (out)
-           (format out "<div class=\"pl-figure\"><b>~:d</b> ~a left</div>"
-                   (+ (max 0 (- free used)) (or balance 0)) (units))
-           (format out "<p class=\"pl-line\">this session: ~:d of ~:d free ~a~@[ &middot; balance ~:d~]</p>"
-                   used free (units) balance)
+           (format out "<div class=\"pl-figure\"><b>~:d</b> credits left</div>"
+                   (+ (max 0 (- free used)) (or balance 0)))
+           (format out "<p class=\"pl-line\">this session: ~:d of ~:d free credits~@[ &middot; balance ~:d~]</p>"
+                   used free balance)
            (write-string (buttons offers "Buy:") out))))
-      (t (format nil "<p class=\"pl-line\">~a show here once you build.</p>" (units-title))))))
+      (t "<p class=\"pl-line\">The community pot and your AI allowance show here once you build.</p>"))))
 
 (defun publishable-key (session)
   "The Stripe publishable key the gate reports -- with the pot, else with
@@ -843,7 +845,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               ;; a free public lab says what it is before the first build
                               (when *free-lab?*
                                 (htm (:p :class "pl-line pl-public"
-                                         "This is the free public lab: building here costs you nothing -- each build draws a few rivets from a community pot that Genworks keeps filled.  A build typically draws 15 to 50 rivets; a web app refined over several prompts can draw 100 or more.  Everything made here -- your prompts, the model and its code -- is public the moment it is made, in the archive for anyone to read and reuse under the GNU Affero General Public License, version 3 or later -- the license of Gendl, which it runs on.  Nothing is sold here; a private lab of your own, where you can sell what you make, is a rung up "
+                                         "This is the free public lab: building here costs you nothing -- each build's AI is paid from a community pot that Genworks keeps filled, and an author key has a monthly AI allowance of its own.  Everything made here -- your prompts, the model and its code -- is public the moment it is made, in the archive for anyone to read and reuse under the GNU Affero General Public License, version 3 or later -- the license of Gendl, which it runs on.  Nothing is sold here; a private lab of your own, where you can sell what you make, is a rung up "
                                          (:a :href "https://genworks.com/authors/" :target "_blank" :rel "noopener" "the ladder")
                                          ".")))
                               (:textarea :id "pl-prompt" :rows "4" :|data-bind:prompt| ""
@@ -1117,7 +1119,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      ;; the author's slider: points of every payment, on top of
                                      ;; the fee, for the community pot (deploy.lisp)
                                      (when *pot-percent-least*
-                                       (htm (:label :data-doc (unit-text "Give more of every payment to the community pot of {units} that pays for everyone's builds.  It is taken on top of the monetization fee, and kept with the deployment's terms.")
+                                       (htm (:label :data-doc "Give more of every payment to the community pot that pays for everyone's builds.  It is taken on top of the monetization fee, and kept with the deployment's terms."
                                                     (:span :|data-text| (format nil "'To the community pot, on top of the fee: ' + $dpot + '%'"))
                                                     (:input :type "range" :step "1"
                                                             :min (format nil "~d" *pot-percent-least*)
@@ -1142,7 +1144,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      ;; the agent at the visitor's word (deploy.lisp)
                                      (:p :class "pl-line"
                                          (if (eq *toll-provider* :stripe)
-                                             (esc "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  Its users pay by card on Stripe's page, in dollars at a cent a rivet; the house keeps the monetization fee and the rest is transferred to your own Stripe account with each payment.  A model's priced files are sold on its page the same way.")
+                                             (esc "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  Its users pay by card on Stripe's page, in dollars; the house keeps the monetization fee and the rest is transferred to your own Stripe account with each payment.  A model's priced files are sold on its page the same way.")
                                              (esc "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  No money moves yet: a web app's tolls are taken as test payments, booked and marked as tests, and a model's priced downloads open only to you.")))
                                      ;; esc: a form's value is written only when said so (cl-who), and
                                      ;; a bare (if ...) here left the field with no label at all
@@ -1168,7 +1170,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      (:p :class "pl-line"
                                          (if (eq *toll-provider* :stripe)
                                              (esc "Each payment is split at Stripe: your share is transferred to your account at once, the card cost taken off the top and shared, and Stripe pays it out on its schedule.  ")
-                                             (unit-text "Your share is held in {units} through each quarter and paid out after it, at that day's rate.  "))
+                                             "Your share is held through each quarter and paid out after it.  ")
                                          (:a :target "_blank" :rel "noopener" :|data-show| "$deployed"
                                              :|data-attr:href| (format nil "'~a?name=' + $deployed.split('/').pop() + '&owner=' + $owner"
                                                                        (door-path "earnings"))
@@ -1395,7 +1397,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                          (spend (and session (the owner?) (spend-state session))))
                     (with-lhtml-string ()
                       (:div :class "pl-card pl-credits"
-                            (:h2 (esc (units-title)))
+                            (:h2 "AI allowance")
                             (str (credits-html self (pot) spend))
                             ;; the author's AI allowance this month (the gate's word on the key)
                             (let ((ai (and session (the owner?) (ignore-errors (author-ai (session-wallet session))))))

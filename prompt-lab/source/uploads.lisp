@@ -336,12 +336,12 @@ it, if any."
             ((null name) "That file has no usable name.")
             ((zerop (the bytes)) "That file is empty.")
             ((> (the bytes) (getf caps :bytes))
-             (format nil (unit-text "~a has ~a; a file may have ~a here~:[~;, more for a session that has added {units}~].")
+             (format nil "~a has ~a; a file may have ~a here~:[~;, more for a trusted author's session~]."
                      name (size-label (the bytes)) (size-label (getf caps :bytes)) (not (the paid?))))
             ((the shelf (file-named name))
              (format nil "This session already has a file named ~a." name))
             ((>= (length (the shelf files)) (getf caps :files))
-             (format nil (unit-text "This session has its ~a files~:[~;; a session that has added {units} may have more~].")
+             (format nil "This session has its ~a files~:[~;; a trusted author's session may have more~]."
                      (getf caps :files) (not (the paid?))))
             ((> (+ (the bytes) (the shelf total-bytes)) (getf caps :total))
              (format nil "With ~a this session's files would pass ~a in all." name (size-label (getf caps :total))))

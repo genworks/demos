@@ -611,8 +611,8 @@ value, where it belongs -- a plist of :engine, :reason and :url."
         ;; a community pot with nothing in it builds for nobody
         ((pot-empty?)
          (values nil (unit-text (if (topups-offered?)
-                                    "The community pot of {units} is empty.  Top it up and the lab builds again, for everyone."
-                                    "The community pot of {units} is empty: the lab rests until the house fills it again."))
+                                    "The community pot that pays for builds is empty.  Top it up and the lab builds again, for everyone."
+                                    "The community pot that pays for builds is empty: the lab rests until the house fills it again."))
                  *response-too-many-requests*))
         ((and (free-caps? session) (>= (prompts-used session) *max-prompts-per-session*))
          (values nil (format nil "This session has used its ~a ~:[free ~;~]prompts.  ~@[~a to keep going here, ~]take a copy of the model file, or start a new session."
@@ -711,7 +711,7 @@ hosted page, or client_secret for a form in the page, and the wallet), or
 nil and the reason."
   (unless (topups-offered?)
     (return-from begin-topup!
-      (values nil (unit-text "This lab sells no {units}: building here is free, within each author's daily allowance."))))
+      (values nil "This lab sells nothing to its builders: building here is free, within each author key's AI allowance.")))
   (multiple-value-bind (answer status)
       (gate-post "topup" (h "wallet" (session-wallet session)
                             "amount_cents" amount
@@ -790,7 +790,7 @@ checkout, publishable_key, wallet} for Stripe's one-line card control."
     (cond (*free-lab?* (free-lab-refusal req ent))
           ((not (topups-offered?))
            (refuse req ent net.aserve:*response-forbidden* "~a"
-                   (unit-text "This lab sells no {units}: building here is free, within each author's daily allowance.")))
+                   "This lab sells nothing to its builders: building here is free, within each author key's AI allowance."))
           ((null session) (no-such-session req ent))
           ((not (owner-request? req session json)) (not-yours req ent))
           ((not (integerp amount)) (refuse req ent "Say how much."))

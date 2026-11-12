@@ -10,8 +10,9 @@ or edit the file by hand and reload it.
 
 Genworks hosts the lab at
 **<https://hack.genworks.com/prompt-lab>**.  It is an experiment,
-offered as is: each session allows a handful of prompts and starts
-with free rivets to spend, prompts and generated code are logged,
+offered as is: building there is free -- the AI it uses is paid from
+a community pot, and an author key has a monthly AI allowance --
+prompts and generated code are logged,
 and generated code is the visitor's under the GNU Affero General
 Public License, like Gendl itself and like this code.
 
@@ -53,14 +54,16 @@ deploying stack's reverse proxy, which holds the API key: no key
 lives with this code, and none is read from it.  Payments, when an
 instance offers them, are settled by the same gate.
 
-Builds are paid in **rivets**, the lab's unit (`*unit*` in
-`parameters.lisp`: an instance may call it what it likes; the doors'
-field names still say `credits`), and the gate keeps the count.  It
-may give every session a free allowance and every payer a balance of
-their own, or keep one **community pot**: a single balance that every
-build, by anyone, draws on, that anyone may add to, and that stops the
-lab at zero until someone does.  The page shows whichever the gate
-says it keeps; the reference instance keeps a pot.
+The AI the agent uses is paid through the gate, which keeps the
+count.  It may give every session a free allowance and every payer a
+balance of their own, or keep one **community pot**: a single balance
+that every build, by anyone, draws on, and that stops the lab at zero.
+It may also cap what each **author key**'s AI calls cost in a day and
+in a month (its **AI allowance**); past it, the author's own agent may
+go on building through the lab's agent doors.  The page shows the pot
+and the key's allowance as the gate reports them; the reference
+instance keeps a pot and caps each key.  (The books' unit is `*unit*`
+in `parameters.lisp`; the doors' field names say `credits`.)
 
 ## Two kinds of build: a geometry model, or a web app
 
@@ -140,7 +143,7 @@ cannot (`*closed-source?*` nil) offers open source alone.
 - A web app has **tollbooths**, which the author asks the agent to put
   wherever they like -- a price for each CAD download, a pass that
   unlocks a results table for a day, a price computed from the model.
-  The app declares them (`tolls`: a key, a label, the price in rivets, and
+  The app declares them (`tolls`: a key, a label, the price in cents -- `:cents 300` is $3.00 -- and
   `:uses` or `:seconds` when the payment covers so many uses or so
   long) and places them (`toll-button`, `toll-paid?`, `use-toll!`);
   `file-link` gives a download of the model as it stands in the
@@ -155,17 +158,16 @@ Nothing is deployed that charges for nothing (`monetizable?`: a priced
 toll, and for a model a download it stands on); the state door answers
 `monetizable`.
 
-Everything is priced and paid in **rivets**, the lab's own unit, which
-visitors buy in packets.  Of what users pay, the house keeps its
+Everything is priced and paid in money, in cents of the author's
+currency.  Of what users pay, the house keeps its
 **monetization fee**: `*house-fee-percents*`, 10% of an open-source
 deployment's takings and 15% of a closed-source one's.  Where the house's
 gate pours it into the pot as each payment settles, the author may
-give more, to the lab's community pot of rivets that pays for
+give more, to the lab's community pot that pays for
 everyone's builds: a slider on the Monetize form, from
 `*pot-percent-least*` upwards, in points on top of the fee (nil, the
 default, offers no slider).  The author
-is owed the rest, held in rivets and paid out after each quarter at
-that day's rate.  The terms are written into each deployment's record
+is owed the rest, held and paid out after each quarter.  The terms are written into each deployment's record
 on the day.  The records and the books are kept by
 [Monocle](https://gitlab.common-lisp.net/clo/monocle).
 
@@ -220,13 +222,13 @@ solids engine a STEP or IGES file can be imported outright.
 
 **An uploaded file is public with its session**, live and in the
 archive, for anyone to download, unless the session is private (a
-closed-source session is, and one that has added rivets may be).  A
+closed-source session is, and so may a trusted author's be).  A
 visitor whose session is public acknowledges that the file will be
 shared before it is taken.  Files are only ever served as downloads.
 
 The caps are `*upload-caps*` in `source/uploads.lisp` (by default 2 MB
-a file, three files and a PDF of ten pages for a session; more for one
-that has added rivets), and `*uploads?*` nil takes none.  Attached
+a file, three files and a PDF of ten pages for a session; more for a
+trusted author's), and `*uploads?*` nil takes none.  Attached
 files travel with every call the session makes, so the gate must take
 a request that large.
 
@@ -269,8 +271,8 @@ Where an instance puts a human check in front of the prompt door, a
 prompt that carries no check token is taken on a small daily
 allowance -- so many from one address, so many from all together
 (`*max-automated-prompts-per-day*`, `*max-automated-prompts-per-address*`
-in `parameters.lisp`; none at all when the first is nil) -- and spends
-the same rivets as anyone's.  An interesting model built
+in `parameters.lisp`; none at all when the first is nil) -- and draws
+on the same pot as anyone's.  An interesting model built
 that way is as welcome as any other; the allowance is there so that
 a day of abuse stays small.
 

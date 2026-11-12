@@ -422,6 +422,19 @@ loaded) its page too."
                                    (search " Grace Hopper." header)
                                    (search "AGPL-3.0-or-later" header))))
                        (eval `(setf (,(lab '#:session-wallet) ',found) ',old))))))
+          ;; no unit is named to a developer (ruling 59): the lab's page says
+          ;; no rivets, the free lab's words included
+          (smoke "prompt-lab names no rivets to a developer, the free lab's page included"
+                 (lambda ()
+                   (flet ((page () (http :get prefix)))
+                     (let ((plain (page))
+                           (saved (symbol-value (lab '#:*free-lab?*))))
+                       (setf (symbol-value (lab '#:*free-lab?*)) t)
+                       (unwind-protect
+                            (let ((free (page)))
+                              (and (stringp plain) (plusp (length plain)) (not (search "rivet" plain))
+                                   (stringp free) (search "community pot" free) (not (search "rivet" free))))
+                         (setf (symbol-value (lab '#:*free-lab?*)) saved))))))
           ;; the author's AI allowance (rulings 46, 46b): the gate's word on the
           ;; key, kept with its standing, shown as a bar and about-tokens; past
           ;; it, the way on is the author's own agent
