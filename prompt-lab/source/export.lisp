@@ -249,6 +249,17 @@ there is nothing to write."
 ;; The door.
 ;;
 
+(defun source-download (req ent session key deployed?)
+  "Answer SESSION's model file, header and all, to its owner (KEY): the
+author may take their own source at any time, open or closed, and needs to
+declare or unlock nothing for it.  Anyone else, and a deployed model's
+viewer, is told there is no such session.  Not metered: nothing runs."
+  (let ((file (and (not deployed?) (owner? session key) (session-model-file session))))
+    (cond ((null file) (no-such-session req ent))
+          ((not (probe-file file)) (refuse req ent "No model has been written in this session yet."))
+          (t (respond-deployment req ent (uiop:read-file-string file :external-format :utf-8)
+                                 :attachment (format nil "prompt-lab-~a.lisp" (session-id session)))))))
+
 (defun download-door (req ent)
   "GET <prefix>/api/download?session=<id>&format=<name> (or replay=<id>
 for an archived session's replay; owner=<key> for a private one; or
@@ -276,6 +287,9 @@ credits are spent.  A grant is spent when its file is served."
                                    (equal (gethash "owner" record) (or key (query-value req "owner")))))
                          (grant-admits? grant deployed kind))))
     (cond ((or (null session) (not (visible-to? session key))) (no-such-session req ent))
+          ;; the model file itself: its author's, at any time, open or
+          ;; closed, with nothing to unlock (the user's ruling, 2026-11-12)
+          ((equal kind "source") (source-download req ent session key (stringp deployed)))
           ((null entry) (refuse req ent "No such download here: ~a." kind))
           ;; a deployed model's priced download: its owner's, or bought on its page
           ((and record (not (deployment-admits? record kind (or key (query-value req "owner")) grant)))

@@ -403,6 +403,17 @@ loaded) its page too."
                           (text (uiop:read-file-string (uiop:symbol-call :prompt-lab :session-model-file found))))
                      (and (search "SPDX-License-Identifier: AGPL-3.0-or-later" text)
                           (not (search "SPDX" (uiop:symbol-call :prompt-lab :model-body found)))))))
+          ;; the author takes their own source at any time; nobody else does
+          (smoke "prompt-lab source download: the owner's file, a stranger's 404"
+                 (lambda ()
+                   (let ((url (format nil "~a?session=~a&format=source" (door "download") session)))
+                     (multiple-value-bind (body status) (http :get url :headers (owner-headers))
+                       (unless (and (eql status 200) (search "define-object model" body) (search "SPDX" body))
+                         (error "the owner's source download answered ~a" status)))
+                     (multiple-value-bind (body status) (http :get url)
+                       (declare (ignore body))
+                       (unless (eql status 404) (error "a stranger's source download answered ~a" status)))
+                     t)))
           ;; the reviewer pass over the archive's authors (author-review.lisp):
           ;; a dry run reads and calls nothing; each recommendation's rung
           (smoke "prompt-lab reviewer pass: a dry run reads the archive, and the ladder's moves"

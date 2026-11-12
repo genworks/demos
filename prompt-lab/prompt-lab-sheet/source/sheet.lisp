@@ -1451,6 +1451,18 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                                   (session-id session) (first entry)))))
                                                 (esc (fourth entry)))))
                                 (htm (:p :class "pl-line" "The model's drawings and files, once it is built.")))
+                            ;; the source, its author's at any time: nothing to unlock
+                            (when (and session (the owner?) (probe-file (session-model-file session)))
+                              (htm (:button :type "button" :class "pl-download"
+                                            :data-doc "Your model file, as the lab keeps it: yours to take at any time"
+                                            :|data-on:click|
+                                            (escape-string-minimal-plus-quotes
+                                             (format nil "plDownload(~a, $owner)"
+                                                     (js-string-literal
+                                                      (format nil "~a?~:[session~;replay~]=~a&format=source"
+                                                              (door-path "download") (session-replay? session)
+                                                              (session-id session)))))
+                                            "Source (.lisp)")))
                             ;; the model file in the host's terminal, for its owner
                             (let ((console (and session (the owner?) (not (session-replay? session))
                                                 (ignore-errors (console-url session)))))
