@@ -55,7 +55,7 @@
   "Integer.  The sweep walks the archive at most this often.")
 
 (defparameter *closed-declaration-text*
-  "I will host this myself or distribute binaries built from it, and I will make the quarterly report for Gendl-built binaries I host or distribute, even when I charge nothing for them."
+  "I will host this myself or distribute binaries built from it, and I will make the quarterly royalty report at genworks.com/royalties/ for Gendl-built binaries I host or distribute, even when I charge nothing for them -- or hold a Genworks GDL commercial license."
   "String.  The words of the declaration's box, as the author ticks them;
 kept with the declaration.")
 

@@ -446,12 +446,14 @@ days are left.")
   "Integer.  The days the house's one-line grant gives, as the request
 names it.")
 
-(defparameter *closed-minimum-cents* nil
-  "Number or nil.  The least a CLOSED deployment hosted here must bring the
-house in fees each calendar month (cents), unless the house sets its own
-(the deployment's \"minimum_cents\", $0 included); short of it at the
-month's end, its hosting stops until hosting bought for it settles the
-shortfall.  Nil: no minimum anywhere until the house names one.")
+(defparameter *closed-minimum-cents* 1000
+  "Number or nil.  The least REVENUE a CLOSED deployment hosted here must
+take from its users each calendar month (cents; the user's ruling 49:
+$10), unless the house sets its own (the deployment's \"minimum_cents\",
+$0 included).  Short of it at the month's end, the house's share of the
+shortfall -- at the deployment's fee rate, $1.50 of a missing $10 at 15% --
+is due, and its hosting stops until hosting bought for it settles that.
+Nil: no minimum anywhere.")
 
 (defparameter *house-token-file* nil
   "Pathname or nil.  A file whose first line is the token the house's doors

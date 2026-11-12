@@ -1488,6 +1488,11 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      (htm (:p :class "pl-line"
                                               (fmt "Only you see this work.  Decide by ~a (~d day~:p left): ~:[~;host it with Monetize, ~]say you will host it yourself or distribute it, make it public, or delete it.  Undecided, it becomes public then, under the GNU Affero General Public License."
                                                    day left (eq (gethash "deploys" state) t)))
+                                          ;; the license, said plainly where it matters (Dave's ruling 53)
+                                          (:p :class "pl-line"
+                                              "Gendl, which your code runs on, is under the GNU Affero General Public License, which asks you to share your code with its users.  Hosting or shipping it closed, you sidestep that with the quarterly royalty report at "
+                                              (:a :href "https://genworks.com/royalties/" :target "_blank" :rel "noopener" "genworks.com/royalties/")
+                                              " -- a $0 quarter is fine -- or a Genworks GDL commercial license.  Nothing else to sign.")
                                           (:div :class "pl-declare" :|data-ignore-morph| ""
                                                 (:label :class "pl-pick"
                                                         (:input :type "checkbox" :|data-bind:cbox| "")

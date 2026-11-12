@@ -990,9 +990,10 @@ loaded) its page too."
                                   (let* ((prev-month (if (= month 1) 12 (1- month)))
                                          (prev-year (if (= month 1) (1- year) year))
                                          (mid (encode-universal-time 0 0 12 15 prev-month prev-year 0)))
-                                    (uiop:symbol-call :monocle :book-revenue! house name 4000 :toll "ci" :reference "ci-minimum")
-                                    (unless (plusp (call :deployment-fees-cents name (- now 60) (+ now 60)))
-                                      (error "the booked payment carries no fee"))
+                                    ;; $4 of revenue against a $10 minimum
+                                    (uiop:symbol-call :monocle :book-revenue! house name 400 :toll "ci" :reference "ci-minimum")
+                                    (unless (eql 400 (call :deployment-revenue-cents name (- now 60) (+ now 60)))
+                                      (error "the booked payment's revenue does not read 400"))
                                     (let ((moved (with-output-to-string (out)
                                                    (with-input-from-string (in (uiop:read-file-string books))
                                                      (loop for l = (read-line in nil) while l
@@ -1011,8 +1012,10 @@ loaded) its page too."
                                         (values (make-hash-table :test #'equal) 200)))
                                 (let* ((reported (call :reckon-closed-minimums! :force? t))
                                        (mine (assoc name reported :test #'equal)))
-                                  (unless (and mine (< 0 (cdr mine) 1000))
-                                    (error "the shortfall was not reckoned from the fees: ~s" reported))
+                                  ;; the house's share of the $6 that fell short, at the closed rate
+                                  (unless (and mine (eql (cdr mine)
+                                                         (ceiling (* 600 (call :house-fee-percent t) 1/100))))
+                                    (error "the shortfall was not reckoned from the revenue: ~s" reported))
                                   (unless (find-if (lambda (a) (and (equal (first a) "host-minimum") (equal (second a) name))) asked)
                                     (error "the gate was not told")))
                                 (when (assoc name (call :reckon-closed-minimums!) :test #'equal)
