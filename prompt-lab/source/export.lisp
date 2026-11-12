@@ -254,7 +254,15 @@ there is nothing to write."
 author may take their own source at any time, open or closed, and needs to
 declare or unlock nothing for it.  Anyone else, and a deployed model's
 viewer, is told there is no such session.  Not metered: nothing runs."
-  (let ((file (and (not deployed?) (owner? session key) (session-model-file session))))
+  (let ((file (and (not deployed?)
+                   (if (session-replay? session)
+                       ;; an archived work: its owner is the record's, and its file
+                       ;; the archive's, not the replay's scratch copy
+                       (let* ((directory (archived-directory (session-id session)))
+                              (json (and directory (read-record (merge-pathnames "session.json" directory)))))
+                         (and json (stringp key) (equal (gethash "owner" json) key)
+                              (merge-pathnames "model.lisp" directory)))
+                       (and (owner? session key) (session-model-file session))))))
     (cond ((null file) (no-such-session req ent))
           ((not (probe-file file)) (refuse req ent "No model has been written in this session yet."))
           (t (respond-deployment req ent (uiop:read-file-string file :external-format :utf-8)

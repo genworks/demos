@@ -200,10 +200,9 @@ owner what is owed."
 ;; Closed source is a session's choice, made as it opens and before its
 ;; first prompt: the session is then closed to watchers and kept out of
 ;; the listings, as a private one is, and what it deploys does not serve
-;; its source.  The choice stands while the session completes the
-;; Monetize flow -- a deployment.  A closed session that ends without one
-;; REVERTS: it is opened again and goes into the public archive under the
-;; GNU Affero General Public License, like any other.
+;; its source.  How long it stays closed, and how its author decides, is
+;; closed.lisp's: thirty days from when it opened, then public under the
+;; GNU Affero General Public License unless hosted, declared or deleted.
 ;;
 
 (defvar *closed-sessions* (make-hash-table :test #'equal)
@@ -226,36 +225,6 @@ made from it stands."
   (find-if #'(lambda (record) (and (equal (gethash "session" record) id)
                                    (truthy? (gethash "closed" record))))
            (deployment-records)))
-
-(defun revert-closed-session! (session)
-  "SESSION is ending.  If it was opened closed-source and never deployed,
-it is opened again, so the record that goes to the archive is public."
-  (when (session-closed? session)
-    (unless (ignore-errors (closed-deployment? (session-id session)))
-      (setf (session-private? session) nil)
-      (ignore-errors
-       (log-event session :note "This session was opened closed-source and ended without a deployment: its source is public again, under the GNU Affero General Public License."))
-      ;; the record on disk is what the archive copies
-      (save-session! session)))
-  (bt:with-lock-held (*kinds-lock*) (remhash (session-id session) *closed-sessions*)))
-
-(defun revert-closed-record! (directory)
-  "The same for a session directory no live session owns (a restarted
-Lisp left it): its archived record is opened when it was closed and
-never deployed.  Never signals."
-  (ignore-errors
-   (let* ((json (read-record (merge-pathnames "session.json" directory)))
-          (id (and json (gethash "id" json)))
-          (created (and json (gethash "created" json))))
-     (when (and (stringp id) (integerp created) (truthy? (gethash "closed" json))
-                (not (closed-deployment? id)))
-       (let* ((target (archive-directory-for id created))
-              (file (and target (merge-pathnames "session.json" target)))
-              (record (and file (read-record file))))
-         (when record
-           (setf (gethash "private" record) 'yason:false
-                 (gethash "closed" record) 'yason:false)
-           (write-text-file (with-output-to-string (out) (yason:encode record out)) file)))))))
 
 ;;
 ;; The monetization story.  Nothing is deployed until what was built says

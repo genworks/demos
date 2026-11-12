@@ -582,6 +582,8 @@ not hold."
                 (list :object (the project-tile) :place :left :tab "Prompt")
                 (list :object (the app-section) :place :left :tab "Prompt")
                 (list :object (the monetize-tile) :place :left :tab "Prompt")
+                ;; a closed work's deadline and its author's exits (closed.lisp)
+                (list :object (the closed-section) :place :left :tab "Prompt")
                 (list :object (the files-section) :place :left :tab "Prompt")
                 (list :object (the status-section) :place :left :tab "Prompt")
                 (list :object (the credits-section) :place :left :tab "Prompt")
@@ -600,7 +602,7 @@ not hold."
    (user-mode?-default t)
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
-   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :author :author-name :wear-skin :shade-desk :upload :adopt
+   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :author :author-name :closed-decide :wear-skin :shade-desk :upload :adopt
                            :deploy :undeploy :connect :open-project :push-project :deploy-project))
 
    ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
@@ -742,7 +744,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cbox: false, cemail: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; and of its last staged hosting (hosting.lisp)
@@ -815,24 +817,29 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                               "A web app is a page of its own around the model -- its inputs as a form, its results and a drawing -- at an address anyone can open and use.")))
                               ;; closed source is chosen here, before the session
                               ;; opens with the first build or upload (deploy.lisp)
-                              (when (and *closed-source?* *deployments?*)
-                                (htm (:label :class "pl-pick pl-closed" :style "display:none" :|data-show| "!$opened"
-                                             :data-doc "Closed source: nobody else sees the session, and what you deploy from it does not serve its source, under a closed-source licence for the Gendl it runs on, which comes with the higher fee.  If you do not deploy it, its source becomes public when the session ends."
+                              (when (closed-offered?)
+                                (htm (:label :class "pl-pick pl-closed" :style "display:none"
+                                             ;; a free lab keeps closed work for its author keys alone
+                                             :|data-show| (if *deployments?* "!$opened" "!$opened && $wallet")
+                                             :data-doc (format nil "Closed source: nobody else sees the work, for ~d days from its first build.  Within them, decide: ~:[~;host it with Monetize, ~]say you will host it yourself or distribute it, or delete it.  Otherwise it becomes public, under the GNU Affero General Public License." *closed-days* *deployments?*)
                                              ;; closed-pick: an attribute's name reaches Datastar
                                              ;; in lower case, and it reads the hyphen as closedPick
                                              (:input :type "checkbox" :id "pl-closed" :|data-bind:closed-pick| "")
                                              " Closed source")
-                                     ;; the hosting fee follows the box as it is ticked
-                                     (:p :class "pl-line pl-fee" :style "display:none" :|data-show| "!$opened"
-                                         "Monetization fee: "
-                                         (:b :|data-text| (format nil "$closedPick ? '~d%' : '~d%'"
-                                                                  (house-fee-percent t) (house-fee-percent nil)))
-                                         (:span :|data-show| "$closedPick"
-                                                " -- nobody else sees the session; its source becomes public if you never deploy it.")
-                                         (:span :|data-show| "!$closedPick" " -- open source, public as you build."))
-                                     (:p :class "pl-line" :style "display:none" :|data-show| "$opened && $closed"
-                                         (fmt "Closed source, ~d% monetization fee: deploy it with Monetize, or its source becomes public when the session ends."
-                                              (house-fee-percent t)))))
+                                     (if *deployments?*
+                                         ;; the hosting fee follows the box as it is ticked
+                                         (htm (:p :class "pl-line pl-fee" :style "display:none" :|data-show| "!$opened"
+                                                  "Monetization fee: "
+                                                  (:b :|data-text| (format nil "$closedPick ? '~d%' : '~d%'"
+                                                                           (house-fee-percent t) (house-fee-percent nil)))
+                                                  (:span :|data-show| "$closedPick"
+                                                         (fmt " -- nobody else sees the work; decide within ~d days, or its source becomes public." *closed-days*))
+                                                  (:span :|data-show| "!$closedPick" " -- open source, public as you build."))
+                                              (:p :class "pl-line" :style "display:none" :|data-show| "$opened && $closed"
+                                                  (fmt "Closed source, ~d% monetization fee: decide within ~d days -- the Decide panel -- or its source becomes public."
+                                                       (house-fee-percent t) *closed-days*)))
+                                         (htm (:p :class "pl-line" :style "display:none" :|data-show| "!$opened && $wallet && $closedPick"
+                                                  (fmt "Only you see a closed work, for ~d days from its first build; then decide, or it becomes public under the GNU Affero General Public License." *closed-days*))))))
                               ;; a free public lab says what it is before the first build
                               (when *free-lab?*
                                 (htm (:p :class "pl-line pl-public"
@@ -1442,6 +1449,66 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                         (:button :type "button" :class "pl-download" :onclick "plClosePayment()" "Close")
                                         (:a :href "#" :id "pl-pay-more" :onclick "plMoreOptions(); return false" "more payment options"))))))))
 
+   ;; A CLOSED WORK's panel, for its owner alone (closed.lisp): the date it
+   ;; must be decided by and the exits -- host (Monetize, where this lab
+   ;; deploys), declare, make public, delete -- and, near the date, a
+   ;; request to the house for more time.  The declaration's inputs keep
+   ;; their typing through a redraw.
+   (closed-section
+    :type 'base-html-div
+    :inner-html (progn
+                  (the revision)
+                  (let* ((session (the session))
+                         ;; closed-state checks the key against the work's owner, so an
+                         ;; archived work's replay (which is nobody's) shows it too
+                         (state (and session (the owner-key)
+                                     (ignore-errors (closed-state (session-id session) (the owner-key))))))
+                    (if (null state)
+                        ""
+                        (let ((day (let ((until (gethash "until" state))) (and until (utc-day until))))
+                              (left (gethash "days_left" state))
+                              (act (lambda (what confirm)
+                                     (escape-string-minimal-plus-quotes
+                                      (format nil "~@[confirm(~a) && ~](($cact = '~a'), ~a)"
+                                              (and confirm (js-string-literal confirm)) what
+                                              (the (datastar-action :closed-decide :options "{filterSignals: {include: /^(cact|cbox|cemail|owner)$/}}")))))))
+                          (with-lhtml-string ()
+                            (:div :class "pl-card pl-closed-work"
+                                  (:h2 "Closed work")
+                                  (cond
+                                    ((gethash "declared" state)
+                                     (htm (:p :class "pl-line"
+                                              (fmt "You said on ~a that you will host this work yourself or distribute it: it stays closed.  Its source is yours to take from Download."
+                                                   (utc-day (gethash "declared" state))))))
+                                    ((eq (gethash "hosted" state) t)
+                                     (htm (:p :class "pl-line" "Hosted with us, closed: it stays closed.")))
+                                    (t
+                                     (htm (:p :class "pl-line"
+                                              (fmt "Only you see this work.  Decide by ~a (~d day~:p left): ~:[~;host it with Monetize, ~]say you will host it yourself or distribute it, make it public, or delete it.  Undecided, it becomes public then, under the GNU Affero General Public License."
+                                                   day left (eq (gethash "deploys" state) t)))
+                                          (:div :class "pl-declare" :|data-ignore-morph| ""
+                                                (:label :class "pl-pick"
+                                                        (:input :type "checkbox" :|data-bind:cbox| "")
+                                                        " " (esc *closed-declaration-text*))
+                                                (:div :class "pl-row"
+                                                      (:input :type "email" :maxlength "200" :|data-bind:cemail| ""
+                                                              :placeholder "Your address, for the quarterly report")
+                                                      (:button :type "button" :class "pl-download"
+                                                               :|data-attr:disabled| "!$cbox"
+                                                               :|data-on:click| (funcall act "declare" nil)
+                                                               "Declare")))
+                                          (:div :class "pl-row"
+                                                (:button :type "button" :class "pl-download"
+                                                         :|data-on:click| (funcall act "public" "Make this work public now, under the GNU Affero General Public License?  This cannot be undone.")
+                                                         "Make it public now")
+                                                (:button :type "button" :class "pl-download"
+                                                         :|data-on:click| (funcall act "delete" "Delete this work and everything the lab keeps of it?  This cannot be undone.")
+                                                         "Delete it")
+                                                (when (eq (gethash "may_ask" state) t)
+                                                  (htm (:button :type "button" :class "pl-download"
+                                                                :|data-on:click| (funcall act "more-time" nil)
+                                                                "Ask for more time"))))))))))))))
+
    ;; The model's files, from the download door (export.lisp): fetched, so
    ;; a refusal is a line on the page and not a saved file, and with the
    ;; owner's key, which the door needs for a private session and to
@@ -1468,7 +1535,8 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                 (esc (fourth entry)))))
                                 (htm (:p :class "pl-line" "The model's drawings and files, once it is built.")))
                             ;; the source, its author's at any time: nothing to unlock
-                            (when (and session (the owner?) (probe-file (session-model-file session)))
+                            (when (and session (the owner-key) (or (the owner?) (session-replay? session))
+                                       (probe-file (session-model-file session)))
                               (htm (:button :type "button" :class "pl-download"
                                             :data-doc "Your model file, as the lab keeps it: yours to take at any time"
                                             :|data-on:click|
@@ -1730,6 +1798,35 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
               (t (the (tell-error! reason)))))
       (the spent-token!)))
 
+   (closed-decide
+    (signals)
+    ;; the owner's exit for the closed work shown (closed.lisp)
+    (let ((session (the session))
+          (action (gethash "cact" signals)))
+      ;; decide-closed-work! checks the key against the work's owner
+      (if (not (and session (the owner-key)))
+          (the (tell-error! "This is no closed work of yours."))
+          (multiple-value-bind (notice reason)
+              (decide-closed-work! (session-id session) (the owner-key) action
+                                   :email (let ((e (gethash "cemail" signals))) (and (stringp e) (string-trim " " e)))
+                                   :box (eq (gethash "cbox" signals) t))
+            (cond ((null notice) (the (tell-error! reason)))
+                  ((equal action "delete")
+                   ;; nothing is left to show: back to the lab's front door
+                   (sheet-send! self
+                                (datastar-signals-event
+                                 (with-output-to-string (s) (yason:encode (h "notice" notice "error" "" "cact" "") s)))
+                                (datastar-script-event
+                                 (format nil "setTimeout(function(){location.href=~a},1500)" (js-string-literal *url-prefix*)))))
+                  (t (the (set-slot! :revision (1+ (the revision))))
+                     (sheet-send! self (datastar-signals-event
+                                        (with-output-to-string (s)
+                                          (yason:encode (h "notice" notice "error" "" "cact" ""
+                                                           "closed" (if (and (not (equal action "public")) (session-closed? session))
+                                                                        t 'yason:false))
+                                                        s))))
+                     (sheet-changed! self)))))))
+
    (author-name
     (signals)
     ;; the name the author goes by, kept with the key at the gate (page.lisp
@@ -1980,7 +2077,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                       (let ((session (the session)))
                         (if session
                             (or (session-closed? session) (paid? session))
-                            (and *closed-source?* *deployments?* (eq (gethash "closedPick" signals) t))))))
+                            (and (closed-offered?) (eq (gethash "closedPick" signals) t))))))
              (the (tell-error! "Tick the box first: the file will be shared with this session.")))
             ((and *turnstile-site-key* (null token))
              (the (tell-error! "Complete the human check first.")))

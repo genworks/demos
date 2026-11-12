@@ -548,9 +548,11 @@ has credit or has put more into the pot than it has drawn."
         (funnel-count! "sessions")
         (watch-event! :session-open session :address address :detail (session-id session))
         (log-event session :note "Session ~a opened.  Describe what to build." (session-id session))
-        (when (and closed? *closed-source?* *deployments?*)
+        (when (and closed? (closed-allowed? (session-wallet session)))
           (close-session-source! session)
-          (log-event session :note "This session is closed-source: nobody else sees it, and what you deploy from it (Monetize) does not serve its source.  If it ends without a deployment its source becomes public, under the GNU Affero General Public License, like any other session's."))
+          (start-closed-clock! session)
+          (log-event session :note "This work is closed source: nobody else sees it, for ~d days from now.  Within them host it~:[~; with Monetize~], say you will host it yourself or distribute it, or delete it -- the Decide panel -- or it becomes public, under the GNU Affero General Public License, like any other work."
+                     *closed-days* *deployments?*))
         (refresh-balance! session)
         (save-session! session)
         session)))
@@ -1281,6 +1283,8 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
     ;; the upstream licensor's view of the royalty accruing (deploy.lisp):
     ;; behind a token of its own, not the lab's lock
     (net.aserve:publish :path (door-path "royalty") :server server :host host :function #'royalty-door)
+    ;; the house's grant of more closed time (closed.lisp), behind its own token
+    (net.aserve:publish :path (door-path "closed-extend") :server server :host host :function #'closed-extend-door)
     (net.aserve:publish :path (format nil "~a/royalty" *url-prefix*) :server server :host host :function #'royalty-page)
     ;; the hangar's feed of this lab's deployments (deploy.lisp): behind
     ;; the hangar's token, not the lab's lock

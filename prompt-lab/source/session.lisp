@@ -238,6 +238,9 @@ privacy switch can all save at once, and shared session.tmp."
            "kind" (kind-name (session-kind session))
            ;; opened closed-source, and not yet reverted (deploy.lisp)
            "closed" (if (session-closed? session) t 'yason:false)
+           ;; a closed work's deadline and its author's declaration (closed.lisp)
+           "closed_until" (and (session-closed? session) (closed-deadline (session-id session)))
+           "declared" (closed-declaration (session-id session))
            "cents" (session-cents session)
            "allowance" (session-allowance session)
            "credits" (session-credits session)
@@ -296,7 +299,8 @@ is on disk for it."
                  (number-or-nil (key) (let ((v (gethash key json))) (and (realp v) v))))
             (setf (session-private? session) (eq (gethash "private" json) 'yason:true))
             (when (and (eq (gethash "closed" json) 'yason:true) (session-private? session))
-              (close-session-source! session))
+              (close-session-source! session)
+              (note-closed-record! id json))
             (setf (session-created session) (number-or "created" (get-universal-time))
                   (session-cents session) (number-or "cents" 0)
                   (session-allowance session) (number-or-nil "allowance")
@@ -333,10 +337,10 @@ is on disk for it."
 
 (defun delete-session (session)
   "Forget SESSION, delete its package and its directory -- after a last
-copy of what it holds goes to the archive.  A session opened
-closed-source that never deployed goes there public (deploy.lisp)."
-  (ignore-errors (revert-closed-session! session))
+copy of what it holds goes to the archive.  A closed work stays closed
+there until its author decides or its time runs out (closed.lisp)."
   (archive-session! session)
+  (end-closed-session! session)
   (bt:with-lock-held (*sessions-lock*)
     (remhash (session-id session) *sessions*)
     (remhash (session-id session) *session-locks*))
@@ -393,8 +397,6 @@ and directories reaped."
              (age (- now (or (ignore-errors (file-write-date (if (probe-file record) record directory))) now))))
         (when (> age lifetime)
           (archive-stale-directory! directory)
-          ;; opened closed-source and never deployed: public in the archive
-          (revert-closed-record! directory)
           (ignore-errors (uiop:delete-directory-tree (pathname directory) :validate t))
           (push (namestring directory) reaped))))
     (nreverse reaped)))
@@ -413,7 +415,9 @@ a no-op when one is running."
                                                          ;; hosting bought whose buyer never came back (deploy.lisp)
                                                          (sweep-hosting!)
                                                          ;; the deployments' terms at the gate, again (deploy.lisp)
-                                                         (register-deployments!))
+                                                         (register-deployments!)
+                                                         ;; closed works whose time ran out, opened (closed.lisp)
+                                                         (sweep-closed-works!))
                                       (error (condition)
                                         (format *error-output* "~&prompt-lab reaper: ~a~%" condition)))))
                           :name "prompt-lab reaper")))

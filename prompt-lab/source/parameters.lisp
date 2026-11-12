@@ -418,6 +418,32 @@ human check).  A builder under an author key is capped at the gate instead,
 by the key's standing (its per-key daily cap), so the serious ones are sent
 to an author key.")
 
+(defparameter *free-lab-closed?* t
+  "Boolean.  Whether a free public lab keeps CLOSED WORK for its author keys
+(closed.lisp): the Closed source box, a work out of sight for *closed-days*
+while its author decides.  Never for a keyless visitor.")
+
+(defparameter *closed-days* 30
+  "Integer.  Days a closed work stays closed from when its session opened,
+unless its author decides first or the house gives it more.")
+
+(defparameter *closed-ask-days* 7
+  "Integer.  A closed work's panel offers 'Ask for more time' once this few
+days are left.")
+
+(defparameter *closed-extension-days* 30
+  "Integer.  The days the house's one-line grant gives, as the request
+names it.")
+
+(defparameter *house-token-file* nil
+  "Pathname or nil.  A file whose first line is the token the house's doors
+want (closed.lisp's closed-extend); nil, those doors answer 404.  Private,
+on the host, never in a repository.")
+
+(defparameter *house-base* nil
+  "String or nil.  The public address of this lab's host (\"https://...\"), put
+in front of the house's commands in an alert; nil writes the path alone.")
+
 (defparameter *contact-address* "lab@genworks.com"
   "String. Where a visitor or an author reaches the house: the lab's page
 says it, and a deployed page's report door (deploy.lisp) names it.")
