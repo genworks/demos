@@ -258,7 +258,7 @@ to go for a lab of one's own when it is full."
          (h "credits" (max 0 (floor (or (getf pot :credits) 0)))
             "max" (getf pot :max)
             "room" (max 0 (floor (or (getf pot :room) 0)))
-            "topup" (if (getf pot :topup?) t 'yason:false)
+            "topup" (if (and (topups-offered?) (getf pot :topup?)) t 'yason:false)
             "topup_amounts" (or (getf pot :amounts) #())
             "topup_credits" (or (getf pot :credits-sold) (getf pot :amounts) #())
             "publishable_key" (or (getf pot :key) "")
@@ -274,6 +274,16 @@ runs out, and the check on every prompt is what keeps a bot from draining
 it.  A pot with no human check in front of it keeps the caps."
   (not (or (paying? session)
            (and (pot) (turnstile-required?)))))
+
+(defun topups-offered? ()
+  "Whether this lab offers its builders {units} for sale: *topups?*, and
+never on a free public lab."
+  (and *topups?* (not *free-lab?*)))
+
+(defun keyless-capped? (session)
+  "True when SESSION is built with no author key and *keyless-address-cap?*
+holds it to the address's daily prompts."
+  (and *keyless-address-cap?* (not (wallet-id? (session-wallet session)))))
 
 (defun model-defined? (session)
   (let ((symbol (model-symbol session)))
@@ -375,7 +385,7 @@ one scale.  Tokens never appear."
        "contributed" (round (or (balance-number session "contributed_cents") 0))
        "contribution_left" (round (or (balance-number session "contribution_left_cents") 0))
        "wallet" (session-wallet session)
-       "topup" (if (and balance (eq (gethash "topup" balance) t)) t 'yason:false)
+       "topup" (if (and (topups-offered?) balance (eq (gethash "topup" balance) t)) t 'yason:false)
        "topup_amounts" (or (and balance (gethash "topup_amounts" balance)) #())
        ;; what each amount buys (an older gate sends none: a cent a credit)
        "topup_credits" (or (and balance (or (gethash "topup_credits" balance)
@@ -533,17 +543,28 @@ value, where it belongs -- a plist of :engine, :reason and :url."
                  net.aserve:*response-bad-request*))
         ;; a community pot with nothing in it builds for nobody
         ((pot-empty?)
-         (values nil (unit-text "The community pot of {units} is empty.  Top it up and the lab builds again, for everyone.")
+         (values nil (unit-text (if (topups-offered?)
+                                    "The community pot of {units} is empty.  Top it up and the lab builds again, for everyone."
+                                    "The community pot of {units} is empty: the lab rests until the house fills it again."))
                  *response-too-many-requests*))
         ((and (free-caps? session) (>= (prompts-used session) *max-prompts-per-session*))
-         (values nil (format nil "This session has used its ~a ~:[free ~;~]prompts.  ~a to keep going here, take a copy of the model file, or start a new session."
+         (values nil (format nil "This session has used its ~a ~:[free ~;~]prompts.  ~@[~a to keep going here, ~]take a copy of the model file, or start a new session."
                              *max-prompts-per-session* (pot)
-                             (unit-text (if (pot) "Add {units} to the pot" "Buy {units}")))
+                             (and (topups-offered?)
+                                  (unit-text (if (pot) "Add {units} to the pot" "Buy {units}"))))
                  net.aserve:*response-bad-request*))
         ((and (free-caps? session) (address-over-limit? address :prompts))
-         (values nil (format nil "This address has run its ~a ~:[free ~;~]prompts for today.  ~a to keep going, come back tomorrow, or bring your own agent."
+         (values nil (format nil "This address has run its ~a ~:[free ~;~]prompts for today.  ~@[~a to keep going, ~]come back tomorrow, or bring your own agent."
                              *max-prompts-per-address* (pot)
-                             (unit-text (if (pot) "Add {units} to the pot" "Buy {units}")))
+                             (and (topups-offered?)
+                                  (unit-text (if (pot) "Add {units} to the pot" "Buy {units}"))))
+                 *response-too-many-requests*))
+        ;; a visitor with no author key keeps the address's daily prompts
+        ;; even where the pot lifts the free caps: a key is capped at the
+        ;; gate by its standing instead
+        ((and (keyless-capped? session) (address-over-limit? address :prompts))
+         (values nil (format nil "This address has run its ~a prompts for today without an author key.  Keep your work under an author key to go on, or come back tomorrow."
+                             *max-prompts-per-address*)
                  *response-too-many-requests*))
         ((session-busy? session)
          (values nil "Still working on the previous request." net.aserve:*response-bad-request*))
@@ -621,6 +642,9 @@ once, a token is single-use.  Values: true, or nil and the reason."
 RETURN-URL.  Values: the gate's answer (a hash table: url for Stripe's
 hosted page, or client_secret for a form in the page, and the wallet), or
 nil and the reason."
+  (unless (topups-offered?)
+    (return-from begin-topup!
+      (values nil (unit-text "This lab sells no {units}: building here is free, within each author's daily allowance."))))
   (multiple-value-bind (answer status)
       (gate-post "topup" (h "wallet" (session-wallet session)
                             "amount_cents" amount
@@ -697,6 +721,9 @@ checkout, publishable_key, wallet} for Stripe's one-line card control."
          (embedded? (and json (eq (gethash "embedded" json) t)))
          (flow (and json (equal (gethash "flow" json) "card") "card")))
     (cond (*free-lab?* (free-lab-refusal req ent))
+          ((not (topups-offered?))
+           (refuse req ent net.aserve:*response-forbidden* "~a"
+                   (unit-text "This lab sells no {units}: building here is free, within each author's daily allowance.")))
           ((null session) (no-such-session req ent))
           ((not (owner-request? req session json)) (not-yours req ent))
           ((not (integerp amount)) (refuse req ent "Say how much."))

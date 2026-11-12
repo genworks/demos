@@ -216,7 +216,7 @@ from a gate that names no credits."
        (let* ((held (max 0 (floor (or (getf pot :credits) 0))))
               (most (or (getf pot :max) 0))
               ;; a free public lab sells nothing: the house fills its pot
-              (offers (and (not *free-lab?*) (getf pot :topup?) (offers (getf pot :amounts) (getf pot :credits-sold)))))
+              (offers (and (topups-offered?) (getf pot :topup?) (offers (getf pot :amounts) (getf pot :credits-sold)))))
          (with-output-to-string (out)
            (format out "<div class=\"pl-figure~:[~; pl-out~]\"><b>~:d</b> ~a left in the community pot</div>"
                    (zerop held) held (units held))
@@ -232,7 +232,7 @@ from a gate that names no credits."
                        drawn (and drawn added) added)))
            (when (zerop held)
              (format out "<p class=\"pl-begging\">~a</p>"
-                     (if *free-lab?*
+                     (if (not (topups-offered?))
                          "The pot is empty: the lab rests until the house fills it again."
                          "The pot is empty: nothing builds until someone tops it up.")))
            (write-string (buttons offers "Add to the pot:") out))))
@@ -240,7 +240,7 @@ from a gate that names no credits."
        (let* ((used (or (gethash "credits_used" spend) 0))
               (free (or (gethash "credits_free" spend) 0))
               (balance (gethash "credits_balance" spend))
-              (offers (and (not *free-lab?*) (eq (gethash "topup" spend) t)
+              (offers (and (topups-offered?) (eq (gethash "topup" spend) t)
                            (offers (gethash "topup_amounts" spend) (gethash "topup_credits" spend)))))
          (with-output-to-string (out)
            (format out "<div class=\"pl-figure\"><b>~:d</b> ~a left</div>"

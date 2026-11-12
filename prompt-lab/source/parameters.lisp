@@ -402,6 +402,22 @@ wants the human check where Turnstile is on, and is capped per address
 (defparameter *max-authors-per-address* 2
   "Integer. Author keys an address may have minted in a UTC day.")
 
+(defparameter *topups?* nil
+  "Boolean.  Whether this lab sells {units} to its builders at all: the
+community pot's top-ups, or a session wallet's where there is no pot.  Nil
+since the ruling that development is free on every rung and money is taken
+only at end uses (2026-11-12): no buy buttons, the topup door and the
+sheet's topup action refused, and no refusal tells a builder to buy.
+Hosting packs and an app's purse are end uses and are not touched.  The
+gate's own top-up doors stay in its code, unused.")
+
+(defparameter *keyless-address-cap?* t
+  "Boolean.  Whether *max-prompts-per-address* binds a visitor building with
+no author key even where free-caps? lifts the free caps (a pot behind the
+human check).  A builder under an author key is capped at the gate instead,
+by the key's standing (its per-key daily cap), so the serious ones are sent
+to an author key.")
+
 (defparameter *contact-address* "lab@genworks.com"
   "String. Where a visitor or an author reaches the house: the lab's page
 says it, and a deployed page's report door (deploy.lisp) names it.")

@@ -822,6 +822,30 @@ loaded) its page too."
                      (multiple-value-bind (body status) (prompt)
                        (or (and (eql status 429) (search "without the human check" body))
                            (error "the second prompt with no token was answered ~a: ~a" status body))))))
+          ;; development is free (2026-11-12): nothing sold to a builder,
+          ;; and a visitor with no author key keeps the address's daily
+          ;; prompts even where the pot lifts the free caps
+          (let ((most (symbol-value (lab '#:*max-prompts-per-address*))))
+            (setf (symbol-value (lab '#:*max-prompts-per-address*)) 0
+                  ;; a gate that sells: the lab still offers nothing
+                  (getf (symbol-value (lab '#:*pot*)) :topup?) t)
+            (unwind-protect
+                 (smoke "prompt-lab sells builders nothing, and holds a keyless visitor to the address's daily prompts"
+                        (lambda ()
+                          (multiple-value-bind (body status)
+                              (http :post (door "topup") :headers (owner-headers)
+                                                         :json (table "session" session "amount_cents" 1000))
+                            (unless (and (eql status 403) (search "sells no" body))
+                              (error "the topup door answered ~a: ~a" status body)))
+                          (when (eq (gethash "topup" (gethash "pot" (json-of :get (door "config")))) t)
+                            (error "the config door still offers top-ups"))
+                          (multiple-value-bind (body status)
+                              (http :post (door "prompt") :headers (owner-headers)
+                                                          :json (table "session" session "prompt" "A plate." "turnstile" "a-token"))
+                            (unless (and (eql status 429) (search "without an author key" body))
+                              (error "a keyless prompt past the address's prompts was answered ~a: ~a" status body)))
+                          t))
+              (setf (symbol-value (lab '#:*max-prompts-per-address*)) most)))
           (setf (symbol-value (lab '#:*pot*)) nil
                 (symbol-value (lab '#:*pot-asked*)) 0
                 (symbol-value (lab '#:*turnstile-site-key*)) nil)

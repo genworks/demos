@@ -646,8 +646,12 @@ the session busy (start-prompt!)."
                    (let ((content (and (hash-table-p response) (gethash "content" response)))
                          (stop (and (hash-table-p response) (gethash "stop_reason" response))))
                     (when (and (hash-table-p response) (equal (gethash "type" response) "error"))
-                      (return (log-event session :stopped "API error: ~a"
-                                         (gethash "message" (gethash "error" response)))))
+                      (return (let ((message (gethash "message" (gethash "error" response))))
+                                (log-event session :stopped "API error: ~a~@[  To ask for more, write to ~a.~]"
+                                           message
+                                           ;; the gate's per-key daily cap: say who to ask
+                                           (and (stringp message) (search "midnight UTC" message)
+                                                *contact-address*)))))
                     ;; anything else without a message in it -- a gate's or
                     ;; proxy's own JSON, an error status -- stops here, and
                     ;; nothing is appended: an assistant turn with no content
