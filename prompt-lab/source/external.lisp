@@ -139,7 +139,7 @@ done or stopped before the reaper releases it.")
      ;; by what the session builds, a model or a web app (kinds.lisp)
      "system" (system-text session)
      "kind" (kind-name (session-kind session))
-     "model" *model*
+     "model" (session-model session)
      "effort" *effort*
      "max_rounds" *max-rounds*
      "mcp" (format nil "~a/mcp?session=~a" *url-prefix* (session-id session))

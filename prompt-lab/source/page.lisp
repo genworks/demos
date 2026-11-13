@@ -550,6 +550,9 @@ behind this room and the sibling lab on the other engine, if any."
                            "engine_label" (engine-label)
                            ;; what a prompt may ask to have built, the default first (kinds.lisp)
                            "kinds" (kinds-state)
+                           ;; the models a prompt may name, from the gate's menu: [] without a choice (agent.lisp)
+                           "models" (models-state)
+                           "default_model" *model*
                            "sibling_url" (car *sibling-lab*)
                            "sibling_label" (cdr *sibling-lab*)
                            "browsing" (if *browsing?* t 'yason:false)
@@ -592,12 +595,14 @@ has credit or has put more into the pot than it has drawn."
         (save-session! session)
         session)))
 
-(defun begin-prompt! (session prompt address token &key (route? t) kind)
+(defun begin-prompt! (session prompt address token &key (route? t) kind model)
   "Start the agent on PROMPT in SESSION for a visitor at ADDRESS, after
 every check the prompt door makes (the owner's excepted: the caller's).
 TOKEN is the human check's, nil for a script's prompt.  KIND, when it
 names one this lab offers, is what the session builds from this prompt
-on (kinds.lisp); without it the session keeps its kind.  Values: :started
+on (kinds.lisp); without it the session keeps its kind.  MODEL, an id
+on the gate's menu (agent.lisp), is what it builds with from this prompt
+on; without it, the model it had.  Values: :started
 and the lane, or nil, the reason and the response to refuse with.  With
 ROUTE?, a session's first prompt that wants the sibling lab's engine is
 not started here (routing.lisp): nil, the reason, a 409 and, a fourth
@@ -635,6 +640,9 @@ value, where it belongs -- a plist of :engine, :reason and :url."
                  *response-too-many-requests*))
         ((session-busy? session)
          (values nil "Still working on the previous request." net.aserve:*response-bad-request*))
+        ;; a model the visitor may not pick, or one not answering (agent.lisp)
+        ((model-refusal session model)
+         (values nil (model-refusal session model) net.aserve:*response-forbidden*))
         (t
          ;; the token is single-use and the check is a network call:
          ;; last, after every cheap refusal.  A prompt with no token at
@@ -652,6 +660,8 @@ value, where it belongs -- a plist of :engine, :reason and :url."
                       (return-from begin-prompt!
                         (values nil (getf route :reason) *response-conflict* route)))))
                  ((not (progn (watch-prompt! session prompt address)
+                              (when (and (stringp model) (plusp (length model)))
+                                (set-session-model! session model))
                               (start-prompt! session (string-trim '(#\space #\tab #\newline #\return) prompt)
                                              :kind (parse-kind kind))))
                   (values nil "Still working on the previous request." net.aserve:*response-bad-request*))
@@ -927,7 +937,9 @@ prompt in a thread of its own; the page follows along through the state door."
                                 ;; "stay": true builds here whatever engine the prompt wants
                                 :route? (not (eq (gethash "stay" json) t))
                                 ;; "kind": "app" builds a web app, "model" a model
-                                :kind (gethash "kind" json))
+                                :kind (gethash "kind" json)
+                                ;; "model": an id from the config door's models
+                                :model (gethash "model" json))
                (cond (started
                       (respond-json req ent (h "started" t "automated" (if (eq reason :automated) t 'yason:false))
                                     net.aserve:*response-accepted*))

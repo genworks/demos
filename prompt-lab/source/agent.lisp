@@ -25,7 +25,104 @@
   "Pathname or nil. A one-line key file, for direct development calls
 only.  Nil when *messages-url* is a gate that adds the key.")
 
-(defparameter *model* "claude-opus-5-5")
+(defparameter *model* "claude-opus-5-5"
+  "String. The model a session builds with until its visitor picks another
+from the gate's menu (below), and the one the lab's own calls use.")
+
+;;
+;; The model switch (2026-11-12).  A gate may offer a menu of models --
+;; each routed to its own server and priced on its own, some offered only
+;; to some author standings -- and answers it at <messages-url>/models.
+;; Gendl's sexp-agent reads it (gate-models), so every application behind
+;; a gate offers the same menu the same way; the lab looks the reader up
+;; at run time, since an older image has none and then offers no switch.
+;; A session's model is kept beside the struct, like its kind (kinds.lisp).
+;;
+
+(defparameter *model-switch?* t
+  "Boolean. Offer the gate's menu of models on the sheet when it has two or
+more.  Nil: every session builds with *model*.")
+
+(defvar *session-models* (make-hash-table :test #'equal)
+  "Package name -> the model the session builds with, when not *model*.")
+
+(defvar *models-lock* (bt:make-lock "prompt-lab models"))
+
+(defun gate-menu (&optional wallet)
+  "The gate's menu of models for WALLET, a list of plists (:id :label
+:house :standings :available :allowed), or nil: the switch off, the API
+itself, an image whose sexp-agent cannot read a menu, or a gate without
+one."
+  (when (and *model-switch?* (stringp *messages-url*)
+             (not (search "api.anthropic.com" *messages-url*))
+             (find-package :sexp-agent))
+    (let ((reader (find-symbol (symbol-name '#:gate-models) :sexp-agent)))
+      (when (and reader (fboundp reader))
+        (ignore-errors (funcall reader *messages-url* :wallet wallet :wallet-header *wallet-header*))))))
+
+(defun model-menu (&optional wallet)
+  "The menu when there is a choice to make (two models or more), else nil."
+  (let ((menu (gate-menu wallet)))
+    (and (rest menu) menu)))
+
+(defun session-model (session)
+  (or (bt:with-lock-held (*models-lock*)
+        (gethash (session-package-name session) *session-models*))
+      *model*))
+
+(defun set-session-model! (session model)
+  "Make SESSION build with MODEL from its next call.  A model that differs
+from the one before drops the thinking blocks the conversation keeps:
+they are signed by the model that wrote them, and another refuses them."
+  (let ((before (session-model session)))
+    (bt:with-lock-held (*models-lock*)
+      (if (or (null model) (equal model *model*))
+          (remhash (session-package-name session) *session-models*)
+          (setf (gethash (session-package-name session) *session-models*) model)))
+    (unless (equal before (session-model session))
+      (with-session-lock (session)
+        (setf (session-messages session)
+              (mapcar #'(lambda (message)
+                          (if (and (hash-table-p message) (listp (gethash "content" message)))
+                              (let ((copy (alexandria:copy-hash-table message)))
+                                (setf (gethash "content" copy)
+                                      (remove-if #'(lambda (block)
+                                                     (and (hash-table-p block)
+                                                          (member (gethash "type" block)
+                                                                  '("thinking" "redacted_thinking") :test #'equal)))
+                                                 (gethash "content" message)))
+                                copy)
+                              message))
+                      (session-messages session)))))
+    model))
+
+(defun forget-session-model! (session)
+  (bt:with-lock-held (*models-lock*)
+    (remhash (session-package-name session) *session-models*)))
+
+(defun model-refusal (session model)
+  "NIL when SESSION may build with MODEL (a string from a request, or nil
+for no change); else why not."
+  (cond ((or (null model) (equal model "") (equal model (session-model session))) nil)
+        ((not (stringp model)) "Pick a model from the list.")
+        (t (let ((entry (find model (gate-menu (session-wallet session))
+                              :key #'(lambda (e) (getf e :id)) :test #'equal)))
+             (cond ((null entry)
+                    (if (equal model *model*) nil "That model is not offered here."))
+                   ((not (getf entry :allowed))
+                    (format nil "~a is offered to ~{~a~^ and ~} author keys."
+                            (getf entry :label) (or (getf entry :standings) '("other"))))
+                   ((not (getf entry :available))
+                    (format nil "~a is not answering just now; pick another model." (getf entry :label))))))))
+
+(defun models-state (&optional wallet)
+  "The menu as the config door reports it: an empty list without a choice."
+  (map 'vector #'(lambda (e)
+                   (h "id" (getf e :id) "label" (getf e :label)
+                      "house" (if (getf e :house) t 'yason:false)
+                      "available" (if (getf e :available) t 'yason:false)
+                      "allowed" (if (getf e :allowed) t 'yason:false)))
+       (model-menu wallet)))
 
 (defparameter *effort* "medium"
   "String. output_config.effort for every call: low, medium or high.")
@@ -179,7 +276,8 @@ Rules:
       (append
        (when stream? (list "stream" t))
        (list
-        "model" *model*
+        ;; the visitor's pick from the gate's menu, else *model*
+        "model" (session-model session)
         "max_tokens" *max-tokens*
         "output_config" (h "effort" *effort*)
         "tools" tools

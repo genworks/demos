@@ -364,7 +364,7 @@ SESSION's balance -- or nil."
 .pl-file-link{display:inline-flex;gap:.4rem;align-items:center;cursor:pointer;color:var(--pl-link,#1550a8);text-decoration:underline;text-underline-offset:2px}
 .pl-file-link:hover{text-decoration-thickness:2px}#pl-file:focus-visible+.pl-file-link,.pl-file-link:focus-within{outline:2px solid var(--pl-focus,#36c);outline-offset:2px}
 .pl-fee b{color:var(--pl-ink,#111)}
-.pl-kinds{margin:0 0 .45rem;gap:.7rem;flex-wrap:wrap;font-size:.9em}.pl-kinds .pl-line{margin:0}
+.pl-kinds{margin:0 0 .45rem;gap:.7rem;flex-wrap:wrap;font-size:.9em}.pl-kinds .pl-line{margin:0}.pl-models{margin:0 0 .45rem;gap:.5rem;align-items:center;flex-wrap:wrap;font-size:.9em}.pl-models .pl-line{margin:0}.pl-models select{font:inherit;max-width:100%}
 .pl-pick{display:inline-flex;gap:.3rem;align-items:center;cursor:pointer}.pl-pick input{accent-color:var(--pl-accent,#366fc5);margin:0}
 .pl-open-app{font-weight:600;color:var(--pl-link,#1550a8)}
 .pl-project a{color:var(--pl-link,#1550a8);text-decoration:underline}
@@ -746,7 +746,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cbox: false, cemail: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cbox: false, cemail: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; and of its last staged hosting (hosting.lisp)
@@ -775,6 +775,8 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
             ;; where this lab still offers it, else the lab's default
             (js-string-literal (kind-name (or (and (the session) (parse-kind (session-kind (the session))))
                                               (default-kind))))
+            ;; the model it builds with, picked from the gate's menu (agent.lisp)
+            (js-string-literal (if (the session) (session-model (the session)) *model*))
             (json-boolean (or (the archive-id) (the archive-pending)))
             (if (the cancelled?) "'The payment was cancelled; nothing was charged.'" "''")
             (json-boolean (and (the session) (session-busy? (the session))))
@@ -817,6 +819,20 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                           " " (esc (string-downcase (kind-label kind))))))))
                                      (htm (:p :class "pl-line pl-dim" :style "display:none" :|data-show| "$kind == 'app'"
                                               "A web app is a page of its own around the model -- its inputs as a form, its results and a drawing -- at an address anyone can open and use.")))
+                              ;; the model switch: the gate's menu (agent.lisp), shown
+                              ;; where it offers a choice; one not answering is greyed
+                              (let ((menu (model-menu)))
+                                (when menu
+                                  (htm (:div :class "pl-row pl-models"
+                                             :data-doc "Which model the agent builds with, from this prompt on.  Each costs your AI allowance at its own rate."
+                                             (:label :class "pl-line" :for "pl-model" "Model")
+                                             (:select :id "pl-model" :|data-bind:model| ""
+                                                      (dolist (entry menu)
+                                                        (htm (:option :value (getf entry :id)
+                                                                      :disabled (and (not (getf entry :available)) "disabled")
+                                                                      (esc (format nil "~a~:[ (not answering)~;~]~@[ (~{~a~^ and ~} authors)~]"
+                                                                                   (getf entry :label) (getf entry :available)
+                                                                                   (getf entry :standings)))))))))))
                               ;; closed source is chosen here, before the session
                               ;; opens with the first build or upload (deploy.lisp)
                               (when (closed-offered?)
@@ -856,7 +872,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               (:input :type "hidden" :id "pl-turnstile" :|data-bind:turnstile| "")
                               (:div :class "pl-row"
                                     (:button :class "pl-build"
-                                             :|data-on:click| (the (datastar-action :build :options "{filterSignals: {include: /^(prompt|turnstile|owner|wallet|kind|closedPick)$/}}"))
+                                             :|data-on:click| (the (datastar-action :build :options "{filterSignals: {include: /^(prompt|turnstile|owner|wallet|kind|model|closedPick)$/}}"))
                                              :|data-indicator:sending| ""
                                              ;; with a human check, a build waits for its token
                                              :|data-attr:disabled| (format nil "$busy || $sending || !$prompt.trim()~@[ || !$turnstile~]"
@@ -1909,7 +1925,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                 ;; a visitor the sibling lab sent here stays here
                                 :route? (not (the arrived?))
                                 ;; the switch: a model or a web app (kinds.lisp)
-                                :kind (gethash "kind" signals))
+                                :kind (gethash "kind" signals)
+                                ;; and the model it builds with (agent.lisp)
+                                :model (gethash "model" signals))
                (declare (ignore response))
                (cond (started
                       (sheet-send! self (datastar-signals-event "{\"error\": \"\", \"prompt\": \"\"}")))
