@@ -403,6 +403,8 @@ nothing (*books?* nil there)."
     ;; closed deployments' monthly minimums, once a month (deploy.lisp)
     (ignore-errors (reckon-closed-minimums!))
     (ignore-errors (sweep-unpaid-dues!))
+    ;; the authors paid their month, from $25 (deploy.lisp)
+    (ignore-errors (ask-gate-payouts!))
     ;; and the root's terms at the gate: at the front's start, then every *register-sweep-seconds*
     (ignore-errors (register-deployments!))))
 

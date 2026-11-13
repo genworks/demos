@@ -428,7 +428,9 @@ a no-op when one is running."
                                                          ;; closed deployments' monthly minimums (deploy.lisp)
                                                          (reckon-closed-minimums!)
                                                          ;; and those their dues kept paused too long, taken down
-                                                         (sweep-unpaid-dues!))
+                                                         (sweep-unpaid-dues!)
+                                                         ;; the authors paid their month, from $25 (deploy.lisp)
+                                                         (ask-gate-payouts!))
                                       (error (condition)
                                         (format *error-output* "~&prompt-lab reaper: ~a~%" condition)))))
                           :name "prompt-lab reaper")))

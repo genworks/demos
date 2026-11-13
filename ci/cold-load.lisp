@@ -1114,6 +1114,41 @@ loaded) its page too."
                                       (uiop:symbol-call :prompt-lab :house-fee-percent t))
                                  (eql 404 (nth-value 1 (http :get (format nil "~a/d/~a/source" prefix name))))))
                        (http :post (door "undeploy") :headers headers :json (table "name" name))))))
+          ;; the authors' payouts (ruling 79): the lab asks the gate once a
+          ;; month, only where it takes tolls by card, and asks again after a
+          ;; gate that did not answer
+          (smoke "prompt-lab asks the gate for the authors' monthly payouts, once a month"
+                 (lambda ()
+                   (let* ((post-fn (lab '#:gate-post))
+                          (saved (fdefinition post-fn))
+                          (asked 0)
+                          (answer 200)
+                          (root (merge-pathnames "payouts-smoke/" (uiop:temporary-directory))))
+                     (uiop:delete-directory-tree root :validate t :if-does-not-exist :ignore)
+                     (progv (list (lab '#:*deployments?*) (lab '#:*books?*) (lab '#:*toll-provider*) (lab '#:*deployed-root*))
+                         (list t t :test root)
+                       (setf (fdefinition post-fn)
+                             (lambda (name object &key seconds)
+                               (declare (ignore object seconds))
+                               (unless (equal name "connect-payouts") (error "asked the gate's ~a door" name))
+                               (incf asked)
+                               (values (table "month" "2026-11") answer)))
+                       (unwind-protect
+                            (progn
+                              (when (uiop:symbol-call :prompt-lab :ask-gate-payouts!)
+                                (error "a lab taking no card payments asked for payouts"))
+                              (setf (symbol-value (lab '#:*toll-provider*)) :stripe)
+                              (setq answer 503)
+                              (uiop:symbol-call :prompt-lab :ask-gate-payouts!)
+                              (setq answer 200)
+                              (unless (uiop:symbol-call :prompt-lab :ask-gate-payouts!)
+                                (error "a gate that did not answer was not asked again"))
+                              (when (uiop:symbol-call :prompt-lab :ask-gate-payouts!)
+                                (error "asked twice in a month"))
+                              (uiop:symbol-call :prompt-lab :ask-gate-payouts! :now (+ (get-universal-time) (* 32 86400)))
+                              (unless (= asked 3) (error "the gate was asked ~d times, not 3" asked))
+                              t)
+                         (setf (fdefinition post-fn) saved))))))
           ;; a closed deployment's monthly minimum (ruling 49): reckoned from
           ;; the books for the month just ended, the shortfall told to the
           ;; gate (caught here: there is no gate); an open one owes none; the

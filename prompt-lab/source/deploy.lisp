@@ -1989,6 +1989,29 @@ Answers the names taken down."
                   (push name down)))))))
       (nreverse down))))
 
+(defun ask-gate-payouts! (&key (now (get-universal-time)) force?)
+  "Once a calendar month (FORCE? again): ask the gate to pay its authors
+their month -- cyclops's connect-payouts door pays each author's account
+whose available balance reaches the gate's minimum ($25), the rest waiting
+for a later month (ruling 79: Stripe charges the platform $2 for each month
+an account is paid, and a payout's own fee) -- where this lab takes tolls by
+card.  The gate runs the pass once a month whoever asks; the month asked is
+kept beside the books, so a restart does not ask again, and a gate that did
+not answer is asked at the next pass.  Answers the gate's record (a hash
+table) or nil."
+  (when (and *deployments?* *books?* (eq *toll-provider* :stripe))
+    (multiple-value-bind (s m h d month year) (decode-universal-time now 0)
+      (declare (ignore s m h d))
+      (let* ((key (format nil "~4,'0d-~2,'0d" year month))
+             (file (merge-pathnames (format nil "payouts-asked-~a.txt" (engine-name)) *deployed-root*))
+             (done (ignore-errors (string-trim '(#\Space #\Newline) (uiop:read-file-string file)))))
+        (unless (and (not force?) (equal done key))
+          (multiple-value-bind (answer status) (ignore-errors (gate-post "connect-payouts" (h) :seconds 120))
+            (when (eql status 200)
+              (ensure-directories-exist file)
+              (write-text-file key file)
+              answer)))))))
+
 (defun set-deployment-minimum! (name cents)
   "The house sets deployment NAME's own monthly minimum to CENTS (0 waives
 it), or back to the default with nil.  Answers the record, or nil."
