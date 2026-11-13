@@ -519,6 +519,78 @@ loaded) its page too."
                        (setf (fdefinition menu-fn) saved)
                        (uiop:symbol-call :prompt-lab :set-session-model! found nil)
                        (set-messages messages))))))
+          ;; MODEL A (2026-11-13): each model's rate on the menu, the fallback to
+          ;; the model the gate serves past the AI allowance, a lab's default
+          (smoke "prompt-lab Model A: rates on the menu, the fallback past the allowance, a lab's default model"
+                 (lambda ()
+                   (let* ((menu-fn (lab '#:gate-menu))
+                          (api-fn (lab '#:call-messages-api))
+                          (saved-menu (fdefinition menu-fn))
+                          (saved-api (fdefinition api-fn))
+                          (found (uiop:symbol-call :prompt-lab :find-session session))
+                          (default (symbol-value (lab '#:*model*)))
+                          (house-up t)
+                          (calls nil)
+                          (messages (uiop:symbol-call :prompt-lab :session-messages found)))
+                     (flet ((set-messages (value)
+                              (eval (list 'setf (list (lab '#:session-messages) found) (list 'quote value)))))
+                       (setf (fdefinition menu-fn)
+                             (lambda (&optional wallet)
+                               (declare (ignore wallet))
+                               (list (list :id default :label "Opus 5.5" :available t :allowed t
+                                           :prices '(:input 4 :output 20 :cache-read 0.2 :cache-write 5))
+                                     (list :id "claude-sonnet-5-5" :label "Sonnet 5.5" :available t :allowed t
+                                           :prices '(:input 2 :output 10 :cache-read 0.1 :cache-write 2.5))
+                                     (list :id "house-1" :label "House" :house t :available house-up :allowed t
+                                           :past-allowance t :prices '(:input 0.08 :output 0.4 :cache-read 0.004 :cache-write 0.1)))))
+                       (unwind-protect
+                            (let ((page (http :get prefix))
+                                  (used "this author key has used this month's AI allowance -- it renews on the 1st (UTC); House keeps working past it"))
+                              (unless (and (search "Opus 5.5 -- 50x" page) (search "Sonnet 5.5 -- 25x" page)
+                                           (search "House -- 1x -- keeps working past the allowance" page)
+                                           (search "$model != $modelnow" page))
+                                (error "the menu's rates or the switch warning read wrong"))
+                              (unless (equal "50x" (gethash "rate" (first (gethash "models" (json-of :get (door "config"))))))
+                                (error "the config door gives no rate"))
+                              ;; the fallback: once, to the model that keeps working
+                              (unless (equal "house-1" (getf (uiop:symbol-call :prompt-lab :allowance-fallback found used) :id))
+                                (error "no fallback past the allowance"))
+                              (when (uiop:symbol-call :prompt-lab :allowance-fallback found "some other refusal")
+                                (error "a fallback for another refusal"))
+                              ;; end to end: the gate refuses the month, the session goes on with the house
+                              (setf (fdefinition api-fn)
+                                    (lambda (s)
+                                      (push (uiop:symbol-call :prompt-lab :session-model s) calls)
+                                      (if (equal (first calls) "house-1")
+                                          (values (table "type" "message" "role" "assistant" "stop_reason" "end_turn"
+                                                         "content" (list (table "type" "text" "text" "built on the house"))
+                                                         "usage" (table "input_tokens" 10 "output_tokens" 5))
+                                                  200)
+                                          (values (table "type" "error" "error" (table "type" "permission_error" "message" used))
+                                                  403))))
+                              (uiop:symbol-call :prompt-lab :set-session-model! found default)
+                              (uiop:symbol-call :prompt-lab :run-prompt found "a washer")
+                              ;; the prompt counted in the funnel's tally, given back: a later smoke counts it exactly
+                              (uiop:symbol-call :prompt-lab :funnel-count! "prompts" -1)
+                              (unless (and (equal calls (list "house-1" default))
+                                           (equal (uiop:symbol-call :prompt-lab :session-model found) "house-1"))
+                                (error "the session did not go on with the house: calls ~s" calls))
+                              (when (uiop:symbol-call :prompt-lab :allowance-fallback found used)
+                                (error "a second fallback from the house itself"))
+                              ;; a lab's default model: the house when offered and answering
+                              (uiop:symbol-call :prompt-lab :set-session-model! found nil)
+                              (setf (symbol-value (lab '#:*session-default-model*)) "house-1")
+                              (unless (equal (uiop:symbol-call :prompt-lab :default-session-model) "house-1")
+                                (error "the lab's default model is not used"))
+                              (setq house-up nil)
+                              (unless (equal (uiop:symbol-call :prompt-lab :default-session-model) default)
+                                (error "a dark default model is still used"))
+                              t)
+                         (setf (symbol-value (lab '#:*session-default-model*)) nil)
+                         (setf (fdefinition menu-fn) saved-menu
+                               (fdefinition api-fn) saved-api)
+                         (uiop:symbol-call :prompt-lab :set-session-model! found nil)
+                         (set-messages messages))))))
           ;; the author takes their own source at any time; nobody else does
           (smoke "prompt-lab source download: the owner's file, a stranger's 404"
                  (lambda ()

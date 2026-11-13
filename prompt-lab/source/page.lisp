@@ -552,7 +552,7 @@ behind this room and the sibling lab on the other engine, if any."
                            "kinds" (kinds-state)
                            ;; the models a prompt may name, from the gate's menu: [] without a choice (agent.lisp)
                            "models" (models-state)
-                           "default_model" *model*
+                           "default_model" (default-session-model)
                            "sibling_url" (car *sibling-lab*)
                            "sibling_label" (cdr *sibling-lab*)
                            "browsing" (if *browsing?* t 'yason:false)

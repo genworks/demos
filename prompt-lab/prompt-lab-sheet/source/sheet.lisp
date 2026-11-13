@@ -101,6 +101,16 @@ stale.  A session gone private closes on every sheet but its owner's."
          (unless (equal body (the-object sheet shown-source))
            (the-object sheet (set-slot! :shown-source body))
            (sheet-send! sheet (datastar-script-event (format nil "plSetSource(~a)" (js-string-literal body))))))
+       ;; the AI model, when the server changed it (the fallback past the
+       ;; allowance): the menu and the switch warning follow
+       (let ((ai-model (session-model session)))
+         (unless (equal ai-model (the-object sheet shown-ai-model))
+           (let ((first? (null (the-object sheet shown-ai-model))))
+             (the-object sheet (set-slot! :shown-ai-model ai-model))
+             (unless first?
+               (sheet-send! sheet (datastar-signals-event
+                                   (format nil "{\"model\": ~a, \"modelnow\": ~a}"
+                                           (js-string-literal ai-model) (js-string-literal ai-model))))))))
        (sheet-send! sheet (datastar-signals-event
                            (format nil "{\"busy\": ~a, \"built\": ~a~@[, \"story\": ~a~]}" (json-boolean (session-busy? session))
                                    ;; something to deploy (the Monetize tile)
@@ -542,6 +552,10 @@ log, status, credits and downloads sections are recomputed from."
     model-stamp nil :settable)
    ("The model file's text as the editor was last sent it (sheets-hear)."
     shown-source "" :settable)
+   ("String or nil.  The AI model the session built with when the page last
+heard (sheets-hear): a change made on the server -- the fallback past the
+AI allowance (agent.lisp) -- is sent to the browser's model menu."
+    shown-ai-model nil :settable)
    ("Boolean. Whether the browser said it is a desk, wider than a phone (the
 shade-desk action, on load)."
     desk? nil :settable)
@@ -746,7 +760,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, modelnow: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; and of its last staged hosting (hosting.lisp)
@@ -776,7 +790,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
             (js-string-literal (kind-name (or (and (the session) (parse-kind (session-kind (the session))))
                                               (default-kind))))
             ;; the model it builds with, picked from the gate's menu (agent.lisp)
-            (js-string-literal (if (the session) (session-model (the session)) *model*))
+            (js-string-literal (if (the session) (session-model (the session)) (default-session-model)))
+            ;; and the one it built with last, for the switch's warning
+            (js-string-literal (if (the session) (session-model (the session)) (default-session-model)))
             (json-boolean (or (the archive-id) (the archive-pending)))
             (if (the cancelled?) "'The payment was cancelled; nothing was charged.'" "''")
             (json-boolean (and (the session) (session-busy? (the session))))
@@ -824,15 +840,21 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               (let ((menu (model-menu)))
                                 (when menu
                                   (htm (:div :class "pl-row pl-models"
-                                             :data-doc "Which model the agent builds with, from this prompt on.  Each costs your AI allowance at its own rate."
+                                             :data-doc "Which model the agent builds with, from this prompt on.  Each costs your AI allowance at its own rate, shown beside it; one marked 'keeps working' goes on past the allowance."
                                              (:label :class "pl-line" :for "pl-model" "Model")
                                              (:select :id "pl-model" :|data-bind:model| ""
                                                       (dolist (entry menu)
                                                         (htm (:option :value (getf entry :id)
                                                                       :disabled (and (not (getf entry :available)) "disabled")
-                                                                      (esc (format nil "~a~:[ (not answering)~;~]~@[ (~{~a~^ and ~} authors)~]"
-                                                                                   (getf entry :label) (getf entry :available)
-                                                                                   (getf entry :standings)))))))))))
+                                                                      (esc (format nil "~a~@[ -- ~a~]~:[~; -- keeps working past the allowance~]~:[ (not answering)~;~]~@[ (~{~a~^ and ~} authors)~]"
+                                                                                   (getf entry :label) (model-rate entry menu)
+                                                                                   (getf entry :past-allowance) (getf entry :available)
+                                                                                   (getf entry :standings))))))))
+                                  ;; a switch deep in a session costs once: each model
+                                  ;; keeps its own cache, and the thinking is dropped
+                                  (htm (:p :class "pl-line pl-dim" :style "display:none"
+                                           :|data-show| "$opened && $model != $modelnow"
+                                           "Switching models: the next prompt reads the whole session again at the new model's full rate (each model keeps its own cache), and the conversation's earlier thinking is left behind.")))))
                               ;; closed source is chosen here, before the session
                               ;; opens with the first build or upload (deploy.lisp)
                               (when (closed-offered?)
@@ -1922,7 +1944,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                 :model (gethash "model" signals))
                (declare (ignore response))
                (cond (started
-                      (sheet-send! self (datastar-signals-event "{\"error\": \"\", \"prompt\": \"\"}")))
+                      (the (set-slot! :shown-ai-model (session-model (the session))))
+                      (sheet-send! self (datastar-signals-event
+                                         (format nil "{\"error\": \"\", \"prompt\": \"\", \"modelnow\": ~a}"
+                                                 (js-string-literal (session-model (the session)))))))
                      ;; the request wants the sibling lab's engine
                      ;; (routing.lisp): the browser goes there, the prompt
                      ;; and the reason with it

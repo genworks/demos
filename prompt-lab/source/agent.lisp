@@ -44,9 +44,25 @@ from the gate's menu (below), and the one the lab's own calls use.")
 more.  Nil: every session builds with *model*.")
 
 (defvar *session-models* (make-hash-table :test #'equal)
-  "Package name -> the model the session builds with, when not *model*.")
+  "Package name -> the model the session builds with, when not the default
+(default-session-model).")
 
 (defvar *models-lock* (bt:make-lock "prompt-lab models"))
+
+(defparameter *session-default-model* nil
+  "String or nil.  The model a new session builds with, when it is on the
+gate's menu and answering -- the house model in a lab that puts it first
+(Model A of the pricing proposal, once it passes the eval).  Nil: *model*,
+which the lab's own calls (the classifier, the reviewer) keep using.")
+
+(defun default-session-model ()
+  "What a session builds with until its visitor picks: *session-default-model*
+when the gate offers it and it is answering, else *model*."
+  (or (and (stringp *session-default-model*)
+           (let ((entry (find *session-default-model* (gate-menu)
+                              :key #'(lambda (e) (getf e :id)) :test #'equal)))
+             (and entry (getf entry :available) *session-default-model*)))
+      *model*))
 
 (defun gate-menu (&optional wallet)
   "The gate's menu of models for WALLET, a list of plists (:id :label
@@ -68,7 +84,7 @@ one."
 (defun session-model (session)
   (or (bt:with-lock-held (*models-lock*)
         (gethash (session-package-name session) *session-models*))
-      *model*))
+      (default-session-model)))
 
 (defun set-session-model! (session model)
   "Make SESSION build with MODEL from its next call.  A model that differs
@@ -76,7 +92,7 @@ from the one before drops the thinking blocks the conversation keeps:
 they are signed by the model that wrote them, and another refuses them."
   (let ((before (session-model session)))
     (bt:with-lock-held (*models-lock*)
-      (if (or (null model) (equal model *model*))
+      (if (or (null model) (equal model (default-session-model)))
           (remhash (session-package-name session) *session-models*)
           (setf (gethash (session-package-name session) *session-models*) model)))
     (unless (equal before (session-model session))
@@ -108,21 +124,56 @@ for no change); else why not."
         (t (let ((entry (find model (gate-menu (session-wallet session))
                               :key #'(lambda (e) (getf e :id)) :test #'equal)))
              (cond ((null entry)
-                    (if (equal model *model*) nil "That model is not offered here."))
+                    (if (member model (list *model* (default-session-model)) :test #'equal) nil "That model is not offered here."))
                    ((not (getf entry :allowed))
                     (format nil "~a is offered to ~{~a~^ and ~} author keys."
                             (getf entry :label) (or (getf entry :standings) '("other"))))
                    ((not (getf entry :available))
                     (format nil "~a is not answering just now; pick another model." (getf entry :label))))))))
 
+(defun allowance-fallback (session message)
+  "When MESSAGE is the gate's refusal for a used AI allowance and SESSION's
+model is not already one the gate serves past it: that menu entry (one
+answering, and allowed for the session's key), else nil."
+  (when (and (stringp message) (search "AI allowance" message))
+    (let ((entry (find-if #'(lambda (e) (and (getf e :past-allowance) (getf e :available) (getf e :allowed)))
+                          (gate-menu (session-wallet session)))))
+      (and entry (not (equal (getf entry :id) (session-model session))) entry))))
+
+(defun model-cost-weight (entry)
+  "What ENTRY's tokens cost the allowance, as one figure (input plus output
+per million), or nil when the gate does not say."
+  (let ((prices (getf entry :prices)))
+    (and (realp (getf prices :input)) (realp (getf prices :output))
+         (+ (getf prices :input) (getf prices :output)))))
+
+(defun model-rate (entry menu)
+  "ENTRY's rate against MENU's base model -- the one served past the
+allowance, else the house model, else the cheapest -- as \"1x\", \"25x\",
+\"1.3x\"; nil when the gate gives no prices."
+  (let* ((priced (remove-if-not #'model-cost-weight menu))
+         (base (or (find-if #'(lambda (e) (getf e :past-allowance)) priced)
+                   (find-if #'(lambda (e) (getf e :house)) priced)
+                   (first (sort (copy-list priced) #'< :key #'model-cost-weight))))
+         (weight (model-cost-weight entry))
+         (base-weight (and base (model-cost-weight base))))
+    (when (and weight base-weight (plusp base-weight))
+      (let ((ratio (/ weight base-weight)))
+        (if (or (>= ratio 10) (< (abs (- ratio (round ratio))) 1/20))
+            (format nil "~dx" (round ratio))
+            (format nil "~,1fx" ratio))))))
+
 (defun models-state (&optional wallet)
   "The menu as the config door reports it: an empty list without a choice."
-  (map 'vector #'(lambda (e)
-                   (h "id" (getf e :id) "label" (getf e :label)
-                      "house" (if (getf e :house) t 'yason:false)
-                      "available" (if (getf e :available) t 'yason:false)
-                      "allowed" (if (getf e :allowed) t 'yason:false)))
-       (model-menu wallet)))
+  (let ((menu (model-menu wallet)))
+    (map 'vector #'(lambda (e)
+                     (h "id" (getf e :id) "label" (getf e :label)
+                        "house" (if (getf e :house) t 'yason:false)
+                        "available" (if (getf e :available) t 'yason:false)
+                        "allowed" (if (getf e :allowed) t 'yason:false)
+                        "past_allowance" (if (getf e :past-allowance) t 'yason:false)
+                        "rate" (model-rate e menu)))
+         menu)))
 
 (defparameter *effort* "medium"
   "String. output_config.effort for every call: low, medium or high.")
@@ -737,12 +788,21 @@ the session busy (start-prompt!)."
          (close-dangling-tool-uses! session "the previous request ended before this tool ran")
          (add-user-prompt! session prompt)
          (loop for round from 1
-               do (multiple-value-bind (response status)
+               do (block round (multiple-value-bind (response status)
                       (handler-case (call-messages-api session)
                         (error (condition)
                           (return (log-event session :stopped "~a" (condition-text condition)))))
                    (let ((content (and (hash-table-p response) (gethash "content" response)))
                          (stop (and (hash-table-p response) (gethash "stop_reason" response))))
+                    ;; the month's AI allowance used: on to the menu's model that
+                    ;; keeps working past it (Model A, the house model first), once
+                    (when (and (hash-table-p response) (equal (gethash "type" response) "error"))
+                      (let ((past (allowance-fallback session (gethash "message" (gethash "error" response)))))
+                        (when past
+                          (set-session-model! session (getf past :id))
+                          (log-event session :note "This key's AI allowance is used for now; the session goes on with ~a, which keeps working past it."
+                                     (getf past :label))
+                          (return-from round))))
                     (when (and (hash-table-p response) (equal (gethash "type" response) "error"))
                       (return (let ((message (gethash "message" (gethash "error" response))))
                                 (log-event session :stopped "API error: ~a~@[  To ask for more, write to ~a.~]"
@@ -822,6 +882,6 @@ the session busy (start-prompt!)."
                        (close-dangling-tool-uses! session "the reply hit its length limit")
                        (return (log-event session :stopped "The reply hit its length limit.")))
                       (t (close-dangling-tool-uses! session (format nil "the reply stopped (~a)" stop))
-                         (return (log-event session :stopped "Stopped: ~a" stop))))))))
+                         (return (log-event session :stopped "Stopped: ~a" stop)))))))))
     (setf (session-busy? session) nil)
     (save-session! session)))
