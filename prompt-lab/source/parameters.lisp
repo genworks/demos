@@ -438,14 +438,6 @@ while its author decides.  Never for a keyless visitor.")
   "Integer.  Days a closed work stays closed from when its session opened,
 unless its author decides first or the house gives it more.")
 
-(defparameter *closed-ask-days* 7
-  "Integer.  A closed work's panel offers 'Ask for more time' once this few
-days are left.")
-
-(defparameter *closed-extension-days* 30
-  "Integer.  The days the house's one-line grant gives, as the request
-names it.")
-
 (defparameter *closed-minimum-cents* 1000
   "Number or nil.  The least a CLOSED deployment hosted here must bring the
 house in FEES each calendar month (cents; the user's rulings 49 and 61:

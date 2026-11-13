@@ -17,16 +17,18 @@
 ;; time its author decides, by one of four exits:
 ;;
 ;;   HOST     a deployment with us (Monetize, where this lab deploys);
-;;   DECLARE  a stated intention to host it themselves or distribute
-;;            binaries built from it, with the box promising the quarterly
-;;            report for Gendl-built binaries even when nothing is charged;
+;;   DECLARE  their choice to host it themselves or distribute binaries
+;;            built from it; nothing to tick and no promise asked (the user's
+;;            ruling, 2026-11-13) -- the panel reminds them of the quarterly
+;;            report, which the license and the terms carry;
 ;;   PUBLIC   opened now, under the AGPL;
 ;;   DELETE   everything the lab keeps of it, gone.
 ;;
 ;; A work neither hosted nor declared when its time runs out is opened:
 ;; public, under the AGPL, its files' copyright lines given the license.
-;; More time is asked for from the work's own panel and granted by the
-;; house, case by case, through a door that wants the house's token.  The
+;; More time is not offered on the page (the user's ruling, 2026-11-13: an
+;; author who needs it asks); the house grants it case by case, through a
+;; door that wants the house's token.  The
 ;; author may take the source at any time (export.lisp): nothing here
 ;; unlocks it.
 ;;
@@ -43,9 +45,6 @@
 (defvar *closed-declared* (make-hash-table :test #'equal)
   "Session id -> its author's declaration (a hash table: at, email).")
 
-(defvar *closed-asked* (make-hash-table :test #'equal)
-  "Session id -> when its author last asked the house for more time.")
-
 (defvar *closed-lock* (bt:make-lock "prompt-lab closed works"))
 
 (defvar *closed-swept* 0
@@ -55,9 +54,14 @@
   "Integer.  The sweep walks the archive at most this often.")
 
 (defparameter *closed-declaration-text*
-  "I will host this myself or distribute binaries built from it, and I will make the quarterly royalty report at genworks.com/royalties/ for Gendl-built binaries I host or distribute, even when I charge nothing for them -- or hold a Genworks GDL commercial license."
-  "String.  The words of the declaration's box, as the author ticks them;
-kept with the declaration.")
+  "I will host this work myself or distribute binaries built from it."
+  "String.  The words of the author's choice, kept with the declaration.  A
+choice, not a promise: nothing is ticked (the user's ruling, 2026-11-13).")
+
+(defparameter *closed-reminder-text*
+  "A reminder: closed Gendl-built work that you host or distribute is reported each quarter at genworks.com/royalties/ -- a $0 quarter is fine -- unless you hold a Genworks GDL commercial license."
+  "String.  The quarterly report's reminder, shown once the author has chosen
+to host or distribute their work themselves.")
 
 (defun closed-offered? ()
   "Whether this lab offers a closed work at all: where it deploys and sells
@@ -102,8 +106,7 @@ keeps the work closed, with its deadline, until the sweep or its author."
 (defun forget-closed-work! (id)
   (bt:with-lock-held (*closed-lock*)
     (remhash id *closed-until*)
-    (remhash id *closed-declared*)
-    (remhash id *closed-asked*)))
+    (remhash id *closed-declared*)))
 
 (defun record-deadline (json)
   "A record's deadline: its \"closed_until\", else its opening plus *closed-days*."
@@ -193,7 +196,6 @@ no closed work of theirs."
            "days_left" left
            "declared" (and declared (gethash "at" declared))
            "hosted" (if hosted t 'yason:false)
-           "may_ask" (if (and left (<= left *closed-ask-days*) (not declared) (not hosted)) t 'yason:false)
            "deploys" (if *deployments?* t 'yason:false))))))
 
 ;;
@@ -273,54 +275,35 @@ upload and thumbnail.  The monitor's audit log keeps its lines."
           (write-record json file)))
     (ignore-errors
      (gate-post "alert" (h "title" "Prompt lab: a closed work to be self-hosted or distributed"
-                           "text" (format nil "Work ~a (~a lab): its author declared they will host it themselves or distribute binaries, and make the quarterly report.  Contact: ~a"
+                           "text" (format nil "Work ~a (~a lab): its author chose to host it themselves or distribute binaries.  Contact: ~:[none given~;~:*~a~]"
                                           id (engine-name) email)
                            "priority" "default" "tags" "page_facing_up")))
     declaration))
 
-(defun ask-for-closed-time! (id)
-  "Tell the house work ID's author asks for more closed time, with the line
-that grants it.  Values: true, or nil and the reason."
-  (let ((now (get-universal-time))
-        (last (bt:with-lock-held (*closed-lock*) (gethash id *closed-asked*))))
-    (cond ((and last (< (- now last) 86400))
-           (values nil "You asked today already; the house answers by mail or by the date on this panel."))
-          (t (multiple-value-bind (answer status)
-                 (ignore-errors
-                  (gate-post "alert" (h "title" "Prompt lab: more closed time asked for"
-                                        "text" (format nil "Work ~a (~a lab) asks for more closed-source time.  To grant ~d days:~%curl -X POST -H \"X-Prompt-Lab-House: $PROMPT_LAB_HOUSE_TOKEN\" '~a~a/api/closed-extend?work=~a&days=~d'"
-                                                       id (engine-name) *closed-extension-days*
-                                                       (or *house-base* "") *url-prefix* id *closed-extension-days*)
-                                        "priority" "default" "tags" "hourglass")))
-               (declare (ignore answer))
-               (if (eql status 200)
-                   (progn (bt:with-lock-held (*closed-lock*) (setf (gethash id *closed-asked*) now))
-                          t)
-                   (values nil "The request could not be sent just now; try again later, or write to the lab's address.")))))))
-
-(defun decide-closed-work! (id key action &key email box)
+(defun decide-closed-work! (id key action &key email)
   "The owner's (KEY) exit for closed work ID: ACTION one of \"public\",
-\"delete\", \"declare\" (with EMAIL and BOX true) or \"more-time\".  Values: a
-notice for the author, or nil and the reason."
+\"delete\" or \"declare\" (EMAIL optional: an address the house may use).
+Values: a notice for the author, or nil and the reason."
   (multiple-value-bind (session json directory) (closed-work id key)
-    (cond ((not (or session json)) (values nil "That is no closed work of yours."))
-          ((equal action "public")
-           (open-closed-work! id :session session :json json :directory directory)
-           "Your work is public now, under the GNU Affero General Public License.")
-          ((equal action "delete")
-           (if (ignore-errors (closed-deployment? id))
-               (values nil "This work is deployed: take the deployment down first.")
-               (progn (delete-closed-work! id :session session :directory directory)
-                      "Your work is deleted: the lab keeps nothing of it.")))
-          ((equal action "declare")
-           (cond ((not box) (values nil "Tick the box first: the declaration is what keeps the work closed."))
-                 ((not (valid-email? email)) (values nil "Give an address the house can write to about the quarterly report."))
-                 (t (declare-closed-work! id email :session session :json json :directory directory)
-                    "Declared: the work stays closed, and it is yours to host or distribute.")))
-          ((equal action "more-time")
-           (multiple-value-bind (ok? reason) (ask-for-closed-time! id)
-             (if ok? "Asked: the house will look at it and extend the date if it can." (values nil reason))))
-          (t (values nil "No such choice here.")))))
+    (let ((email (and (stringp email) (plusp (length email)) email)))
+      (cond ((not (or session json)) (values nil "That is no closed work of yours."))
+            ((equal action "public")
+             (open-closed-work! id :session session :json json :directory directory)
+             "Your work is public now, under the GNU Affero General Public License.")
+            ((equal action "delete")
+             (if (ignore-errors (closed-deployment? id))
+                 (values nil "This work is deployed: take the deployment down first.")
+                 (progn (delete-closed-work! id :session session :directory directory)
+                        "Your work is deleted: the lab keeps nothing of it.")))
+            ((equal action "declare")
+             ;; a choice, not a promise: nothing to tick (the user's ruling,
+             ;; 2026-11-13); an address only if the author gives one
+             (cond ((and email (not (valid-email? email)))
+                    (values nil "That address does not look right; leave it empty if you prefer."))
+                   (t (declare-closed-work! id email :session session :json json :directory directory)
+                      (format nil "Noted: the work stays closed, and it is yours to host or distribute.  ~a"
+                              *closed-reminder-text*))))
+            (t (values nil "No such choice here."))))))
 
 ;;
 ;; The sweep: works whose time ran out, opened.

@@ -746,7 +746,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cbox: false, cemail: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; and of its last staged hosting (hosting.lisp)
@@ -1127,7 +1127,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              (:textarea :rows "2" :maxlength "400" :|data-bind:dblurb| ""))
                                      ;; the source terms were the session's choice as it opened
                                      (:p :class "pl-line" :|data-show| "!$closed"
-                                         (fmt "Open source, under the GNU Affero General Public License: it runs on Gendl, which is under that licence, so the deployment offers its source to the people who use it, in a line at the foot of its page.  Of what its users pay, ~d% is the monetization fee."
+                                         (fmt "Open source, under the GNU Affero General Public License: it runs on Gendl, which is under that license, so the deployment offers its source to the people who use it, in a line at the foot of its page.  Of what its users pay, ~d% is the monetization fee."
                                               (house-fee-percent nil)))
                                      (:p :class "pl-line" :|data-show| "$closed"
                                          (fmt "Closed source, as you chose when the session opened: the house licenses the Gendl it runs on for closed use, so the deployment does not serve its source, and its pages carry nothing of the house.  Of what its users pay, ~d% is the monetization fee."
@@ -1474,9 +1474,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
 
    ;; A CLOSED WORK's panel, for its owner alone (closed.lisp): the date it
    ;; must be decided by and the exits -- host (Monetize, where this lab
-   ;; deploys), declare, make public, delete -- and, near the date, a
-   ;; request to the house for more time.  The declaration's inputs keep
-   ;; their typing through a redraw.
+   ;; deploys), declare, make public, delete.  No request for more time is
+   ;; offered here, and declaring ticks nothing (the user's rulings,
+   ;; 2026-11-13).  The address input keeps its typing through a redraw.
    (closed-section
     :type 'base-html-div
     :inner-html (progn
@@ -1494,7 +1494,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      (escape-string-minimal-plus-quotes
                                       (format nil "~@[confirm(~a) && ~](($cact = '~a'), ~a)"
                                               (and confirm (js-string-literal confirm)) what
-                                              (the (datastar-action :closed-decide :options "{filterSignals: {include: /^(cact|cbox|cemail|owner)$/}}")))))))
+                                              (the (datastar-action :closed-decide :options "{filterSignals: {include: /^(cact|cemail|owner)$/}}")))))))
                           (with-lhtml-string ()
                             (:div :class "pl-card pl-closed-work"
                                   (:h2 "Closed work")
@@ -1502,7 +1502,8 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                     ((gethash "declared" state)
                                      (htm (:p :class "pl-line"
                                               (fmt "You said on ~a that you will host this work yourself or distribute it: it stays closed.  Its source is yours to take from Download."
-                                                   (utc-day (gethash "declared" state))))))
+                                                   (utc-day (gethash "declared" state))))
+                                          (:p :class "pl-line" (esc *closed-reminder-text*))))
                                     ((eq (gethash "hosted" state) t)
                                      (htm (:p :class "pl-line" "Hosted with us, closed: it stays closed.")))
                                     (t
@@ -1515,27 +1516,19 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                               (:a :href "https://genworks.com/royalties/" :target "_blank" :rel "noopener" "genworks.com/royalties/")
                                               " -- a $0 quarter is fine -- or a Genworks GDL commercial license.  Nothing else to sign.")
                                           (:div :class "pl-declare" :|data-ignore-morph| ""
-                                                (:label :class "pl-pick"
-                                                        (:input :type "checkbox" :|data-bind:cbox| "")
-                                                        " " (esc *closed-declaration-text*))
                                                 (:div :class "pl-row"
                                                       (:input :type "email" :maxlength "200" :|data-bind:cemail| ""
-                                                              :placeholder "Your address, for the quarterly report")
+                                                              :placeholder "Your address (optional)")
                                                       (:button :type "button" :class "pl-download"
-                                                               :|data-attr:disabled| "!$cbox"
                                                                :|data-on:click| (funcall act "declare" nil)
-                                                               "Declare")))
+                                                               "I will host or distribute it myself")))
                                           (:div :class "pl-row"
                                                 (:button :type "button" :class "pl-download"
                                                          :|data-on:click| (funcall act "public" "Make this work public now, under the GNU Affero General Public License?  This cannot be undone.")
                                                          "Make it public now")
                                                 (:button :type "button" :class "pl-download"
                                                          :|data-on:click| (funcall act "delete" "Delete this work and everything the lab keeps of it?  This cannot be undone.")
-                                                         "Delete it")
-                                                (when (eq (gethash "may_ask" state) t)
-                                                  (htm (:button :type "button" :class "pl-download"
-                                                                :|data-on:click| (funcall act "more-time" nil)
-                                                                "Ask for more time"))))))))))))))
+                                                         "Delete it"))))))))))))
 
    ;; The model's files, from the download door (export.lisp): fetched, so
    ;; a refusal is a line on the page and not a saved file, and with the
@@ -1836,8 +1829,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
           (the (tell-error! "This is no closed work of yours."))
           (multiple-value-bind (notice reason)
               (decide-closed-work! (session-id session) (the owner-key) action
-                                   :email (let ((e (gethash "cemail" signals))) (and (stringp e) (string-trim " " e)))
-                                   :box (eq (gethash "cbox" signals) t))
+                                   :email (let ((e (gethash "cemail" signals))) (and (stringp e) (string-trim " " e))))
             (cond ((null notice) (the (tell-error! reason)))
                   ((equal action "delete")
                    ;; nothing is left to show: back to the lab's front door

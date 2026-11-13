@@ -542,7 +542,7 @@ loaded) its page too."
                   (symbol-value (lab '#:*deployments?*)) nil
                   (symbol-value (lab '#:*closed-source?*)) nil)
             (unwind-protect
-                 (smoke "prompt-lab closed work: an author key's, thirty days, declared, swept open, deleted, extended by the house"
+                 (smoke "prompt-lab closed work: an author key's, thirty days, declared with nothing ticked, swept open, deleted, extended by the house"
                         (lambda ()
                           (flet ((call (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args))
                                  (open-closed (address key)
@@ -571,10 +571,15 @@ loaded) its page too."
                                 (let ((text (uiop:read-file-string (call :session-model-file one))))
                                   (unless (and (search "All rights reserved." text) (not (search "SPDX" text)))
                                     (error "a closed work's file does not reserve its rights")))
-                                (when (call :decide-closed-work! id owner "declare" :email "a@b.example" :box nil)
-                                  (error "a declaration without the box was taken"))
-                                (unless (call :decide-closed-work! id owner "declare" :email "a@b.example" :box t)
-                                  (error "the declaration was refused"))
+                                ;; no box to tick and no address needed (rulings, 2026-11-13);
+                                ;; no request for more time on the page
+                                (when (call :decide-closed-work! id owner "more-time")
+                                  (error "the page's request for more time is still taken"))
+                                (when (call :decide-closed-work! id owner "declare" :email "not an address")
+                                  (error "a malformed address was taken"))
+                                (let ((notice (call :decide-closed-work! id owner "declare")))
+                                  (unless (and notice (search "genworks.com/royalties/" notice))
+                                    (error "the declaration without an address was refused, or gave no reminder")))
                                 (when (member id (call :sweep-closed-works! :now (+ (get-universal-time) (* 40 86400)) :force? t)
                                               :test #'equal)
                                   (error "a declared work was opened by the sweep"))
