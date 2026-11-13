@@ -353,7 +353,7 @@ the same session under the same name replaces the copy and the terms."
                  (if free?
                      (log-event session :note "Deployed as ~a: ~a, open source, charging nothing: hosted free, at the house's discretion, within the monthly hosting allowance."
                                 name (gethash "url" saved))
-                     (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee; paid by card through Stripe to your account."
+                     (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the platform fee; paid by card through Stripe to your account."
                                 name (gethash "url" saved) closed? (gethash "fee_percent" saved)))
                  (funnel-count! "deploys")
                  saved))))
@@ -384,7 +384,7 @@ the same session under the same name replaces the copy and the terms."
              (if free?
                  (log-event session :note "Deployed as ~a: ~a, open source, charging nothing: hosted free, at the house's discretion, within the monthly hosting allowance."
                             name (deployment-url name))
-                 (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the monetization fee~@[ and ~a% goes to the community pot~]~:[~;; paid by card through Stripe to your account~]."
+                 (log-event session :note "Deployed as ~a: ~a, ~:[open~;closed~] source; of what its users pay, ~a% is the platform fee~@[ and ~a% goes to the community pot~]~:[~;; paid by card through Stripe to your account~]."
                             name (deployment-url name) closed? (house-fee-percent closed?)
                             (let ((pot (gethash "pot_percent" saved))) (and (realp pot) (plusp pot) pot))
                             account))
@@ -1732,7 +1732,7 @@ hosting for it."
                      (let ((due (and balance (gethash "minimum_due" balance))))
                        (if (and (realp due) (plusp due) (not (truthy? (gethash "dues_carried" balance))))
                            ;; a closed app's monthly minimums unpaid (rulings 49, 61): paid exactly, here
-                           (htm (:p (esc (format nil "Its monthly minimum in fees to its host was not met~@[ (to ~a)~]: ~a is due.  It runs again once that is paid."
+                           (htm (:p (esc (format nil "Its monthly minimum in platform fees was not met~@[ (to ~a)~]: ~a is due.  It runs again once that is paid."
                                                  (gethash "minimum_month" balance) (money-text due))))
                                 (:form :method "post" :action (deployment-door-url name "host-settle")
                                        (:input :type "hidden" :name "deployed" :value name)

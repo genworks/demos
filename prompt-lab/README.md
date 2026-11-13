@@ -160,7 +160,7 @@ toll, and for a model a download it stands on); the state door answers
 
 Everything is priced and paid in money, in cents of the author's
 currency.  Of what users pay, the house keeps its
-**monetization fee**: `*house-fee-percents*`, 10% of an open-source
+**platform fee**: `*house-fee-percents*`, 10% of an open-source
 deployment's takings and 15% of a closed-source one's.  Where the house's
 gate pours it into the pot as each payment settles, the author may
 give more, to the lab's community pot that pays for

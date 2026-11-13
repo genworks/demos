@@ -489,7 +489,7 @@ books are <root>/revenue.jsonl.")
   '(:gendl (:open 10 :closed 15)
     :solid (:open 15 :closed 20))
   "Plist, engine -> plist. The house's share of what a deployment's users
-pay, its monetization fee, in percent, by the engine the lab runs on
+pay, its platform fee, in percent, by the engine the lab runs on
 (*engine*) and then by the deployment's source terms: open (the GNU
 Affero General Public License) or closed.  The closed rate is the open
 rate plus the standalone royalty for closed use of the engine; the solids

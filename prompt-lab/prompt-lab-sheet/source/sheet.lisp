@@ -847,14 +847,14 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      (if *deployments?*
                                          ;; the hosting fee follows the box as it is ticked
                                          (htm (:p :class "pl-line pl-fee" :style "display:none" :|data-show| "!$opened"
-                                                  "Monetization fee: "
+                                                  "Platform fee: "
                                                   (:b :|data-text| (format nil "$closedPick ? '~d%' : '~d%'"
                                                                            (house-fee-percent t) (house-fee-percent nil)))
                                                   (:span :|data-show| "$closedPick"
                                                          (fmt " -- nobody else sees the work; decide within ~d days, or its source becomes public." *closed-days*))
                                                   (:span :|data-show| "!$closedPick" " -- open source, public as you build."))
                                               (:p :class "pl-line" :style "display:none" :|data-show| "$opened && $closed"
-                                                  (fmt "Closed source, ~d% monetization fee: decide within ~d days -- the Decide panel -- or its source becomes public."
+                                                  (fmt "Closed source, ~d% platform fee: decide within ~d days -- the Decide panel -- or its source becomes public."
                                                        (house-fee-percent t) *closed-days*)))
                                          (htm (:p :class "pl-line" :style "display:none" :|data-show| "!$opened && $wallet && $closedPick"
                                                   (fmt "Only you see a closed work, for ~d days from its first build; then decide, or it becomes public under the GNU Affero General Public License." *closed-days*))))))
@@ -1127,16 +1127,16 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              (:textarea :rows "2" :maxlength "400" :|data-bind:dblurb| ""))
                                      ;; the source terms were the session's choice as it opened
                                      (:p :class "pl-line" :|data-show| "!$closed"
-                                         (fmt "Open source, under the GNU Affero General Public License: it runs on Gendl, which is under that license, so the deployment offers its source to the people who use it, in a line at the foot of its page.  Of what its users pay, ~d% is the monetization fee."
+                                         (fmt "Open source, under the GNU Affero General Public License: it runs on Gendl, which is under that license, so the deployment offers its source to the people who use it, in a line at the foot of its page.  Of what its users pay, ~d% is the platform fee."
                                               (house-fee-percent nil)))
                                      (:p :class "pl-line" :|data-show| "$closed"
-                                         (fmt "Closed source, as you chose when the session opened: the house licenses the Gendl it runs on for closed use, so the deployment does not serve its source, and its pages carry nothing of the house.  Of what its users pay, ~d% is the monetization fee."
+                                         (fmt "Closed source, as you chose when the session opened: the house licenses the Gendl it runs on for closed use, so the deployment does not serve its source, and its pages carry nothing of the house.  Of what its users pay, ~d% is the platform fee."
                                               (house-fee-percent t)))
                                      ;; the author's slider: points of every payment, on top of
                                      ;; the fee, for the community pot (deploy.lisp)
                                      (when *pot-percent-least*
-                                       (htm (:label :data-doc "Give more of every payment to the community pot that pays for everyone's builds.  It is taken on top of the monetization fee, and kept with the deployment's terms."
-                                                    (:span :|data-text| (format nil "'To the community pot, on top of the fee: ' + $dpot + '%'"))
+                                       (htm (:label :data-doc "Give more of every payment to the community pot that pays for everyone's builds.  It is taken on top of the platform fee, and kept with the deployment's terms."
+                                                    (:span :|data-text| (format nil "'To the community pot, on top of the platform fee: ' + $dpot + '%'"))
                                                     (:input :type "range" :step "1"
                                                             :min (format nil "~d" *pot-percent-least*)
                                                             :max "50" :|data-bind:dpot| ""))
@@ -1160,7 +1160,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      ;; the agent at the visitor's word (deploy.lisp)
                                      (:p :class "pl-line"
                                          (if (eq *toll-provider* :stripe)
-                                             (esc "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  Its users pay by card on Stripe's page, in dollars; the house keeps the monetization fee and the rest is transferred to your own Stripe account with each payment.  A model's priced files are sold on its page the same way.")
+                                             (esc "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  Its users pay by card on Stripe's page, in dollars; the house keeps the platform fee and the rest is transferred to your own Stripe account with each payment.  A model's priced files are sold on its page the same way.")
                                              (esc "It charges what its tollbooths say, as you had the agent write them: ask for a change in a prompt and deploy again.  No money moves yet: a web app's tolls are taken as test payments, booked and marked as tests, and a model's priced downloads open only to you.")))
                                      ;; esc: a form's value is written only when said so (cl-who), and
                                      ;; a bare (if ...) here left the field with no label at all
