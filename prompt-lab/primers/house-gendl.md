@@ -15,13 +15,13 @@ every example in it compiles as written.  Do not probe the macro
    (height 25))
 
   :computed-slots
-  ((half-width (half (the width))))
+  ((top-color :steel-blue))
 
   :objects
   ((top :type 'box
         :width (the width) :length (the length) :height (the height)
         :center (the center)
-        :display-controls (list :color :steel-blue))))
+        :display-controls (list :color (the top-color)))))
 ```
 
 Each of these rules is a compiler error, or a model that silently
@@ -36,6 +36,16 @@ draws nothing, when it is broken:
   "No such toplevel define-object keyword exists".
 - No docstring after the name, and no `:documentation` string.
 - A slot is `(name default)`.  The default is any expression.
+- NAMES.  Every name in one define-object -- inputs, computed slots,
+  children, functions -- is used ONCE ("duplicate slot name" otherwise).
+  And names Gendl already gives every object are not yours to define:
+  `index`, `center`, `orientation`, `half-width`, `half-length`,
+  `half-height`, `bounding-box`, `leaves`, `children`, `parent`, `root`,
+  `faces`, `vertex-list`, `volume`, `area` ("reserved word" otherwise).
+  Only `width`, `length` and `height` may be MODEL's inputs.  Name your
+  own things specifically: `leg-height`, `top-center`, `spoke-count`.
+- A function's arguments are distinct names: `(plate-area (w l) ...)`,
+  never `(plate-area (d d) ...)`.
 - Read a slot, inside define-object, with `(the name)` -- an input, a
   computed slot, `center`, anything.  A bare `width` is an unbound
   variable.  A child's slot: `(the top width)`; a member of a sequence:
@@ -67,6 +77,11 @@ draws nothing, when it is broken:
   floor (`:up` from 0) sticks out above the envelope, and the size
   comes out half as tall again.  Dimensions with other names (`depth`,
   `span`) are not part of the envelope.
+- THE RECIPE for any part: place it by its height above the floor.
+  For a part of height `h` whose bottom is `z` above the floor:
+  `:center (translate (the center) :down (half (the height)) :up (+ z (half h)))`.
+  Sideways the same way from the left and front faces, or from the
+  center line.  Parts placed this way can never overshoot the envelope.
 - `box`: `:width` along X, `:length` along Y, `:height` along Z,
   centered on its `:center`.
 - `cylinder`: `:radius`, `:length`, `:center`.  Its axis runs along its
@@ -123,7 +138,29 @@ only what a person would change; derived values go in
   `:steel-blue`, `:slate-gray`, `:dim-gray`, `:saddle-brown`,
   `:dark-olive-green`, `:firebrick`, `:goldenrod`.
 
-### 6. Worked examples
+### 6. When check_model or the compiler complains
+
+- "Unexpected end of file" or "Reader error": the parentheses do not
+  balance.  Do not patch it with edit_model; write the whole file again
+  with write_model, closing every form as you go -- each child form
+  `(name :type 'box ...)` closed on its own last line, then `)` for
+  `:objects`, then `)` for the define-object.
+- SIZE MISMATCH where a size is too big by about half the expected
+  height (or width, or length): the parts were placed up from the center,
+  not from the floor.  Use the recipe in section 2; do not change the
+  inputs to make the numbers agree.
+- SIZE MISMATCH where the parts are right and only your expected_size
+  was a guess: say so in the reply and stop.  Two fixes for the same
+  mismatch is the most to try.
+- edit_model wants OLD copied exactly from the file as read_model shows
+  it.  For a file under about 80 lines, write_model the whole file
+  instead.
+- In evaluate there is no `self`: `(the width)` fails there.  Ask the
+  built model: `(the-object (make-object 'model) width)`.
+- When check_model says "Expected size matched" and lists the parts you
+  meant, reply to the visitor and STOP.  Do not keep improving.
+
+### 7. Worked examples
 
 A table: a top and four legs from one sequence, inside the envelope.
 

@@ -732,7 +732,7 @@ loaded) its page too."
                  (lambda ()
                    (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
                      (let* ((primer (pl :house-primer-text))
-                            (examples (let ((from (search "### 6. Worked examples" primer)) (found nil))
+                            (examples (let ((from (search "Worked examples" primer)) (found nil))
                                         (loop for start = (and from (search (format nil "```lisp~%") primer :start2 from))
                                               while start
                                               do (let ((end (search (format nil "~%```") primer :start2 (+ start 8))))
@@ -741,6 +741,17 @@ loaded) its page too."
                                         (nreverse found)))
                             (sizes '((1200 700 750) (300 90 90) (800 300 1800) (200 200 40))))
                        (unless (= (length examples) 4) (error "the primer has ~d worked examples, not 4" (length examples)))
+                       ;; the grammar's own first example compiles too (a reserved
+                       ;; slot name in it once taught the very mistake it warns of)
+                       (let ((first-block (let ((start (search (format nil "```lisp~%") primer)))
+                                            (subseq primer (+ start 8) (search (format nil "~%```") primer :start2 (+ start 8)))))
+                             ;; an address of its own: the examples above use 10.9.8.5's day of sessions
+                             (s (pl :open-session! "10.9.8.3" nil)))
+                         (unwind-protect
+                              (when (nth-value 1 (pl :write-model s first-block))
+                                (error "the primer's first example does not compile"))
+                           (ignore-errors (pl :delete-session s))
+                           (pl :funnel-count! "sessions" -1)))
                        (loop for source in examples
                              for size in sizes
                              for s = (pl :open-session! "10.9.8.5" nil)
@@ -759,7 +770,7 @@ loaded) its page too."
                          (unwind-protect
                               (progn
                                 (pl :set-session-model! s "house-1")
-                                (unless (and (search "### 6. Worked examples" (pl :system-text s))
+                                (unless (and (search "Worked examples" (pl :system-text s))
                                              (search "after EVERY write_model" (pl :system-text s)))
                                   (error "a house session's system text lacks the house primer"))
                                 (when (find "render" (coerce (pl :tool-definitions s) 'list)
@@ -775,7 +786,7 @@ loaded) its page too."
                                              (null (pl :paren-report (format nil "(a \"(\" #\\( ; (~%)"))))
                                   (error "the parenthesis report is wrong"))
                                 (pl :set-session-model! s nil)
-                                (when (search "### 6. Worked examples" (pl :system-text s))
+                                (when (search "Worked examples" (pl :system-text s))
                                   (error "a session on the lab's own model got the house primer"))
                                 t)
                            (ignore-errors (pl :delete-session s))
