@@ -1365,7 +1365,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                   (htm (:span :title (format nil "The model read ~:d tokens and wrote ~:d" (getf usage :input) (getf usage :output))
                                               (fmt "Session ~a" (session-id session)))
                                        (:span (str (if (session-busy? session) "working" "ready")))
-                                       (:span (fmt "~a of ~a prompts" (prompts-used session) *max-prompts-per-session*))
+                                       ;; a session its own agent builds has no prompt quota here (external.lisp)
+                                       (if (own-agent? session)
+                                           (htm (:span "built by your own agent"))
+                                           (htm (:span (fmt "~a of ~a prompts" (prompts-used session) *max-prompts-per-session*))))
                                        (when pot
                                          (htm (:span (fmt "pot ~:d ~a" (max 0 (floor (or (getf pot :credits) 0))) (units)))))
                                        ;; closing the session to watchers, once its author is trusted
@@ -1463,10 +1466,15 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                     (with-lhtml-string ()
                       (:div :class "pl-card pl-credits"
                             (:h2 "AI allowance")
-                            (str (credits-html self (pot) spend))
-                            ;; the author's AI allowance this month (the gate's word on the key)
-                            (let ((ai (and session (the owner?) (ignore-errors (author-ai (session-wallet session))))))
-                              (when ai (str (ai-allowance-html ai))))
+                            (if (and session (own-agent? session))
+                                ;; its own agent's tokens are its author's: nothing here is drawn
+                                (htm (:p :class "pl-line"
+                                         "Your own agent builds this session, on your own sign-in: the lab's AI allowance and the community pot are not drawn.  They apply when the lab's agent builds."))
+                                (progn
+                                  (str (credits-html self (pot) spend))
+                                  ;; the author's AI allowance this month (the gate's word on the key)
+                                  (let ((ai (and session (the owner?) (ignore-errors (author-ai (session-wallet session))))))
+                                    (when ai (str (ai-allowance-html ai))))))
                             ;; the AUTHOR KEY (*author-keys?*): one public record across
                             ;; sessions, what the trust ladder's review reads
                             (when *author-keys?*
