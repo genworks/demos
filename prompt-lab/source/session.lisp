@@ -338,6 +338,8 @@ is on disk for it."
               (ignore-errors (set-session-model! session model))))
           ;; and whose agent builds it (external.lisp)
           (when (equal (gethash "agent" json) "own")
+            ;; its MCP token first, so the mark keeps it rather than minting anew
+            (restore-mcp-token! session)
             (set-own-agent! session t))
           (when (probe-file (session-model-file session))
             (ignore-errors (load-model-file session)))

@@ -113,12 +113,67 @@ session, so a tool that is slow in one keeps no other waiting.")
   (and session (bt:with-lock-held (*sessions-lock*) (gethash (session-id session) *own-agent-sessions*)) t))
 
 (defun set-own-agent! (session on?)
-  "Mark SESSION as run by its author's own agent (ON? true) or by the lab's."
+  "Mark SESSION as run by its author's own agent (ON? true), with an MCP
+token minted if it has none, or as the lab's again, its token revoked."
   (bt:with-lock-held (*sessions-lock*)
     (if on?
         (setf (gethash (session-id session) *own-agent-sessions*) t)
         (remhash (session-id session) *own-agent-sessions*)))
+  (if on?
+      (unless (mcp-token session) (mint-mcp-token! session))
+      (when (mcp-token session) (set-mcp-token! session nil)))
   on?)
+
+(defvar *mcp-tokens* (make-hash-table :test #'equal)
+  "Session id -> the MCP token its author's own agent uses.  Scoped to that
+session's MCP door alone -- unlike the owner key, which can also deploy,
+delete and publish the session -- and replaced or revoked from the panel.
+Kept in the session's directory as mcp-token, a file the archive never
+copies (session.json is archived whole).")
+
+(defun mcp-token-file (session)
+  (merge-pathnames "mcp-token" (session-directory session)))
+
+(defun mcp-token (session)
+  (bt:with-lock-held (*sessions-lock*) (gethash (session-id session) *mcp-tokens*)))
+
+(defun set-mcp-token! (session token)
+  "SESSION's MCP token is TOKEN from now on (nil: none, the old one revoked)."
+  (bt:with-lock-held (*sessions-lock*)
+    (if token
+        (setf (gethash (session-id session) *mcp-tokens*) token)
+        (remhash (session-id session) *mcp-tokens*)))
+  (ignore-errors
+   (let ((file (mcp-token-file session)))
+     (if token
+         (progn (ensure-directories-exist file) (write-text-file token file))
+         (when (probe-file file) (delete-file file)))))
+  token)
+
+(defun mint-mcp-token! (session)
+  "A new MCP token for SESSION; the one before stops working."
+  (set-mcp-token! session (format nil "plmcp_~a" (new-owner-key))))
+
+(defun restore-mcp-token! (session)
+  "Take SESSION's MCP token back from its file after a restart."
+  (let ((token (ignore-errors (string-trim '(#\Space #\Newline #\Return)
+                                           (uiop:read-file-string (mcp-token-file session))))))
+    (when (and (stringp token) (plusp (length token)))
+      (bt:with-lock-held (*sessions-lock*) (setf (gethash (session-id session) *mcp-tokens*) token)))))
+
+(defun request-mcp-token (req)
+  "The MCP token a request carries: an Authorization: Bearer header (first),
+else token= in the address."
+  (flet ((key (value) (and (stringp value) (plusp (length value)) value)))
+    (or (let ((auth (net.aserve:header-slot-value req :authorization)))
+          (and (stringp auth) (> (length auth) 7) (string-equal "Bearer " auth :end2 7)
+               (key (string-trim " " (subseq auth 7)))))
+        (key (query-value req "token")))))
+
+(defun mcp-token-ok? (req session)
+  (let ((token (mcp-token session))
+        (given (request-mcp-token req)))
+    (and (stringp token) (stringp given) (string= token given))))
 
 (defun own-agent-offered? (wallet)
   "Whether this lab offers WALLET's author a session run by their own agent."
@@ -372,7 +427,8 @@ one JSON-RPC message; a request is answered in JSON, a notification with
   (let ((session (requested-session req)))
     (cond ((not *external-agent?*) (external-off req ent))
           ((null session) (no-such-session req ent))
-          ((not (owner-request? req session)) (not-yours req ent))
+          ;; the session's own MCP token (the panel's), or its owner key (a driver's)
+          ((not (or (mcp-token-ok? req session) (owner-request? req session))) (not-yours req ent))
           ((not (external-admits? (session-wallet session)))
            (external-refused req ent "Bringing your own agent here wants a session under an author key."))
           ((external-over? (session-wallet session) :calls)

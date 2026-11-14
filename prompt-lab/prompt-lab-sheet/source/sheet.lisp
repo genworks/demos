@@ -620,7 +620,7 @@ not hold."
    (user-mode?-default t)
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
-   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :author :author-name :closed-decide :connect-agent :agent-mode :wear-skin :shade-desk :upload :adopt
+   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :author :author-name :closed-decide :connect-agent :agent-mode :mcp-token-new :wear-skin :shade-desk :upload :adopt
                            :deploy :undeploy :connect :open-project :push-project :deploy-project))
 
    ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
@@ -1533,27 +1533,38 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                   (let ((session (the session)))
                     (if (not (and session (own-agent? session) (the owner?)))
                         ""
-                        (let* ((address (format nil "window.location.origin + ~a + $owner"
-                                                (js-string-literal (format nil "~a/mcp?session=~a&owner=" *url-prefix* (session-id session)))))
+                        (let* ((token (or (mcp-token session) (mint-mcp-token! session)))
+                               (address (format nil "window.location.origin + ~a"
+                                                (js-string-literal (format nil "~a/mcp?session=~a" *url-prefix* (session-id session)))))
+                               (bearer (js-string-literal (format nil "Bearer ~a" token)))
                                (shown (lambda (expression) (escape-string-minimal-plus-quotes expression))))
                           (with-lhtml-string ()
                             (:div :class "pl-card pl-own-agent"
                                   (:h2 "Your own agent")
                                   (:p :class "pl-line"
                                       "This session is built by your own agent over MCP, the Model Context Protocol.  The lab calls no AI model for it: your agent's tokens are your own business.  What still runs here: the tools your agent calls -- writing, compiling and checking the model, drawing it -- the archive, and the hosting when you deploy.")
-                                  (:p :class "pl-line" "The session's address.  It carries the session's owner key: keep it to yourself, as you would a password.")
+                                  (:p :class "pl-line"
+                                      "Your agent signs in with this session's MCP token, sent as an Authorization header.  The token opens this session's tools and nothing else -- not your other sessions, not Deploy -- and a new one can be made below, which stops the old.  Keep it out of shared files.")
+                                  (:p :class "pl-line" "The address:")
                                   (:pre :class "pl-code" (:code :|data-text| (funcall shown address)))
+                                  (:p :class "pl-line" "The token:")
+                                  (:pre :class "pl-code" (esc token))
                                   (:p :class "pl-line" (:b "Claude Code") ", in a terminal:")
                                   (:pre :class "pl-code"
-                                        (:code :|data-text| (funcall shown (format nil "'claude mcp add --transport http prompt-lab \"' + ~a + '\"'" address))))
+                                        (:code :|data-text| (funcall shown (format nil "'claude mcp add --transport http prompt-lab \"' + ~a + '\" --header \"Authorization: ' + ~a + '\"'" address bearer))))
                                   (:p :class "pl-line" (:b "Cursor") ", in .cursor/mcp.json:")
                                   (:pre :class "pl-code"
-                                        (:code :|data-text| (funcall shown (format nil "'{\"mcpServers\": {\"prompt-lab\": {\"url\": \"' + ~a + '\"}}}'" address))))
-                                  (:p :class "pl-line" (:b "Claude Desktop") ", in claude_desktop_config.json, through the mcp-remote bridge (needs Node):")
+                                        (:code :|data-text| (funcall shown (format nil "'{\"mcpServers\": {\"prompt-lab\": {\"url\": \"' + ~a + '\", \"headers\": {\"Authorization\": \"' + ~a + '\"}}}}'" address bearer))))
+                                  (:p :class "pl-line" (:b "Claude Desktop") ", in claude_desktop_config.json, through the mcp-remote bridge (needs Node; the header written without a space after the colon, as its README advises):")
                                   (:pre :class "pl-code"
-                                        (:code :|data-text| (funcall shown (format nil "'{\"mcpServers\": {\"prompt-lab\": {\"command\": \"npx\", \"args\": [\"-y\", \"mcp-remote\", \"' + ~a + '\"]}}}'" address))))
+                                        (:code :|data-text| (funcall shown (format nil "'{\"mcpServers\": {\"prompt-lab\": {\"command\": \"npx\", \"args\": [\"-y\", \"mcp-remote\", \"' + ~a + '\", \"--header\", \"Authorization:${AUTH_HEADER}\"], \"env\": {\"AUTH_HEADER\": \"' + ~a + '\"}}}}'" address bearer))))
                                   (:p :class "pl-line" (:b "Any other MCP client")
-                                      ": the Streamable HTTP transport -- POST one JSON-RPC message at a time to the address, answered in plain JSON; no stream is offered.  The owner key may go in an X-Prompt-Lab-Owner header instead of the address.")
+                                      ": the Streamable HTTP transport -- POST one JSON-RPC message at a time to the address, answered in plain JSON; no stream is offered -- with the Authorization header as above.  A client that can send no header may put "
+                                      (:code "&token=") " and the token at the end of the address instead; an address is written to servers' logs, so make a new token once you are done with such a client.")
+                                  (:div :class "pl-row"
+                                        (:button :type "button" :class "pl-download"
+                                                 :|data-on:click| (the (datastar-action :mcp-token-new :options "{filterSignals: {include: /^(owner)$/}}"))
+                                                 "Make a new token (the old one stops working)"))
                                   (:details
                                    (:summary "The instructions the lab's own agent works by")
                                    (:p :class "pl-line" "Your agent receives these as the MCP server's instructions when it connects.  If it does not use them, paste them into its first prompt.")
@@ -1937,6 +1948,18 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                (save-session! session)
                (the (set-slot! :revision (1+ (the revision))))
                (sheet-send! self (datastar-signals-event "{\"agentmode\": \"own\", \"ownagent\": true, \"error\": \"\"}")))))))
+
+   (mcp-token-new
+    (signals)
+    (declare (ignore signals))
+    ;; a new MCP token for the session's own agent; the old one stops working
+    (let ((session (the session)))
+      (cond ((not (and session (the owner?) (own-agent? session)))
+             (the (tell-error! "This is no session of yours run by your own agent.")))
+            (t (mint-mcp-token! session)
+               (log-event session :note "A new MCP token was made for this session; the old one no longer works.")
+               (the (set-slot! :revision (1+ (the revision))))
+               (sheet-send! self (datastar-signals-event "{\"notice\": \"A new token: update your agent's set-up.\"}"))))))
 
    (agent-mode
     (signals)

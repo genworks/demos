@@ -620,9 +620,29 @@ loaded) its page too."
                             (uiop:symbol-call :prompt-lab :save-session! own)
                             (let ((json (uiop:symbol-call :prompt-lab :read-record
                                                           (merge-pathnames "session.json"
-                                                                           (uiop:symbol-call :prompt-lab :session-directory own)))))
+                                                                           (uiop:symbol-call :prompt-lab :session-directory own))))
+                                  (token (uiop:symbol-call :prompt-lab :mcp-token own)))
                               (unless (and json (equal (gethash "agent" json) "own"))
-                                (error "the record does not keep whose agent builds")))
+                                (error "the record does not keep whose agent builds"))
+                              ;; the session's own MCP token: in a header, scoped, replaceable,
+                              ;; never in the record (which the archive copies whole)
+                              (unless (stringp token) (error "no MCP token was minted"))
+                              (when (search token (uiop:read-file-string
+                                                   (merge-pathnames "session.json" (uiop:symbol-call :prompt-lab :session-directory own))))
+                                (error "the MCP token is in session.json"))
+                              (flet ((mcp (headers)
+                                       (nth-value 1 (http :post (format nil "~a/mcp?session=~a" prefix (uiop:symbol-call :prompt-lab :session-id own))
+                                                          :headers headers
+                                                          :json (table "jsonrpc" "2.0" "id" 1 "method" "ping")))))
+                                (unless (eql 200 (mcp (list (cons "Authorization" (format nil "Bearer ~a" token)))))
+                                  (error "the MCP token in a header was refused"))
+                                (unless (eql 403 (mcp (list (cons "Authorization" "Bearer plmcp_not-the-token"))))
+                                  (error "a wrong MCP token was taken"))
+                                (unless (eql 200 (mcp (list (cons "X-Prompt-Lab-Owner" (uiop:symbol-call :prompt-lab :session-owner own)))))
+                                  (error "the owner key no longer opens the door"))
+                                (uiop:symbol-call :prompt-lab :mint-mcp-token! own)
+                                (unless (eql 403 (mcp (list (cons "Authorization" (format nil "Bearer ~a" token)))))
+                                  (error "a replaced MCP token still opens the door"))))
                             (uiop:symbol-call :prompt-lab :set-own-agent! own nil)
                             (multiple-value-bind (started reason)
                                 (uiop:symbol-call :prompt-lab :begin-prompt! own "" "10.9.8.7" nil :route? nil)
