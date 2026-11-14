@@ -28,6 +28,10 @@
 //   --kind KIND      what to build: model (a geometry model, the lab's
 //                    default) or app (a GWL web app, served by the lab
 //                    at an address this script prints)
+//   --accept-terms   accept the texts the lab asks accepted before a
+//                    session's first build (its Terms of Service and
+//                    open-source notice, at <lab>/terms/<id>): read
+//                    them first.  Once per author key and version.
 //   --continue       go on in the session this script last worked in
 //   --session ID     go on in that session (one this script opened)
 //   --model NAME     instead of the model the lab itself uses
@@ -85,6 +89,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--kind') opt.kind = value();
   else if (a === '--session') opt.session = value();
   else if (a === '--continue') opt.continue = true;
+  else if (a === '--accept-terms') opt.acceptTerms = true;
   else if (a === '--model') opt.model = value();
   else if (a === '--effort') opt.effort = value();
   else if (a === '--claude') opt.claude = value();
@@ -147,7 +152,7 @@ if (opt.seed) {
 let brief;
 try {
   brief = await tell({ event: 'prompt', text: prompt, session: sessionId || undefined, model: seed,
-                       kind: opt.kind || undefined });
+                       kind: opt.kind || undefined, accept_terms: opt.acceptTerms || undefined });
 } catch (e) {
   console.error(`The lab at ${lab} cannot be reached: ${e.cause ? e.cause.message : e.message}`);
   process.exit(1);

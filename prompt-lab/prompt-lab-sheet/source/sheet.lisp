@@ -762,7 +762,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, modelnow: ~a, agentmode: ~a, ownagent: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, modelnow: ~a, agentmode: ~a, ownagent: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', tagree: false, termsneed: ~a, dagree: false, cagree: false, private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; and of its last staged hosting (hosting.lisp)
@@ -800,6 +800,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
             (if (and (the session) (own-agent? (the session))) "'own'" "'lab'")
             (json-boolean (and (the session) (own-agent? (the session))))
             (json-boolean (or (the archive-id) (the archive-pending)))
+            ;; the clickwrap (guards.lisp): whether this session's first build
+            ;; still waits for its texts to be accepted
+            (json-boolean (and (terms-required? :build)
+                               (not (and (the session) (session-accepted? (the session) :build)))))
             (if (the cancelled?) "'The payment was cancelled; nothing was charged.'" "''")
             (json-boolean (and (the session) (session-busy? (the session))))
             ;; a browser holding the session's key shows the owner's page
@@ -908,7 +912,8 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                    " my own, over MCP"))
                                      (:div :class "pl-row" :style "display:none" :|data-show| "$agentmode == 'own' && !$ownagent"
                                            (:button :type "button" :class "pl-build"
-                                                    :|data-on:click| (the (datastar-action :connect-agent :options "{filterSignals: {include: /^(owner|wallet|kind|closedPick)$/}}"))
+                                                    :|data-on:click| (the (datastar-action :connect-agent :options "{filterSignals: {include: /^(owner|wallet|kind|closedPick|tagree)$/}}"))
+                                                    :|data-attr:disabled| (if (terms-required? :build) "$termsneed && !$tagree" "false")
                                                     "Connect my own agent")
                                            (:span :class "pl-line" "Opens this session for your agent: its address and set-up appear below.  The lab calls no AI for it."))
                                      (:p :class "pl-line" :style "display:none" :|data-show| "$agentmode == 'own' && $ownagent"
@@ -919,13 +924,21 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               (when *turnstile-site-key*
                                 (htm (:div :class "cf-turnstile" :data-sitekey *turnstile-site-key* :data-callback "plTurnstile")))
                               (:input :type "hidden" :id "pl-turnstile" :|data-bind:turnstile| "")
+                              ;; the clickwrap (guards.lisp): the texts accepted before
+                              ;; a session's first build, or before its own agent is connected
+                              (when (terms-required? :build)
+                                (htm (:label :class "pl-pick pl-terms" :style "display:none" :|data-show| "$termsneed"
+                                             :data-doc "The terms this lab is used on: tick to accept them before the first build"
+                                             (:input :type "checkbox" :id "pl-tagree" :|data-bind:tagree| "")
+                                             " I accept the " (str (terms-links-html :build)))))
                               (:div :class "pl-row" :|data-show| "$agentmode != 'own'"
                                     (:button :class "pl-build"
-                                             :|data-on:click| (the (datastar-action :build :options "{filterSignals: {include: /^(prompt|turnstile|owner|wallet|kind|model|closedPick)$/}}"))
+                                             :|data-on:click| (the (datastar-action :build :options "{filterSignals: {include: /^(prompt|turnstile|owner|wallet|kind|model|closedPick|tagree)$/}}"))
                                              :|data-indicator:sending| ""
-                                             ;; with a human check, a build waits for its token
-                                             :|data-attr:disabled| (format nil "$busy || $sending || !$prompt.trim()~@[ || !$turnstile~]"
-                                                                           *turnstile-site-key*)
+                                             ;; with a human check, a build waits for its token;
+                                             ;; with a clickwrap, a first build for the tick
+                                             :|data-attr:disabled| (format nil "$busy || $sending || !$prompt.trim()~@[ || !$turnstile~]~:[~; || ($termsneed && !$tagree)~]"
+                                                                           *turnstile-site-key* (terms-required? :build))
                                              "Build")
                                     (:span :class "pl-busy" :|data-show| "$busy" "the agent is working..."))
                               ;; a file for the agent to build from (uploads.lisp):
@@ -1242,9 +1255,14 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              "What it has taken so far"))
                                      (:p :class "pl-line"
                                          "Keep a copy of the model file for your own records: the lab holds your code as a file, and the editor shows all of it.")
+                                     ;; the clickwrap (guards.lisp): ticked for every deployment
+                                     (when (terms-required? :deploy)
+                                       (htm (:label :class "pl-pick pl-terms"
+                                                    (:input :type "checkbox" :id "pl-dagree" :|data-bind:dagree| "")
+                                                    " I accept the " (str (terms-links-html :deploy)) " for this deployment")))
                                      (:div :class "pl-row"
                                            (:button :type "button" :class "pl-download"
-                                                    :|data-attr:disabled| "!$dname.trim()"
+                                                    :|data-attr:disabled| (if (terms-required? :deploy) "!$dname.trim() || !$dagree" "!$dname.trim()")
                                                     :|data-on:click| (the (datastar-action :deploy :options "{filterSignals: {include: /^(d[a-z]+|owner|turnstile)$/}}"))
                                                     "Deploy")
                                            (:button :type "button" :class "pl-download" :|data-show| "$deployed"
@@ -1607,7 +1625,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      (escape-string-minimal-plus-quotes
                                       (format nil "~@[confirm(~a) && ~](($cact = '~a'), ~a)"
                                               (and confirm (js-string-literal confirm)) what
-                                              (the (datastar-action :closed-decide :options "{filterSignals: {include: /^(cact|cemail|owner)$/}}")))))))
+                                              (the (datastar-action :closed-decide :options "{filterSignals: {include: /^(cact|cemail|cagree|owner)$/}}")))))))
                           (with-lhtml-string ()
                             (:div :class "pl-card pl-closed-work"
                                   (:h2 "Closed work")
@@ -1629,10 +1647,16 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                               (:a :href "https://genworks.com/royalties/" :target "_blank" :rel "noopener" "genworks.com/royalties/")
                                               " -- a $0 quarter is fine -- or a Genworks GDL commercial license.  Nothing else to sign.")
                                           (:div :class "pl-declare" :|data-ignore-morph| ""
+                                                ;; the clickwrap (guards.lisp): the texts, not a promise
+                                                (when (terms-required? :declare)
+                                                  (htm (:label :class "pl-pick pl-terms"
+                                                               (:input :type "checkbox" :id "pl-cagree" :|data-bind:cagree| "")
+                                                               " I accept the " (str (terms-links-html :declare)))))
                                                 (:div :class "pl-row"
                                                       (:input :type "email" :maxlength "200" :|data-bind:cemail| ""
                                                               :placeholder "Your address (optional)")
                                                       (:button :type "button" :class "pl-download"
+                                                               :|data-attr:disabled| (if (terms-required? :declare) "!$cagree" "false")
                                                                :|data-on:click| (funcall act "declare" nil)
                                                                "I will host or distribute it myself")))
                                           (:div :class "pl-row"
@@ -1958,16 +1982,22 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
              (the (tell-error! "Your own agent can build here under an author key: get one on this page first.")))
             ((and (the session) (session-busy? (the session)))
              (the (tell-error! "The lab's agent is still working on this session; switch when it has finished.")))
+            ;; the clickwrap (guards.lisp): the texts accepted before the agent builds
+            ((and (terms-required? :build) (not (eq (gethash "tagree" signals) t))
+                  (not (and (the session) (session-accepted? (the session) :build))))
+             (the (tell-error! (terms-refusal :build))))
             ((the (own-session! address wallet (eq (gethash "closedPick" signals) t)))
              (let ((session (the session)))
                (when new?
                  (let ((kind (parse-kind (gethash "kind" signals))))
                    (when kind (ignore-errors (set-session-kind! session kind)))))
+               (when (and (terms-required? :build) (not (session-accepted? session :build)))
+                 (accept-terms! :build :session session :address address :via "sheet, own agent"))
                (set-own-agent! session t)
                (log-event session :note "This session is built by its author's own agent over MCP; the lab calls no AI model for it.")
                (save-session! session)
                (the (set-slot! :revision (1+ (the revision))))
-               (sheet-send! self (datastar-signals-event "{\"agentmode\": \"own\", \"ownagent\": true, \"error\": \"\"}")))))))
+               (sheet-send! self (datastar-signals-event "{\"agentmode\": \"own\", \"ownagent\": true, \"termsneed\": false, \"error\": \"\"}")))))))
 
    (mcp-token-new
     (signals)
@@ -2004,7 +2034,11 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
           (the (tell-error! "This is no closed work of yours."))
           (multiple-value-bind (notice reason)
               (decide-closed-work! (session-id session) (the owner-key) action
-                                   :email (let ((e (gethash "cemail" signals))) (and (stringp e) (string-trim " " e))))
+                                   :email (let ((e (gethash "cemail" signals))) (and (stringp e) (string-trim " " e)))
+                                   ;; the clickwrap's tick, at a declaration
+                                   :accepted (eq (gethash "cagree" signals) t))
+            (when (and notice (equal action "declare"))
+              (accept-terms! :declare :session session :address (client-address *datastar-request*) :via "sheet"))
             (cond ((null notice) (the (tell-error! reason)))
                   ((equal action "delete")
                    ;; nothing is left to show: back to the lab's front door
@@ -2086,6 +2120,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
           (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
       (cond ((and (the session) (not (the owner?)))
              (the (tell-error! "This session is someone else's; start your own to build.")))
+            ;; the clickwrap (guards.lisp), before a session is opened for nothing
+            ((and (terms-required? :build) (not (eq (gethash "tagree" signals) t))
+                  (not (and (the session) (session-accepted? (the session) :build))))
+             (the (tell-error! (terms-refusal :build))))
             ((the (own-session! address (gethash "wallet" signals) (eq (gethash "closedPick" signals) t)))
              (multiple-value-bind (started reason response route)
                  (begin-prompt! (the session) prompt address token
@@ -2094,13 +2132,17 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                 ;; the switch: a model or a web app (kinds.lisp)
                                 :kind (gethash "kind" signals)
                                 ;; and the model it builds with (agent.lisp)
-                                :model (gethash "model" signals))
+                                :model (gethash "model" signals)
+                                ;; the clickwrap's tick, logged as the prompt starts
+                                :accepted (eq (gethash "tagree" signals) t) :via "sheet")
                (declare (ignore response))
                (cond (started
                       (the (set-slot! :shown-ai-model (session-model (the session))))
                       (sheet-send! self (datastar-signals-event
-                                         (format nil "{\"error\": \"\", \"prompt\": \"\", \"modelnow\": ~a}"
-                                                 (js-string-literal (session-model (the session)))))))
+                                         (format nil "{\"error\": \"\", \"prompt\": \"\", \"modelnow\": ~a, \"termsneed\": ~a}"
+                                                 (js-string-literal (session-model (the session)))
+                                                 (json-boolean (and (terms-required? :build)
+                                                                    (not (session-accepted? (the session) :build))))))))
                      ;; the request wants the sibling lab's engine
                      ;; (routing.lisp): the browser goes there, the prompt
                      ;; and the reason with it
@@ -2135,11 +2177,15 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      :pot-percent (let ((pot (gethash "dpot" signals)))
                                                     (cond ((realp pot) pot)
                                                           ((stringp pot) (ignore-errors (parse-integer pot :junk-allowed t)))))
-                                     :balance? (eq (gethash "dbalance" signals) t))
+                                     :balance? (eq (gethash "dbalance" signals) t)
+                                     ;; the clickwrap's tick, for this deployment
+                                     :accepted (eq (gethash "dagree" signals) t))
+                  (when record
+                    (accept-terms! :deploy :session session :address address :via "sheet"))
                   (if record
                       (sheet-send! self (datastar-signals-event
                                          (with-output-to-string (s)
-                                           (yason:encode (h "error" "" "monetize" 'yason:false
+                                           (yason:encode (h "error" "" "monetize" 'yason:false "dagree" 'yason:false
                                                             "deployed" (deployment-url (gethash "name" record))
                                                             "notice" (format nil "Deployed at ~a." (deployment-url (gethash "name" record))))
                                                          s))))
@@ -2511,6 +2557,18 @@ link to it (a session or an archive entry in its query) comes to the sheet."
                 (format nil "~a?~a" *url-prefix* (net.aserve:query-to-form-urlencoded query))
                 *url-prefix*))
       (net.aserve:with-http-body (req ent)))))
+
+(defun terms-links-html (scope)
+  "The clickwrap's texts at SCOPE (guards.lisp) as links for a checkbox's
+label, each with its version and SHA-256 under the pointer."
+  (format nil "~{~a~#[~; and the ~:;, the ~]~}"
+          (mapcar #'(lambda (doc)
+                      (format nil "<a href=\"~a\" target=\"_blank\" rel=\"noopener\" title=\"version ~a, SHA-256 ~a\">~a</a>"
+                              (escape-string-minimal-plus-quotes (terms-url doc))
+                              (escape-string-minimal-plus-quotes (getf doc :version))
+                              (getf doc :sha256)
+                              (escape-string-minimal-plus-quotes (getf doc :title))))
+                  (terms-set scope))))
 
 (defun publish-lab-sheet! (&key host)
   "THE PAGE: publish the sheet at <prefix>, and at <prefix>/sheet, its

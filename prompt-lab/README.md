@@ -267,6 +267,16 @@ and the key in an `X-Prompt-Lab-Owner` header starts a build; `GET
 <prefix>/api/state?session=...` follows it: the log, the model's
 source, the viewer's address.
 
+Where an instance asks visitors to accept its terms before building
+(`*terms-root*` in `source/guards.lisp`: a directory of texts, each
+`<id>.md` with a `Version:` first line), a session's first prompt
+carries `"accept_terms": true`, as does every `POST
+<prefix>/api/deploy`; the texts are at `<prefix>/terms/<id>`, and the
+config door names them with their versions and SHA-256 hashes.  The
+same goes for an external agent's first prompt (`<prefix>/api/agent`,
+`--accept-terms` in the driver below), once per author key and
+version.  Read them before you accept.
+
 Where an instance puts a human check in front of the prompt door, a
 prompt that carries no check token is taken on a small daily
 allowance -- so many from one address, so many from all together

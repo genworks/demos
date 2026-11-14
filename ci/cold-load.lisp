@@ -686,6 +686,130 @@ loaded) its page too."
                        (declare (ignore body))
                        (unless (eql status 404) (error "a stranger's source download answered ~a" status)))
                      t)))
+          ;; THE CLICKWRAP (ruling 94, guards.lisp): versioned texts with their
+          ;; hashes; Build, the own agent, an external agent, Deploy and Declare
+          ;; each wait for the tick; the acceptance log is chained, names no
+          ;; owner key and is kept out of the archive
+          (let* ((root (merge-pathnames "ci-terms/" (uiop:temporary-directory)))
+                 (log-root (merge-pathnames "ci-acceptances/" (uiop:temporary-directory)))
+                 (saved (mapcar #'(lambda (name) (cons name (symbol-value (lab name))))
+                                '(#:*terms-root* #:*terms-log-root* #:*external-agent?* #:*closed-source?*
+                                  #:*deployments?* #:*free-lab?*)))
+                 (fresh (lambda ()
+                          (setf (symbol-value (lab '#:*terms-log-head*)) nil
+                                (symbol-value (lab '#:*key-acceptances*)) nil)
+                          (clrhash (symbol-value (lab '#:*terms-cache*))))))
+            (ensure-directories-exist root)
+            (uiop:delete-directory-tree log-root :validate t :if-does-not-exist :ignore)
+            (with-open-file (out (merge-pathnames "terms.md" root) :direction :output :if-exists :supersede)
+              (format out "Version: ci-1~%~%The terms, for the smoke run.~%"))
+            (with-open-file (out (merge-pathnames "author-agreement.md" root) :direction :output :if-exists :supersede)
+              (format out "Version: ci-1~%~%The author agreement, for the smoke run.~%"))
+            (setf (symbol-value (lab '#:*terms-root*)) (namestring root)
+                  (symbol-value (lab '#:*terms-log-root*)) (namestring log-root)
+                  (symbol-value (lab '#:*external-agent?*)) t
+                  (symbol-value (lab '#:*closed-source?*)) t
+                  (symbol-value (lab '#:*deployments?*)) t
+                  (symbol-value (lab '#:*free-lab?*)) nil)
+            (funcall fresh)
+            (unwind-protect
+                 (smoke "prompt-lab clickwrap: versioned texts, the tick at Build, agent, Deploy and Declare, the log"
+                        (lambda ()
+                          (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args))
+                                 (refused? (reason) (search "First accept" (or reason ""))))
+                            (let* ((build (pl :terms-set :build))
+                                   (terms (find "terms" build :key (lambda (d) (getf d :id)) :test #'equal)))
+                              ;; the texts: the root's, and the lab's own notice beside them
+                              (unless (and terms (find "open-source" build :key (lambda (d) (getf d :id)) :test #'equal)
+                                           (equal (getf terms :version) "ci-1")
+                                           (equal (getf terms :sha256)
+                                                  (pl :watch-sha256-hex (uiop:read-file-string (merge-pathnames "terms.md" root)))))
+                                (error "the build texts are not versioned and hashed: ~s" build))
+                              (unless (search "The terms, for the smoke run" (http :get (format nil "~a/terms/terms" prefix)))
+                                (error "the terms door does not answer the text"))
+                              (unless (eql 404 (nth-value 1 (http :get (format nil "~a/terms/nothing" prefix))))
+                                (error "an unknown text was answered"))
+                              (unless (gethash "terms" (json-of :get (door "config")))
+                                (error "the config door does not name the texts"))
+                              (unless (search "pl-tagree" (http :get prefix))
+                                (error "the page asks for no tick before a build")))
+                            (let* ((s (pl :open-session! "10.9.8.6" nil))
+                                   (closed (pl :open-session! "10.9.8.6" nil :closed? t))
+                                   (owner (list (cons "X-Prompt-Lab-Owner" (pl :session-owner s))))
+                                   (id (pl :session-id s)))
+                              (unwind-protect
+                                   (progn
+                                     ;; BUILD: refused without the tick, before anything costs
+                                     (unless (refused? (nth-value 1 (pl :begin-prompt! s "a box" "10.9.8.6" nil :route? nil)))
+                                       (error "a first build was let through without the tick"))
+                                     (unless (eql 403 (nth-value 1 (http :post (door "prompt") :headers owner
+                                                                         :json (table "session" id "prompt" "a box"))))
+                                       (error "the prompt door let a first build through without the tick"))
+                                     ;; THE OWN AGENT'S MCP DOOR: refused until accepted
+                                     (pl :set-own-agent! s t)
+                                     (flet ((ping () (nth-value 1 (http :post (format nil "~a/mcp?session=~a" prefix id) :headers owner
+                                                                        :json (table "jsonrpc" "2.0" "id" 1 "method" "ping")))))
+                                       (unless (eql 403 (ping)) (error "the MCP door served a session whose terms were not accepted"))
+                                       ;; AN EXTERNAL AGENT: accept_terms with the prompt
+                                       (pl :set-own-agent! s nil)
+                                       (unless (eql 403 (nth-value 1 (http :post (door "agent") :headers owner
+                                                                           :json (table "event" "prompt" "session" id "text" "A plate."))))
+                                         (error "the agent door took a first prompt without accept_terms"))
+                                       (json-of :post (door "agent") :headers owner
+                                                :json (table "event" "prompt" "session" id "text" "A plate." "accept_terms" t))
+                                       (json-of :post (door "agent") :headers owner
+                                                :json (table "event" "stopped" "session" id "text" "Only a test."))
+                                       (unless (pl :session-accepted? s :build) (error "the agent door's acceptance was not noted"))
+                                       (unless (eql 200 (ping)) (error "the MCP door refused an accepted session")))
+                                     ;; accepted, the build goes on to the next check (busy here)
+                                     (funcall (fdefinition (list 'setf (find-symbol "SESSION-BUSY?" :prompt-lab))) t s)
+                                     (when (refused? (nth-value 1 (pl :begin-prompt! s "a box" "10.9.8.6" nil :route? nil)))
+                                       (error "an accepted session was still asked to accept"))
+                                     (funcall (fdefinition (list 'setf (find-symbol "SESSION-BUSY?" :prompt-lab))) nil s)
+                                     ;; a new version of a text asks again
+                                     (with-open-file (out (merge-pathnames "terms.md" root) :direction :output :if-exists :supersede)
+                                       (format out "Version: ci-2~%~%The terms, changed.~%"))
+                                     (clrhash (symbol-value (lab '#:*terms-cache*)))
+                                     (when (pl :session-accepted? s :build) (error "a changed text was taken as accepted"))
+                                     ;; DEPLOY: every deployment waits for the tick
+                                     (unless (refused? (nth-value 1 (pl :deploy-session! s :name "ci-terms")))
+                                       (error "a deployment went ahead without the tick"))
+                                     (when (refused? (nth-value 1 (pl :deploy-session! s :name "ci-terms" :accepted t)))
+                                       (error "a ticked deployment was still refused for the terms"))
+                                     ;; DECLARE: the tick accepts the texts, and is asked for
+                                     (let ((cid (pl :session-id closed)) (ckey (pl :session-owner closed)))
+                                       (unless (refused? (nth-value 1 (pl :decide-closed-work! cid ckey "declare")))
+                                         (error "a declaration went ahead without the tick"))
+                                       (unless (pl :decide-closed-work! cid ckey "declare" :accepted t)
+                                         (error "a ticked declaration was refused"))
+                                       (pl :accept-terms! :declare :session closed :address "10.9.8.6" :via "ci"))
+                                     ;; THE LOG: chained, the texts' versions and hashes, no owner key, not in the archive
+                                     (let* ((file (pl :terms-log-file))
+                                            (text (uiop:read-file-string file)))
+                                       (unless (pl :terms-log-verify file) (error "the acceptance log's chain does not verify"))
+                                       (unless (and (search "\"scope\":\"build\"" text) (search "\"scope\":\"declare\"" text)
+                                                    (search "ci-1" text) (search "agent door" text))
+                                         (error "the log does not record the acceptances"))
+                                       (when (or (search (pl :session-owner s) text) (search (pl :session-owner closed) text))
+                                         (error "the log holds an owner key"))
+                                       (let ((archive (symbol-value (lab '#:*archive-root*))))
+                                         (when (and archive (search (namestring archive) (namestring file)))
+                                           (error "the log is in the archive")))
+                                       ;; a line changed afterwards breaks the chain
+                                       (let ((copy (merge-pathnames "tampered.jsonl" log-root)))
+                                         (with-open-file (out copy :direction :output :if-exists :supersede)
+                                           (write-string (uiop:frob-substrings text '("10.9.8.6") "10.9.8.7") out))
+                                         (when (pl :terms-log-verify copy) (error "a tampered log verified"))))
+                                     t)
+                                (ignore-errors (pl :delete-session s))
+                                (ignore-errors (pl :decide-closed-work! (pl :session-id closed) (pl :session-owner closed) "delete"))
+                                (ignore-errors (pl :delete-session closed))
+                                ;; the two sessions, the prompt and the stop joined the funnel's tally: given back
+                                (pl :funnel-count! "sessions" -2)
+                                (pl :funnel-count! "prompts" -1)
+                                (pl :funnel-count! "builds-stopped" -1))))))
+              (dolist (pair saved) (setf (symbol-value (lab (car pair))) (cdr pair)))
+              (funcall fresh)))
           ;; CLOSED WORK in a free lab (closed.lisp): an author key may close
           ;; a work, a keyless visitor may not; thirty days from its opening;
           ;; a declaration keeps it closed; an undecided one is opened by the

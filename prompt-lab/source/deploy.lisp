@@ -101,10 +101,11 @@ the front does not answer."
                 records)
               (cdr kept))))))
 
-(defun deploy-through-front! (session &key name title blurb payee closed? pot-percent balance? free?)
+(defun deploy-through-front! (session &key name title blurb payee closed? pot-percent balance? free? accepted)
   "Hand what SESSION built to the private front as deployment NAME.  The
-front writes the terms itself; this sends the author's choices and the
-model file.  Values: the record the front kept, or nil and the reason."
+front writes the terms itself; this sends the author's choices, the model
+file and ACCEPTED, the texts the author ticked (terms-state), which the
+front logs.  Values: the record the front kept, or nil and the reason."
   (multiple-value-bind (answer status)
       (ignore-errors
        (front-post "deploy" (h "name" name "title" (or title "") "blurb" (or blurb "") "payee" payee
@@ -116,6 +117,7 @@ model file.  Values: the record the front kept, or nil and the reason."
                                "kind" (kind-name (session-kind session))
                                "session" (session-id session)
                                "owner" (session-owner session)
+                               "accepted_terms" (or accepted (vector))
                                "model" (model-body session))))
     (cond ((and (eql status 200) answer (hash-table-p (gethash "deployment" answer)))
            (front-deployments :fresh? t)
@@ -279,7 +281,7 @@ with a price, and for a model a download that toll stands on."
 nil when that one is free."
   (monocle:record-file-price record format))
 
-(defun deploy-session! (session &key name title blurb payee pot-percent balance?)
+(defun deploy-session! (session &key name title blurb payee pot-percent balance? accepted)
   "Deploy what SESSION built as NAME.  Values: the record, or nil and the
 reason.  It must have a monetization story (monetizable?).  Its source is
 closed when the session was opened closed-source, else open.  POT-PERCENT
@@ -288,7 +290,10 @@ the lab's community pot.  BALANCE? switches on a prepaid balance per
 visitor for the app's tolls (the purse).  With the :stripe provider PAYEE must have a
 Stripe account of its own, onboarded through the gate (author-account):
 its id is kept in the record as connect_account.  Deploying again from
-the same session under the same name replaces the copy and the terms."
+the same session under the same name replaces the copy and the terms.
+Where the lab asks its texts to be accepted at a deployment (guards.lisp,
+THE CLICKWRAP), every deployment waits for ACCEPTED; the caller logs it,
+and a private session's front is sent the texts accepted, to log."
   (bt:with-lock-held (*deploy-lock*)
     (let* ((closed? (session-closed? session))
            (name (and (stringp name) (string-downcase (string-trim " " name))))
@@ -315,6 +320,9 @@ the same session under the same name replaces the copy and the terms."
                 account-problem why)))
       (cond
         ((not *deployments?*) (values nil "This lab deploys nothing."))
+        ;; the clickwrap: the texts accepted at every deployment
+        ((and (not accepted) (terms-required? :deploy))
+         (values nil (terms-refusal :deploy)))
         ((not (and symbol (find-class symbol nil)))
          (values nil (format nil "There is nothing to deploy yet: build a ~:[model~;web app~] first." app?)))
         ((and closed? (not (monetizable? session)))
@@ -346,7 +354,7 @@ the same session under the same name replaces the copy and the terms."
          (multiple-value-bind (saved reason)
              (deploy-through-front! session :name name :title title :blurb blurb :payee payee
                                             :closed? closed? :pot-percent pot-percent :balance? balance?
-                                            :free? free?)
+                                            :free? free? :accepted (and accepted (terms-state :deploy)))
            (if (null saved)
                (values nil reason)
                (progn
@@ -1026,8 +1034,9 @@ runtime.  Test payments are left out unless TESTS?."
 
 (defun deploy-door (req ent)
   "POST <prefix>/api/deploy {session, name, payee, title?, blurb?,
-pot_percent?, turnstile?}: the session's owner deploys what it built, once it charges
-for something (monetizable?); answers the deployment.  Its source is
+pot_percent?, turnstile?, accept_terms?}: the session's owner deploys what it built, once it charges
+for something (monetizable?); answers the deployment.  Where the lab asks
+its texts to be accepted (guards.lisp), accept_terms: true accepts them.  Its source is
 closed when the session was opened closed-source.  Where a human check
 stands it wants its token."
   (let* ((json (request-json req))
@@ -1045,9 +1054,12 @@ stands it wants its token."
                                         :blurb (gethash "blurb" json)
                                         :payee (gethash "payee" json)
                                         :pot-percent (gethash "pot_percent" json)
-                                        :balance? (eq (gethash "balance" json) t))
+                                        :balance? (eq (gethash "balance" json) t)
+                                        :accepted (eq (gethash "accept_terms" json) t))
                      (if record
-                         (respond-json req ent (deployment-state record :owner? t))
+                         (progn
+                           (accept-terms! :deploy :session session :address (client-address req) :via "deploy door")
+                           (respond-json req ent (deployment-state record :owner? t)))
                          (refuse req ent "~a" reason)))))))))
 
 (defun undeploy-door (req ent)

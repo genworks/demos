@@ -259,6 +259,11 @@ private session, into the private deployed root.  Answers {deployment} or
     (cond
           ((not (private-deploys?)) (refuse req ent net.aserve:*response-not-found* "No private deployments here."))
           ((null request) (refuse req ent net.aserve:*response-forbidden* "No such session."))
+          ;; the clickwrap: the texts the author ticked in their session, sent
+          ;; with the deployment, logged here where the books are kept
+          ((and (terms-required? :deploy)
+                (not (plusp (length (gethash "accepted_terms" json)))))
+           (refuse req ent net.aserve:*response-forbidden* "~a" (terms-refusal :deploy)))
           ;; a monetizing author deploys anything; a trusted one, open work
           ;; that charges nothing, hosted free (the user's ruling 50)
           ((let ((standing (or (ignore-errors (gate-post "author" (h "wallet" wallet))) (h))))
@@ -325,6 +330,12 @@ private session, into the private deployed root.  Answers {deployment} or
                         (monocle:save-record! (lab-house) record)
                         ;; the terms just written, at the gate: the VM that will serve it cannot steer them
                         (register-deployment! name)
+                        (let ((accepted (coerce (gethash "accepted_terms" json) 'list)))
+                          (when (every #'hash-table-p accepted)
+                            (record-acceptance! :deploy accepted
+                                                :session (and (stringp session-id) (clip-line session-id 64))
+                                                :wallet wallet :owner (gethash "owner" json)
+                                                :address (client-address req) :via "private front")))
                         (respond-json req ent (h "deployment" (private-deployment-row (deployment-record name)))))))))))))))
 
 (defun private-vm-undeploy-door (req ent)

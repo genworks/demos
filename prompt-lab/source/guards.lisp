@@ -402,3 +402,254 @@ lab just sends the visitor on."
           ;; a visit with no password (another door sending the visitor
           ;; here with ?next=) gets the form; a wrong one, the form again
           (t (unlock-page req ent :wrong (and password t) :next next)))))
+
+
+;;
+;; THE CLICKWRAP.  The texts a person accepts with a tick: at a
+;; session's first Build (or when their own agent is connected, or an
+;; external agent's first prompt under a key), at every Deploy and at a
+;; closed work's Declare.  Each text is a file, versioned by its first
+;; line and fingerprinted by its SHA-256, both recorded with the
+;; acceptance in an append-only log -- one JSON line an acceptance, each
+;; chained to the line before by hash -- kept beside the workspace,
+;; never in the archive.  The log names the author key, the session, a
+;; fingerprint of the owner key (never the key), the address and the
+;; texts; the page shows only the texts.
+;;
+
+(defparameter *terms-root* nil
+  "String or nil.  The directory holding the texts accepted by clickwrap,
+each as <id>.md whose first line reads `Version: <version>'.  Nil: no
+clickwrap -- nothing is asked and nothing logged.")
+
+(defparameter *terms-documents*
+  '((:id "terms" :title "Terms of Service" :at (:build :deploy :declare))
+    (:id "open-source" :title "open-source notice" :at (:build))
+    (:id "author-agreement" :title "Author Agreement" :at (:deploy :declare)))
+  "The texts and the moments each is accepted at: :build, :deploy,
+:declare.  A text with no file is left out of what is asked.")
+
+(defparameter *terms-default-directory*
+  ;; the SOURCE file's place, read at compile time (as *static-directory*)
+  (let ((here #.(or *compile-file-truename* *load-truename*)))
+    (make-pathname :name nil :type nil :version nil
+                   :directory (append (butlast (pathname-directory here)) (list "terms"))
+                   :defaults here))
+  "Where a text the root lacks is looked for: the lab's own open-source
+notice ships here.")
+
+(defparameter *terms-log-root* nil
+  "String or nil.  The acceptance log's directory; nil is
+prompt-lab-acceptances/ beside the workspace root.  Never the archive.")
+
+(defvar *terms-lock* (bt:make-lock "prompt-lab terms"))
+
+(defvar *terms-cache* (make-hash-table :test #'equal)
+  "Text id -> its plist, kept while its file's date stands.")
+
+(defvar *terms-log-head* nil
+  "The hash of the acceptance log's last line, read at its first write.")
+
+(defvar *key-acceptances* nil
+  "(author-key scope) -> what that key last accepted at that scope (a
+terms-stamp), read from the log when first asked.")
+
+(defun clickwrap? () (and *terms-root* t))
+
+(defun terms-text-file (id)
+  (let ((name (format nil "~a.md" id)))
+    (or (and *terms-root* (probe-file (merge-pathnames name (uiop:ensure-directory-pathname *terms-root*))))
+        (probe-file (merge-pathnames name *terms-default-directory*)))))
+
+(defun terms-document (id)
+  "Text ID as it stands: a plist (:id :title :version :sha256 :file :date),
+or nil when it has no file."
+  (let* ((file (terms-text-file id))
+         (date (and file (ignore-errors (file-write-date file)))))
+    (when date
+      (let ((cached (bt:with-lock-held (*terms-lock*) (gethash id *terms-cache*))))
+        (if (and cached (equal (getf cached :file) (namestring file)) (eql (getf cached :date) date))
+            cached
+            (let* ((text (uiop:read-file-string file :external-format :utf-8))
+                   (first (subseq text 0 (or (position #\Newline text) (length text))))
+                   (version (if (eql 0 (search "Version:" first))
+                                (string-trim '(#\Space #\Tab #\Return) (subseq first 8))
+                                (utc-day date)))
+                   (spec (find id *terms-documents* :key #'(lambda (d) (getf d :id)) :test #'equal))
+                   (doc (list :id id :title (or (getf spec :title) id) :version version
+                              :sha256 (watch-sha256-hex text) :file (namestring file) :date date)))
+              (bt:with-lock-held (*terms-lock*) (setf (gethash id *terms-cache*) doc))
+              doc))))))
+
+(defun terms-set (scope)
+  "The texts accepted at SCOPE (:build :deploy :declare) as they stand,
+plists in the order of *terms-documents*; nil without a clickwrap."
+  (when (clickwrap?)
+    (loop for spec in *terms-documents*
+          for doc = (and (member scope (getf spec :at)) (terms-document (getf spec :id)))
+          when doc collect doc)))
+
+(defun terms-required? (scope) (and (terms-set scope) t))
+
+(defun terms-url (doc) (format nil "~a/terms/~a" *url-prefix* (getf doc :id)))
+
+(defun acceptance-document (doc)
+  "DOC, a text's plist or the object a lab sent, as {id, version, sha256}."
+  (if (hash-table-p doc)
+      (h "id" (gethash "id" doc) "version" (gethash "version" doc) "sha256" (gethash "sha256" doc))
+      (h "id" (getf doc :id) "version" (getf doc :version) "sha256" (getf doc :sha256))))
+
+(defun terms-stamp (documents)
+  "One string for what accepting DOCUMENTS means: each id, version and hash."
+  (format nil "~{~a~^,~}"
+          (mapcar #'(lambda (doc)
+                      (let ((doc (acceptance-document doc)))
+                        (format nil "~a@~a:~a" (gethash "id" doc) (gethash "version" doc) (gethash "sha256" doc))))
+                  documents)))
+
+(defun terms-state (scope)
+  "SCOPE's texts for a page or a script: [{id, title, version, sha256, url}]."
+  (coerce (mapcar #'(lambda (doc)
+                      (h "id" (getf doc :id) "title" (getf doc :title) "version" (getf doc :version)
+                         "sha256" (getf doc :sha256) "url" (terms-url doc)))
+                  (terms-set scope))
+          'vector))
+
+(defun terms-titles (scope)
+  (format nil "~{~a~#[~; and the ~:;, the ~]~}" (mapcar #'(lambda (doc) (getf doc :title)) (terms-set scope))))
+
+(defun terms-refusal (scope)
+  "Why SCOPE's act waits: its texts are not accepted yet."
+  (format nil "First accept the ~a (~{~a~^, ~}): tick the box, or from a script send accept_terms: true."
+          (terms-titles scope) (mapcar #'terms-url (terms-set scope))))
+
+(defun terms-log-file ()
+  (merge-pathnames (format nil "acceptances-~a.jsonl" (engine-name))
+                   (uiop:ensure-directory-pathname
+                    (or *terms-log-root*
+                        (merge-pathnames "prompt-lab-acceptances/"
+                                         (uiop:pathname-parent-directory-pathname (pathname *workspace-root*)))))))
+
+(defun terms-log-lines (file)
+  (ignore-errors
+   (with-open-file (in file :external-format :utf-8 :if-does-not-exist nil)
+     (when in
+       (loop for line = (read-line in nil) while line
+             when (plusp (length line)) collect line)))))
+
+(defun terms-log-head (file)
+  (or *terms-log-head*
+      (setf *terms-log-head*
+            (or (let ((last (car (last (terms-log-lines file)))))
+                  (and last (let ((record (ignore-errors (yason:parse last))))
+                              (and (hash-table-p record) (gethash "h" record)))))
+                ""))))
+
+(defun key-acceptances ()
+  (or *key-acceptances*
+      (let ((table (make-hash-table :test #'equal)))
+        (dolist (line (terms-log-lines (terms-log-file)))
+          (let ((record (ignore-errors (yason:parse line))))
+            (when (and (hash-table-p record) (stringp (gethash "author" record)))
+              (setf (gethash (list (gethash "author" record) (gethash "scope" record)) table)
+                    (terms-stamp (coerce (gethash "documents" record) 'list))))))
+        (setf *key-acceptances* table))))
+
+(defun record-acceptance! (scope documents &key session wallet owner address via)
+  "Append one acceptance of DOCUMENTS (texts' plists, or the objects a lab
+sent) at SCOPE to the log: who (SESSION's id, the author key WALLET, a
+fingerprint of the owner key OWNER, ADDRESS), when, through VIA, and each
+text's id, version and SHA-256.  Answers the line's hash."
+  (when documents
+    (bt:with-lock-held (*terms-lock*)
+      (let* ((file (terms-log-file))
+             (prev (terms-log-head file))
+             (scope (string-downcase scope))
+             (documents (mapcar #'acceptance-document documents))
+             (text (with-output-to-string (s)
+                     (yason:encode (h "time" (utc-time (get-universal-time)) "scope" scope "via" via
+                                      "session" session "author" (and (wallet-id? wallet) wallet)
+                                      "owner" (let ((hash (and (stringp owner) (watch-sha256-hex owner))))
+                                                (and hash (subseq hash 0 16)))
+                                      "address" address
+                                      "documents" (coerce documents 'vector)
+                                      "prev" prev)
+                                   s)))
+             (hash (or (watch-sha256-hex (concatenate 'string prev text)) ""))
+             ;; the hash goes last, so a line less its ,"h":"..." is what was hashed
+             (line (format nil "~a,\"h\":\"~a\"}" (subseq text 0 (1- (length text))) hash)))
+        (ensure-directories-exist file)
+        (with-open-file (out file :direction :output :if-exists :append :if-does-not-exist :create
+                                  :external-format :utf-8)
+          (write-line line out))
+        (setf *terms-log-head* hash)
+        (when (wallet-id? wallet)
+          (setf (gethash (list wallet scope) (key-acceptances)) (terms-stamp documents)))
+        hash))))
+
+(defun terms-log-verify (&optional (file (terms-log-file)))
+  "Walk the acceptance log: (values t lines) when every line hashes to its
+h and names the line before as prev, else nil and the first bad line's number."
+  (let ((prev "") (n 0))
+    (dolist (line (terms-log-lines file) (values t n))
+      (incf n)
+      (let* ((at (search ",\"h\":\"" line :from-end t))
+             (text (and at (concatenate 'string (subseq line 0 at) "}")))
+             (record (ignore-errors (yason:parse line))))
+        (unless (and text (hash-table-p record)
+                     (equal (gethash "prev" record) prev)
+                     (equal (gethash "h" record) (watch-sha256-hex (concatenate 'string prev text))))
+          (return (values nil n)))
+        (setq prev (gethash "h" record))))))
+
+(defun key-accepted? (wallet scope)
+  "Whether author key WALLET has accepted SCOPE's texts as they stand now."
+  (and (wallet-id? wallet) (terms-required? scope)
+       (equal (gethash (list wallet (string-downcase scope)) (key-acceptances))
+              (terms-stamp (terms-set scope)))))
+
+(defun session-terms-file (session)
+  ;; beside mcp-token in the session's directory: never in the archive
+  (merge-pathnames "terms-accepted" (session-directory session)))
+
+(defun session-accepted? (session scope)
+  "Whether SESSION's author has accepted SCOPE's texts as they stand now."
+  (let ((want (format nil "~a ~a" (string-downcase scope) (terms-stamp (terms-set scope)))))
+    (ignore-errors
+     (with-open-file (in (session-terms-file session) :external-format :utf-8 :if-does-not-exist nil)
+       (and in (loop for line = (read-line in nil) while line
+                     thereis (string= (string-right-trim '(#\Return) line) want)))))))
+
+(defun note-session-acceptance! (session scope)
+  (ignore-errors
+   (let ((file (session-terms-file session)))
+     (ensure-directories-exist file)
+     (with-open-file (out file :direction :output :if-exists :append :if-does-not-exist :create
+                               :external-format :utf-8)
+       (format out "~a ~a~%" (string-downcase scope) (terms-stamp (terms-set scope)))))))
+
+(defun accept-terms! (scope &key session wallet address via)
+  "SCOPE's texts as they stand, accepted by SESSION's author (or WALLET)
+from ADDRESS through VIA: logged, and for :build noted on the session.
+Answers the texts, nil without a clickwrap."
+  (let ((documents (terms-set scope)))
+    (when documents
+      (record-acceptance! scope documents
+                          :session (and session (session-id session))
+                          :wallet (or wallet (and session (session-wallet session)))
+                          :owner (and session (session-owner session))
+                          :address address :via via)
+      (when (and session (eq scope :build)) (note-session-acceptance! session scope))
+      documents)))
+
+(defun terms-door (req ent)
+  "GET <prefix>/terms/<id>: a text accepted by clickwrap, as it stands --
+the words the version and hash on the page and in the log are of."
+  (let* ((path (net.uri:uri-path (net.aserve:request-uri req)))
+         (id (subseq path (1+ (or (position #\/ path :from-end t) -1))))
+         (doc (and (clickwrap?)
+                   (find id *terms-documents* :key #'(lambda (d) (getf d :id)) :test #'equal)
+                   (terms-document id))))
+    (if doc
+        (respond-deployment req ent (uiop:read-file-string (getf doc :file) :external-format :utf-8))
+        (respond-deployment req ent "No such text here." :response net.aserve:*response-not-found*))))

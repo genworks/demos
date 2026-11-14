@@ -255,7 +255,10 @@ agent's side of one prompt.  The events:
   text     TEXT is the agent's progress, for the log.
   done     TEXT is the agent's reply; USAGE, when given, is its token
            counts in the Messages API's names.  The session is released.
-  stopped  TEXT says why the agent gave up.  The session is released."
+  stopped  TEXT says why the agent gave up.  The session is released.
+Where the lab asks its texts to be accepted (guards.lisp, THE CLICKWRAP),
+a session's first prompt carries accept_terms: true, unless its author
+key accepted the same versions before."
   (let* ((json (request-json req))
          (event (and json (gethash "event" json)))
          (text (and json (gethash "text" json)))
@@ -281,6 +284,13 @@ agent's side of one prompt.  The events:
                    ((external-over? (if session (session-wallet session) (gethash "wallet" json)) :prompts)
                     (refuse req ent *response-too-many-requests* "This author key has sent its ~a prompts for today; come back tomorrow."
                             *external-prompts-per-key*))
+                   ;; the clickwrap (guards.lisp): accept_terms: true with a
+                   ;; session's first prompt, once per key for each version
+                   ((and (terms-required? :build)
+                         (not (eq (gethash "accept_terms" json) t))
+                         (not (and session (session-accepted? session :build)))
+                         (not (key-accepted? (if session (session-wallet session) (gethash "wallet" json)) :build)))
+                    (refuse req ent net.aserve:*response-forbidden* "~a" (terms-refusal :build)))
                    (t (let* ((opened? (null session))
                              (session (or session
                                           (if (eq *external-agent?* :authors)
@@ -297,6 +307,11 @@ agent's side of one prompt.  The events:
                                (refuse req ent "Still working on the previous request."))
                               (t (let ((kind (parse-kind (gethash "kind" json))))
                                    (when kind (set-session-kind! session kind)))
+                                 ;; accepted now, or by the key before: the session notes it
+                                 (when (and (terms-required? :build) (not (session-accepted? session :build)))
+                                   (if (eq (gethash "accept_terms" json) t)
+                                       (accept-terms! :build :session session :address (client-address req) :via "agent door")
+                                       (note-session-acceptance! session :build)))
                                  (when opened?
                                    (log-event session :note "Session ~a opened for an external agent."
                                               (session-id session))
@@ -436,6 +451,11 @@ one JSON-RPC message; a request is answered in JSON, a notification with
           ((external-over? (session-wallet session) :calls)
            (refuse req ent *response-too-many-requests* "This author key has made its ~a tool calls for today; come back tomorrow."
                    *external-calls-per-key*))
+          ;; the clickwrap (guards.lisp): the session's author accepted the
+          ;; texts when the agent was connected, or under the key before
+          ((and (terms-required? :build) (not (session-accepted? session :build))
+                (not (key-accepted? (session-wallet session) :build)))
+           (refuse req ent net.aserve:*response-forbidden* "~a" (terms-refusal :build)))
           ((not (eq (net.aserve:request-method req) :post))
            (refuse req ent net.aserve:*response-method-not-allowed*
                    "POST one JSON-RPC message here; no stream is offered."))

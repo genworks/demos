@@ -561,7 +561,11 @@ behind this room and the sibling lab on the other engine, if any."
                            ;; the caps on uploaded files, nil where none are taken (uploads.lisp)
                            "uploads" (uploads-state)
                            ;; the community pot, where the gate keeps one
-                           "pot" (pot-state))))
+                           "pot" (pot-state)
+                           ;; the texts accepted by clickwrap, by moment (guards.lisp); null without
+                           "terms" (and (clickwrap?)
+                                        (h "build" (terms-state :build) "deploy" (terms-state :deploy)
+                                           "declare" (terms-state :declare))))))
 
 (defun open-session! (address &optional wallet &key closed?)
   "Open a session for a visitor at ADDRESS, naming WALLET if any; CLOSED?
@@ -595,7 +599,7 @@ has credit or has put more into the pot than it has drawn."
         (save-session! session)
         session)))
 
-(defun begin-prompt! (session prompt address token &key (route? t) kind model)
+(defun begin-prompt! (session prompt address token &key (route? t) kind model accepted (via "prompt door"))
   "Start the agent on PROMPT in SESSION for a visitor at ADDRESS, after
 every check the prompt door makes (the owner's excepted: the caller's).
 TOKEN is the human check's, nil for a script's prompt.  KIND, when it
@@ -606,7 +610,10 @@ on; without it, the model it had.  Values: :started
 and the lane, or nil, the reason and the response to refuse with.  With
 ROUTE?, a session's first prompt that wants the sibling lab's engine is
 not started here (routing.lisp): nil, the reason, a 409 and, a fourth
-value, where it belongs -- a plist of :engine, :reason and :url."
+value, where it belongs -- a plist of :engine, :reason and :url.  Where
+the lab asks its texts to be accepted (guards.lisp, THE CLICKWRAP), a
+session's first build waits for ACCEPTED, the tick (through VIA), which
+is logged when the prompt starts."
   (cond ((not (and (stringp prompt)
                    (plusp (length (string-trim '(#\space #\tab #\newline #\return) prompt)))))
          (values nil "Say what to build." net.aserve:*response-bad-request*))
@@ -642,6 +649,9 @@ value, where it belongs -- a plist of :engine, :reason and :url."
          (values nil (format nil "This address has run its ~a prompts for today without an author key.  Keep your work under an author key to go on, or come back tomorrow."
                              *max-prompts-per-address*)
                  *response-too-many-requests*))
+        ;; the clickwrap: the texts accepted before the session's first build
+        ((and (not accepted) (terms-required? :build) (not (session-accepted? session :build)))
+         (values nil (terms-refusal :build) net.aserve:*response-forbidden*))
         ((session-busy? session)
          (values nil "Still working on the previous request." net.aserve:*response-bad-request*))
         ;; a model the visitor may not pick, or one not answering (agent.lisp)
@@ -670,6 +680,8 @@ value, where it belongs -- a plist of :engine, :reason and :url."
                                              :kind (parse-kind kind))))
                   (values nil "Still working on the previous request." net.aserve:*response-bad-request*))
                  (t (count-address! address :prompts)
+                    (when (and accepted (terms-required? :build) (not (session-accepted? session :build)))
+                      (accept-terms! :build :session session :address address :via via))
                     (when (eq lane :automated)
                       (count-automated! address)
                       (log-event session :note "This prompt came without the human check: an automated one, on the lab's daily allowance for those."))
@@ -943,7 +955,9 @@ prompt in a thread of its own; the page follows along through the state door."
                                 ;; "kind": "app" builds a web app, "model" a model
                                 :kind (gethash "kind" json)
                                 ;; "model": an id from the config door's models
-                                :model (gethash "model" json))
+                                :model (gethash "model" json)
+                                ;; "accept_terms": true accepts the clickwrap's texts
+                                :accepted (eq (gethash "accept_terms" json) t))
                (cond (started
                       (respond-json req ent (h "started" t "automated" (if (eq reason :automated) t 'yason:false))
                                     net.aserve:*response-accepted*))
@@ -1298,6 +1312,9 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
                         :server server :host host :function #'manifest-door)
     (net.aserve:publish :path (format nil "~a/worker" *url-prefix*)
                         :server server :host host :function #'worker-door)
+    ;; the texts accepted by clickwrap (guards.lisp): public, not behind the lock
+    (net.aserve:publish-prefix :prefix (format nil "~a/terms/" *url-prefix*)
+                               :server server :host host :function #'terms-door)
     ;; the way in, when the lab is locked (guards.lisp)
     (net.aserve:publish :path (door-path "unlock") :server server :host host :function #'unlock-door)
     (net.aserve:publish :path (door-path "config") :server server :host host :function (gated #'config-door))
