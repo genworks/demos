@@ -339,7 +339,9 @@ Rules:
 
 ~a"
           *brand*
-          (cond ((and (house-model? session) *house-structure?*)
+          (cond ((and (house-model? session) *house-auto-view*)
+                 " after EVERY change that compiles.  Each change that compiles comes back with a view of the model as built, marked AUTO-VIEW: read it, and fix what it shows before you reply; the visitor sees the model in a live viewer beside your reply")
+                ((and (house-model? session) *house-structure?*)
                  " after EVERY change that compiles, then view_model, and read both closely: the visitor sees the model in a live viewer beside your reply")
                 ((house-model? session)
                  " after EVERY write_model or edit_model that compiles, and read its numbers closely: the visitor sees the model in a live viewer beside your reply")
@@ -942,6 +944,10 @@ the session busy (start-prompt!)."
                                                                (run-tool session name input)))
                                                        (error (condition)
                                                          (values (list (text-result "~a failed: ~a" name (condition-text condition))) t)))
+                                                   ;; the author-view-edit loop (tools.lisp): an edit
+                                                   ;; that compiled shows the house model what it built
+                                                   (unless error?
+                                                     (setq blocks (append blocks (auto-view-blocks session name))))
                                                    (when error?
                                                      (log-event session :tool-error "~a: ~a" name
                                                                 (or (cdr (assoc "text" (first blocks)

@@ -997,9 +997,11 @@ section when it has none."
 (defparameter *view-max-parts* 40
   "Parts view_model describes one by one; a bigger model is summed up by type.")
 
-(defun view-model (session)
+(defun view-model (session &key brief?)
   "The built model in words: every part's type, size and place, what
-touches and overlaps what, what floats, and its symmetry."
+touches and overlaps what, what floats, and its symmetry.  BRIEF? says only
+the envelope, the count, what floats, overlaps or does not compute, and the
+symmetry -- the account appended to an edit by *house-auto-view*."
   (handler-case
       (with-time-limit (*eval-seconds* "view")
         (let* ((model (make-model session))
@@ -1007,7 +1009,9 @@ touches and overlaps what, what floats, and its symmetry."
                (boxes (mapcar #'leaf-box leaves))
                (env (or (ignore-errors (the-object model bounding-box)) (union-box boxes)))
                (n (length leaves))
-               (lines nil))
+               (lines nil)
+               ;; for BRIEF?: what is worth a look, by name
+               (broken nil) (floating nil) (pairs nil))
           (flet ((lo (box axis) (aref (first box) axis))
                  (hi (box axis) (aref (second box) axis))
                  (say (control &rest args) (push (apply #'format nil control args) lines)))
@@ -1017,7 +1021,7 @@ touches and overlaps what, what floats, and its symmetry."
                    (- (hi env 0) (lo env 0)) (- (hi env 1) (lo env 1)) (- (hi env 2) (lo env 2))))
             (cond
               ((zerop n) (say "No parts: MODEL has no leaves to draw."))
-              ((> n *view-max-parts*)
+              ((and (not brief?) (> n *view-max-parts*))
                (say "~d parts, too many to list; by type: ~{~a~^, ~}." n
                     (let ((counts nil))
                       (dolist (leaf leaves) (incf (getf counts (type-of leaf) 0)))
@@ -1025,10 +1029,12 @@ touches and overlaps what, what floats, and its symmetry."
               (t
                (let ((names (mapcar #'leaf-name leaves))
                      (floor-z (and env (lo env 2))))
-                 (say "~d part~:p:" n)
+                 (say "~d part~:p~:[:~;.~]" n brief?)
                  (loop for leaf in leaves for box in boxes for name in names for i from 0
                        do (if (null box)
-                              (say "- ~a (~(~a~)): its geometry does not compute." name (type-of leaf))
+                              (if brief?
+                                  (push name broken)
+                                  (say "- ~a (~(~a~)): its geometry does not compute." name (type-of leaf)))
                               (let ((touching nil) (overlapping nil))
                                 (loop for other in boxes for other-name in names for k from 0
                                       when (and other (/= i k))
@@ -1038,9 +1044,15 @@ touches and overlaps what, what floats, and its symmetry."
                                                  (depth (loop for axis below 3
                                                               minimize (- (min (hi box axis) (hi other axis))
                                                                           (max (lo box axis) (lo other axis))))))
-                                             (cond ((> depth 1) (push other-name overlapping))
+                                             (cond ((> depth 1)
+                                                    (push other-name overlapping)
+                                                    (when (> k i) (push (cons name other-name) pairs)))
                                                    ((<= gap 0.5) (push other-name touching)))))
-                                (say "- ~a (~(~a~)): ~,1f x ~,1f x ~,1f, X ~,1f..~,1f Y ~,1f..~,1f Z ~,1f..~,1f~@[, axis ~a~]~:[~;, on the floor~]~@[; touches ~{~a~^, ~}~]~@[; OVERLAPS ~{~a~^, ~}~]~:[~;; FLOATS: touches nothing, off the floor~]"
+                                (when (and brief? floor-z (null touching) (null overlapping) (> n 1)
+                                           (> (- (lo box 2) floor-z) 0.5))
+                                  (push name floating))
+                                (unless brief?
+                                 (say "- ~a (~(~a~)): ~,1f x ~,1f x ~,1f, X ~,1f..~,1f Y ~,1f..~,1f Z ~,1f..~,1f~@[, axis ~a~]~:[~;, on the floor~]~@[; touches ~{~a~^, ~}~]~@[; OVERLAPS ~{~a~^, ~}~]~:[~;; FLOATS: touches nothing, off the floor~]"
                                      name (type-of leaf)
                                      (- (hi box 0) (lo box 0)) (- (hi box 1) (lo box 1)) (- (hi box 2) (lo box 2))
                                      (lo box 0) (hi box 0) (lo box 1) (hi box 1) (lo box 2) (hi box 2)
@@ -1049,7 +1061,20 @@ touches and overlaps what, what floats, and its symmetry."
                                      (and floor-z (<= (abs (- (lo box 2) floor-z)) 0.5))
                                      (reverse touching) (reverse overlapping)
                                      (and floor-z (null touching) (null overlapping) (> n 1)
-                                          (> (- (lo box 2) floor-z) 0.5))))))
+                                          (> (- (lo box 2) floor-z) 0.5)))))))
+                 (when brief?
+                   (flet ((some-of (items)
+                            (format nil "~{~a~^, ~}~@[ and ~d more~]"
+                                    (subseq items 0 (min 8 (length items)))
+                                    (when (> (length items) 8) (- (length items) 8)))))
+                     (if (or broken floating pairs)
+                         (progn
+                           (when broken (say "Geometry does not compute: ~a." (some-of (reverse broken))))
+                           (when floating (say "FLOATS (touches nothing, off the floor): ~a." (some-of (reverse floating))))
+                           (when pairs (say "OVERLAPS: ~a."
+                                            (some-of (mapcar #'(lambda (p) (format nil "~a with ~a" (car p) (cdr p)))
+                                                             (reverse pairs))))))
+                         (say "Nothing floats, overlaps or fails to compute."))))
                  ;; symmetry: a part with a twin of its type and size, mirrored
                  ;; across the envelope's middle
                  (when env
@@ -1077,6 +1102,39 @@ touches and overlaps what, what floats, and its symmetry."
 
 (defparameter *house-view?* t
   "Boolean.  Whether a house session is offered view_model, its text view.")
+
+(defparameter *house-auto-view* nil
+  "Nil, :text, :render or :look.  The author-view-edit loop: after every edit
+of a house session that compiles, the harness itself shows the house model
+what it built, appended to that edit's result -- the brief view_model
+account (:text), the drawing as an image for a model that sees (:render), or
+the viewer's words on it (:look, look_at_model).  Nothing is appended when
+the model does not build: the edit's own result says why.  Nil: the model
+asks for a view when it chooses, as before.")
+
+(defparameter *auto-view-tools*
+  '("write_model" "edit_model" "set_slot" "add_slot" "remove_slot" "replace_form")
+  "The edits after which *house-auto-view* shows the model.")
+
+(defparameter *auto-view-mark* "AUTO-VIEW, the model as built now:"
+  "The words that open an appended view, which the eval's tally looks for.")
+
+(defun auto-view-blocks (session name)
+  "The view to append to the result of tool NAME, an edit that compiled, in
+a house SESSION under *house-auto-view*; nil when there is none or the model
+does not build."
+  (when (and *house-auto-view* (house-model? session)
+             (member name *auto-view-tools* :test #'string=))
+    (multiple-value-bind (blocks error?)
+        (ignore-errors
+         (case *house-auto-view*
+           (:text (view-model session :brief? t))
+           (:render (if (render-offered?)
+                        (render session :layout "isometric-plus-ortho")
+                        (values nil t)))
+           (:look (look-at-model session))))
+      (unless (or error? (null blocks))
+        (cons (text-result "~a" *auto-view-mark*) blocks)))))
 
 (defun house-tool-definitions ()
   "The structural edit tools and view_model, for a house session."
