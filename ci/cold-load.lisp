@@ -724,6 +724,55 @@ loaded) its page too."
                               (error "the lab ships a mirror table before a mirror exists"))
                             t)
                        (setf (symbol-value (lab '#:*image-commits-files*)) saved)))))
+          ;; THE HOUSE PRIMER (ruling 106, agent.lisp, primers/house-gendl.md):
+          ;; every worked example compiles and builds through write_model and
+          ;; check_model, as the agent's would; a house model's session gets
+          ;; the primer, no render tool and the longer per-call limit
+          (smoke "prompt-lab house primer: every worked example builds; the house session's text, tools and limit"
+                 (lambda ()
+                   (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
+                     (let* ((primer (pl :house-primer-text))
+                            (examples (let ((from (search "### 6. Worked examples" primer)) (found nil))
+                                        (loop for start = (and from (search (format nil "```lisp~%") primer :start2 from))
+                                              while start
+                                              do (let ((end (search (format nil "~%```") primer :start2 (+ start 8))))
+                                                   (push (subseq primer (+ start 8) end) found)
+                                                   (setq from (+ end 4))))
+                                        (nreverse found)))
+                            (sizes '((1200 700 750) (300 90 90) (800 300 1800) (200 200 40))))
+                       (unless (= (length examples) 4) (error "the primer has ~d worked examples, not 4" (length examples)))
+                       (loop for source in examples
+                             for size in sizes
+                             for s = (pl :open-session! "10.9.8.5" nil)
+                             do (unwind-protect
+                                     (multiple-value-bind (blocks error?) (pl :write-model s source)
+                                       (when error? (error "a worked example does not compile: ~s" blocks))
+                                       (let ((check (format nil "~{~a~}" (mapcar (lambda (b) (or (cdr (assoc "text" b :test #'string=)) ""))
+                                                                                  (pl :check-model s :expected-size size)))))
+                                         (format t "~&HOUSE PRIMER EXAMPLE ~s:~%~a~%" size check)
+                                         (when (or (search "rror" check) (not (search "Expected size matched" check)))
+                                           (error "a worked example does not build to its size: ~a" check))))
+                                  (ignore-errors (pl :delete-session s))
+                                  (pl :funnel-count! "sessions" -1)))
+                       ;; the house session: its primer, no render, the longer limit
+                       (let ((s (pl :open-session! "10.9.8.5" nil)))
+                         (unwind-protect
+                              (progn
+                                (pl :set-session-model! s "house-1")
+                                (unless (and (search "### 6. Worked examples" (pl :system-text s))
+                                             (search "after EVERY write_model" (pl :system-text s)))
+                                  (error "a house session's system text lacks the house primer"))
+                                (when (find "render" (coerce (pl :tool-definitions s) 'list)
+                                            :key (lambda (tool) (cdr (assoc "name" tool :test #'string=))) :test #'equal)
+                                  (error "a house session is offered render"))
+                                (unless (eql (pl :call-seconds s) (symbol-value (lab '#:*house-call-seconds*)))
+                                  (error "a house session's calls keep the short limit"))
+                                (pl :set-session-model! s nil)
+                                (when (search "### 6. Worked examples" (pl :system-text s))
+                                  (error "a session on the lab's own model got the house primer"))
+                                t)
+                           (ignore-errors (pl :delete-session s))
+                           (pl :funnel-count! "sessions" -1)))))))
           ;; THE CLICKWRAP (ruling 94, guards.lisp): versioned texts with their
           ;; hashes; Build, the own agent, an external agent and Deploy each wait
           ;; for the tick, Declare for none (ruling 99); the acceptance log is chained, names no

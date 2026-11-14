@@ -513,7 +513,9 @@ and check_app only for a SESSION that builds a web app (kinds.lisp)."
             (setq tools (without name tools)))
           (dolist (name '("list_project" "read_project_file" "write_project_file" "check_profile"))
             (setq tools (without name tools))))
-      (unless (render-offered?) (setq tools (without "render" tools)))
+      ;; a house model reads text only (agent.lisp): no picture to look at
+      (unless (and (render-offered?) (not (house-model? session)))
+        (setq tools (without "render" tools)))
       (unless (search-offered?) (setq tools (without "search_docs" tools)))
       (unless (uploads-offered?)
         (setq tools (without "read_file" (without "list_files" tools))))

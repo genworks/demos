@@ -194,6 +194,43 @@ second were seen on claude-opus-5-5 (2026-10-20), so a reply of
 *max-tokens* needs most of this; the gate's :timeout-seconds must be
 longer still.")
 
+;;
+;; HOUSE MODELS: a model served on the house's own hardware (the gate's
+;; menu marks it :house) decodes far slower than the API and knows far
+;; less Gendl.  It gets a longer per-call limit and a primer of its own
+;; that spells out the grammar (primers/house-gendl.md), chosen by the
+;; session's model.
+;;
+
+(defparameter *house-models* '("house-1")
+  "List of model ids served as house models.")
+
+(defparameter *house-call-seconds* 960
+  "Integer. Seconds one call to a house model may take.  About 36 output
+tokens a second were measured on the first house model (2026-11-14), and
+it thinks at length: a first reply of *max-tokens* needs about 15
+minutes, which 300 seconds cut off with nothing to show.  The gate's
+:timeout-seconds must be longer still.")
+
+(defparameter *house-primer-file*
+  ;; the SOURCE file's place, read at compile time (as *static-directory*)
+  (let ((here #.(or *compile-file-truename* *load-truename*)))
+    (make-pathname :name "house-gendl" :type "md" :version nil
+                   :directory (append (butlast (pathname-directory here)) (list "primers"))
+                   :defaults here))
+  "Pathname. The house models' primer.")
+
+(defun house-model? (&optional session)
+  "Whether SESSION builds with a house model."
+  (and session (member (session-model session) *house-models* :test #'equal) t))
+
+(defun call-seconds (&optional session)
+  "Seconds one call for SESSION may take: longer for a house model."
+  (if (house-model? session) *house-call-seconds* *call-seconds*))
+
+(defun house-primer-text ()
+  (ignore-errors (uiop:read-file-string *house-primer-file* :external-format :utf-8)))
+
 
 ;;
 ;; JSON: the tool layer speaks alists (cl-json style); requests and
@@ -251,7 +288,7 @@ model, the default and what no session at all gets, or a web app."
     (:app (app-system-text))
     ;; the visitor's own project (project.lisp)
     (:project (project-system-text session))
-    (t (model-system-text))))
+    (t (model-system-text session))))
 
 (defun app-system-text ()
   (format nil "~a
@@ -269,7 +306,7 @@ The modelling primer, for an app that shows geometry:
           (if (uploads-offered?) (uploads-note) "")
           (or (primer-text) "")))
 
-(defun model-system-text ()
+(defun model-system-text (&optional session)
   (format nil "You are the modeling agent of the ~a prompt lab.  A visitor describes a design in plain words; you build it as a working, parametric Gendl model in their session, and they watch it appear in a live viewer beside an editor holding the same model file.
 
 How to work:
@@ -291,9 +328,11 @@ Rules:
 
 ~a"
           *brand*
-          (if (render-offered?)
-              ", then render (layout isometric-plus-ortho) and look"
-              " and read its numbers closely: there is no render on this host, and the visitor sees the model in a live viewer beside your reply")
+          (cond ((house-model? session)
+                 " after EVERY write_model or edit_model that compiles, and read its numbers closely: the visitor sees the model in a live viewer beside your reply")
+                ((render-offered?)
+                 ", then render (layout isometric-plus-ortho) and look")
+                (t " and read its numbers closely: there is no render on this host, and the visitor sees the model in a live viewer beside your reply"))
           ;; which engine this room runs (parameters.lisp)
           (engine-note)
           ;; the reference tools (docs.lisp): search only where a ready room is named
@@ -303,7 +342,9 @@ Rules:
           ;; the charging rule: the author's currency, and the lab's unit it is not
           ;; (none in a free public lab)
           *free-lab?* (string-upcase *toll-currency*) (units)
-          (or (primer-text) "")))
+          ;; a house model gets the grammar spelled out, in place of the
+          ;; guide's primer, which assumes a model that knows Gendl
+          (or (and (house-model? session) (house-primer-text)) (primer-text) "")))
 
 (defun uploads-note ()
   "The system prompt's rule for uploaded files, by engine."
@@ -601,7 +642,7 @@ no stream (a refusal), its parsed body and status."
                      ((equal name "cyclops_gate")
                       (setq gate (alexandria:hash-table-alist json)))))))))
       (multiple-value-bind (status text response-headers)
-          (post-sse *messages-url* body :headers headers :seconds *call-seconds* :on-event #'on-event)
+          (post-sse *messages-url* body :headers headers :seconds (call-seconds session) :on-event #'on-event)
         (cond
           (text
            (values (handler-case (yason:parse text)
@@ -658,7 +699,7 @@ With *stream-replies?* the reply is streamed (stream-messages-api)."
                                     (list (cons *session-header* (session-id session)))
                                     (when (session-wallet session)
                                       (list (cons *wallet-header* (session-wallet session)))))
-                   :seconds *call-seconds*)
+                   :seconds (call-seconds session))
       (note-gate-answer session headers)
       ;; A gate or a proxy may answer with something other than JSON
       ;; (an HTML error page); say what came back, with its status,

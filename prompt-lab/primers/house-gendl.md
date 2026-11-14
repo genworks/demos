@@ -1,0 +1,247 @@
+## Writing a Gendl model: the grammar, spelled out
+
+You write Common Lisp with Gendl's `define-object` macro.  Read this
+before your first write_model: it is the whole grammar you need, and
+every example in it compiles as written.  Do not probe the macro
+(macroexpand, keyword guessing); the forms below are the forms.
+
+### 1. The shape of a define-object
+
+```lisp
+(define-object model (base-object)
+  :input-slots
+  ((width 600)
+   (length 400)
+   (height 25))
+
+  :computed-slots
+  ((half-width (half (the width))))
+
+  :objects
+  ((top :type 'box
+        :width (the width) :length (the length) :height (the height)
+        :center (the center)
+        :display-controls (list :color :steel-blue))))
+```
+
+Each of these rules is a compiler error, or a model that silently
+draws nothing, when it is broken:
+
+- `(define-object NAME (MIXINS) KEYWORD VALUE KEYWORD VALUE ...)`.  The
+  second form is the list of mixins: `(base-object)` for MODEL.  After
+  it come keyword and value PAIRS at the top level -- `:input-slots`,
+  `:computed-slots`, `:objects`, `:hidden-objects`, `:functions` -- each
+  followed by its list.  Never wrap the pairs in one more list:
+  `(define-object model (base-object) (:input-slots ...))` fails with
+  "No such toplevel define-object keyword exists".
+- No docstring after the name, and no `:documentation` string.
+- A slot is `(name default)`.  The default is any expression.
+- Read a slot, inside define-object, with `(the name)` -- an input, a
+  computed slot, `center`, anything.  A bare `width` is an unbound
+  variable.  A child's slot: `(the top width)`; a member of a sequence:
+  `(the legs 0)`.
+- In a child's inputs `(the ...)` is still the object being defined
+  (the parent).  The child itself, for instance its place in a
+  sequence, is `(the-child index)`.
+- A child is `(name :type 'TYPE :input value :input value ...)`.  The
+  type is a quoted symbol; its inputs are keyword and value pairs.
+  Spell input names exactly: describe_object lists a type's inputs.
+- `:functions` are `((name (args) body...))`, called as
+  `(the (name arg))`.
+- Arithmetic helpers: `(half x)`, `(twice x)`; `pi` is Common Lisp's.
+
+### 2. Placing parts
+
+- Every object has a `center` (a point) and an `orientation`.  A child
+  given no `:center` sits at its parent's center, so a model whose parts
+  all lack one is a pile at the origin.  Place each part:
+  `:center (translate (the center) :right x :rear y :up z)`.
+- Directions: `:right` / `:left` along X, `:rear` / `:front` along Y,
+  `:up` / `:down` (or `:top` / `:bottom`) along Z.  Z is up.
+- MODEL's own `width`, `length` and `height` (inputs every object has)
+  are its ENVELOPE: a box centered on `(the center)`, which check_model's
+  overall size counts.  Name the overall dimensions `width` (X),
+  `length` (Y) and `height` (Z), and place every part INSIDE that box,
+  from its center: the envelope's top face is `:up (half (the height))`,
+  its bottom `:down (half (the height))`.  A part built up from the
+  floor (`:up` from 0) sticks out above the envelope, and the size
+  comes out half as tall again.  Dimensions with other names (`depth`,
+  `span`) are not part of the envelope.
+- `box`: `:width` along X, `:length` along Y, `:height` along Z,
+  centered on its `:center`.
+- `cylinder`: `:radius`, `:length`, `:center`.  Its axis runs along its
+  own Y (front to rear).  To turn the axis, give
+  `:orientation (alignment :rear VECTOR)`: upright is
+  `(alignment :rear (the (face-normal-vector :top)))`, along X is
+  `(alignment :rear (the (face-normal-vector :right)))`.  `cone` is the
+  same, with `:radius-1` and `:radius-2`.  `:start` and `:end` are not
+  inputs.
+- `sphere`: `:radius`, `:center`.
+- An extruded outline: `global-polygon-projection` with `:vertex-list`
+  (points, e.g. `(translate (the center) :right 10 :rear 5)`),
+  `:projection-vector` and `:projection-depth`.
+- On this free engine there are no booleans: a hole can be drawn as a
+  cylinder but not cut.  Say so in the reply.
+
+### 3. Repeated parts
+
+`:sequence (:size N)` makes N members, indexed 0 to N-1 by
+`(the-child index)`.  Use it for any repeat; never write `leg-0`,
+`leg-1` ... by hand.  For a grid, one sequence of rows times columns,
+with `(floor i columns)` and `(mod i columns)`.
+
+### 4. Inputs a person can change
+
+Every input-slot of MODEL gets a control in the viewer.  Make an input
+only what a person would change; derived values go in
+`:computed-slots`.  Bounds and choices go in a computed slot named
+`input-controls`:
+
+```lisp
+(input-controls (list :count (list :kind :integer :min 2 :max 12)))
+```
+
+### 5. How to work with the tools
+
+1. Decide the envelope in mm (x y z).  Think briefly; the grammar above
+   is settled.
+2. write_model: the whole file -- helper definitions, then MODEL.  No
+   `in-package`.
+3. ALWAYS check_model with expected_size after every write_model or
+   edit_model that compiles.  Read the leaf count, the overall size and
+   any pile warning.
+4. Fix what check_model shows with edit_model, changing as little as
+   possible.  A compiler error names the form: read it, fix that form.
+5. When the numbers match, stop and reply.  A simple model that is right
+   beats an elaborate one that does not compile.
+
+- evaluate takes ONE expression; wrap several in `(progn ...)`.  It is
+  Common Lisp: `handler-case` and `ignore-errors`, not Emacs Lisp's
+  `condition-case`.  To look at the model:
+  `(the-object (make-object 'model) bounding-box)`.
+- Colours: `:display-controls (list :color :steel-blue)` -- e.g.
+  `:steel-blue`, `:slate-gray`, `:dim-gray`, `:saddle-brown`,
+  `:dark-olive-green`, `:firebrick`, `:goldenrod`.
+
+### 6. Worked examples
+
+A table: a top and four legs from one sequence, inside the envelope.
+
+```lisp
+(define-object model (base-object)
+  :input-slots
+  ((width 1200) (length 700) (height 750) (top-thickness 30) (leg-size 60))
+
+  :computed-slots
+  ((leg-height (- (the height) (the top-thickness)))
+   (leg-inset (half (the leg-size))))
+
+  :objects
+  ((top :type 'box
+        :width (the width) :length (the length) :height (the top-thickness)
+        :center (translate (the center) :up (- (half (the height)) (half (the top-thickness))))
+        :display-controls (list :color :saddle-brown))
+   (legs :type 'box
+         :sequence (:size 4)
+         :width (the leg-size) :length (the leg-size) :height (the leg-height)
+         :center (translate (the center)
+                            :right (* (if (evenp (the-child index)) -1 1)
+                                      (- (half (the width)) (the leg-inset)))
+                            :rear (* (if (< (the-child index) 2) -1 1)
+                                     (- (half (the length)) (the leg-inset)))
+                            :down (half (the top-thickness)))
+         :display-controls (list :color :dim-gray))))
+```
+
+A shaft along X with a flange at one end: cylinders turned by
+orientation.
+
+```lisp
+(define-object model (base-object)
+  :input-slots
+  ((shaft-length 300) (shaft-diameter 30) (flange-diameter 90) (flange-thickness 12))
+
+  :computed-slots
+  ((along-x (the (face-normal-vector :right))))
+
+  :objects
+  ((shaft :type 'cylinder
+          :radius (half (the shaft-diameter)) :length (the shaft-length)
+          :center (the center)
+          :orientation (alignment :rear (the along-x))
+          :display-controls (list :color :steel-blue))
+   (flange :type 'cylinder
+           :radius (half (the flange-diameter)) :length (the flange-thickness)
+           :center (translate (the center)
+                              :left (- (half (the shaft-length)) (half (the flange-thickness))))
+           :orientation (alignment :rear (the along-x))
+           :display-controls (list :color :slate-gray))))
+```
+
+A bookshelf: two sides and a changeable number of shelves, inside the envelope.
+
+```lisp
+(define-object model (base-object)
+  :input-slots
+  ((width 800) (length 300) (height 1800) (board 18) (shelf-count 5))
+
+  :computed-slots
+  ((input-controls (list :shelf-count (list :kind :integer :min 2 :max 10)))
+   (inner-width (- (the width) (twice (the board))))
+   (shelf-pitch (/ (- (the height) (the board)) (1- (the shelf-count)))))
+
+  :objects
+  ((sides :type 'box
+          :sequence (:size 2)
+          :width (the board) :length (the length) :height (the height)
+          :center (translate (the center)
+                             :right (* (if (zerop (the-child index)) -1 1)
+                                       (- (half (the width)) (half (the board)))))
+          :display-controls (list :color :saddle-brown))
+   (shelves :type 'box
+            :sequence (:size (the shelf-count))
+            :width (the inner-width) :length (the length) :height (the board)
+            ;; the bottom shelf on the envelope's floor, the rest above it
+            :center (translate (the center)
+                               :down (half (the height))
+                               :up (+ (half (the board)) (* (the-child index) (the shelf-pitch))))
+            :display-controls (list :color :goldenrod))))
+```
+
+A disk with a ring of bolts: polar placement from the index, and a
+helper object of its own.
+
+```lisp
+(define-object bolt (base-object)
+  :input-slots
+  ((diameter 12) (shank-length 40))
+
+  :objects
+  ((shank :type 'cylinder
+          :radius (half (the diameter)) :length (the shank-length)
+          :center (the center)
+          :orientation (alignment :rear (the (face-normal-vector :top)))
+          :display-controls (list :color :dim-gray))))
+
+(define-object model (base-object)
+  :input-slots
+  ((disk-diameter 200) (disk-thickness 15) (bolt-count 8) (bolt-circle 160))
+
+  :computed-slots
+  ((input-controls (list :bolt-count (list :kind :integer :min 3 :max 24))))
+
+  :objects
+  ((disk :type 'cylinder
+         :radius (half (the disk-diameter)) :length (the disk-thickness)
+         :center (translate (the center) :up (half (the disk-thickness)))
+         :orientation (alignment :rear (the (face-normal-vector :top)))
+         :display-controls (list :color :slate-gray))
+   (bolts :type 'bolt
+          :sequence (:size (the bolt-count))
+          :shank-length 40
+          :center (let ((angle (* 2 pi (/ (the-child index) (the bolt-count)))))
+                    (translate (the center)
+                               :right (* (half (the bolt-circle)) (cos angle))
+                               :rear (* (half (the bolt-circle)) (sin angle))
+                               :up 20)))))
+```
