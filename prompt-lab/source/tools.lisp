@@ -247,9 +247,52 @@ version that fails to compile is kept too."
                                         defined? (built-name session) (reverse warnings)))
                       (not defined?)))))
       (error (condition)
-        (values (list (text-result "Error compiling or loading the model file: ~a~@[~%Warnings first:~%~{- ~a~%~}~]"
-                                  condition (reverse warnings)))
+        (values (list (text-result "Error compiling or loading the model file: ~a~@[~%Warnings first:~%~{- ~a~%~}~]~@[~%~a~]"
+                                  condition (reverse warnings)
+                                  ;; a house model loses count of its parentheses
+                                  ;; (agent.lisp): say where, which the reader's
+                                  ;; 'unexpected end of file' does not
+                                  (and (house-model? session)
+                                       (ignore-errors (paren-report (file-model-body file))))))
                 t)))))
+
+(defun paren-report (text)
+  "Where TEXT's parentheses fail to balance, in words for the agent, or nil
+when they balance.  Strings, comments and character literals are skipped."
+  (let ((depth 0) (line 1) (form-line nil) (form-head nil) (i 0) (n (length text)))
+    (flet ((head (start)
+             (let ((end (or (position #\Newline text :start start) n)))
+               (string-trim '(#\Space #\Tab) (subseq text start (min end (+ start 50)))))))
+      (loop while (< i n)
+            do (let ((c (char text i)))
+                 (cond ((char= c #\Newline) (incf line))
+                       ((char= c #\;)
+                        (setq i (or (position #\Newline text :start i) n))
+                        (when (< i n) (incf line)))
+                       ((char= c #\")
+                        (incf i)
+                        (loop while (and (< i n) (char/= (char text i) #\"))
+                              do (when (char= (char text i) #\\) (incf i))
+                                 (when (and (< i n) (char= (char text i) #\Newline)) (incf line))
+                                 (incf i)))
+                       ((and (char= c #\#) (< (1+ i) n) (char= (char text (1+ i)) #\\))
+                        (incf i 2))
+                       ((and (char= c #\#) (< (1+ i) n) (char= (char text (1+ i)) #\|))
+                        (let ((end (or (search "|#" text :start2 (+ i 2)) n)))
+                          (incf line (count #\Newline text :start i :end end))
+                          (setq i (1+ end))))
+                       ((char= c #\()
+                        (when (zerop depth) (setq form-line line form-head (head i)))
+                        (incf depth))
+                       ((char= c #\))
+                        (decf depth)
+                        (when (minusp depth)
+                          (return-from paren-report
+                            (format nil "The parentheses do not balance: an extra ')' on line ~d closes more than was opened.  Write the whole file again with write_model." line))))))
+               (incf i))
+      (when (plusp depth)
+        (format nil "The parentheses do not balance: ~d '(' left open at the end of the file.  The top-level form starting on line ~d, ~s, is not closed.  Write the whole file again with write_model, closing each child form on its own last line, then ')' for its section and ')' for the define-object."
+                depth form-line form-head)))))
 
 (defun read-model (session)
   "The model's source as write-model takes it: the file after its header

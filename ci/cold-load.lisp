@@ -767,6 +767,11 @@ loaded) its page too."
                                   (error "a house session is offered render"))
                                 (unless (eql (pl :call-seconds s) (symbol-value (lab '#:*house-call-seconds*)))
                                   (error "a house session's calls keep the short limit"))
+                                ;; the parenthesis report a house model gets on a file that does not read
+                                (unless (and (search "line 1" (or (pl :paren-report (format nil "(define-object model (base-object)~% :objects ((a :type 'box))")) ""))
+                                             (search "extra ')' on line 2" (or (pl :paren-report (format nil "(a)~%(b))")) ""))
+                                             (null (pl :paren-report (format nil "(a \"(\" #\\( ; (~%)"))))
+                                  (error "the parenthesis report is wrong"))
                                 (pl :set-session-model! s nil)
                                 (when (search "### 6. Worked examples" (pl :system-text s))
                                   (error "a session on the lab's own model got the house primer"))

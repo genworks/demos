@@ -236,11 +236,11 @@ the cents in all.  A plist."
   "Review rounds at most for one prompt in the reviewed arm.")
 
 (defparameter *eval-engine-grammar*
-  "Gendl grammar: (define-object model (base-object) :input-slots ((name default) ...) :computed-slots ((name expression) ...) :objects ((part :type 'box :width ... :length ... :height ... :center (translate (the center) :up ...)) ...)), the keyword pairs never wrapped in one more list; slots are read with (the name), a sequence member's index with (the-child index) under :sequence (:size n).  MODEL's own width, length and height are its envelope, a box centered on (the center): every part goes inside it.  This engine has box (width X, length Y, height Z), cylinder and cone (axis along their own Y; upright with :orientation (alignment :rear (the (face-normal-vector :top)))), sphere and global-polygon-projection; no booleans."
+  "Gendl grammar: (define-object model (base-object) :input-slots ((name default) ...) :computed-slots ((name expression) ...) :objects ((part :type 'box :width ... :length ... :height ... :center (translate (the center) :up ...)) ...)), the keyword pairs never wrapped in one more list; slots are read with (the name), a sequence member's index with (the-child index) under :sequence (:size n).  MODEL's own width, length and height are its envelope, a box centered on (the center): every part goes inside it, placed by its height above the floor -- a part of height h whose bottom is z up: :center (translate (the center) :down (half (the height)) :up (+ z (half h))).  This engine has box (width X, length Y, height Z), cylinder and cone (axis along their own Y; upright with :orientation (alignment :rear (the (face-normal-vector :top)))), sphere and global-polygon-projection; no booleans."
   "What the strong model is told of Gendl when it plans or reviews.")
 
 (defparameter *eval-plan-system*
-  (format nil "You plan a parametric Gendl model for a less experienced modeling agent, which builds it in the prompt lab with tools that compile and check it.  Given the design request, write (1) a short spec: the overall envelope in mm (x y z), each part with its size and where it sits relative to the model's center, and the few inputs a person would want to change; and (2) a skeleton of MODEL as one define-object that compiles: input-slots with defaults, computed-slots for derived values, and every part under :objects with its :type, sizes and :center.  The builder completes and corrects it.  ~a  Keep the skeleton under 60 lines; no prose beyond the spec."
+  (format nil "You plan a parametric Gendl model for a less experienced modeling agent, which builds it in the prompt lab with tools that compile and check it.  Given the design request, write (1) a short spec: the overall envelope in mm (x y z), each part with its size and where it sits relative to the model's center, and the few inputs a person would want to change; and (2) a skeleton of MODEL as one define-object that compiles: input-slots with defaults, computed-slots for derived values, and every part under :objects with its :type, sizes and :center.  The builder completes and corrects it.  ~a  Keep the skeleton under 40 lines and close every form -- the builder copies it, and an unclosed skeleton is its most common failure; no prose beyond the spec."
           *eval-engine-grammar*))
 
 (defparameter *eval-review-system*
@@ -313,7 +313,7 @@ house model and STRONG planning or reviewing.  Results as eval-run's, with
                  (eval-call '#:set-session-model! session builder)
                  (ecase mode
                    (:planned
-                    (let ((plan (ask *eval-plan-system* (list (eval-text-block prompt)) 4000 (format nil "plan-~a" id))))
+                    (let ((plan (ask *eval-plan-system* (list (eval-text-block prompt)) 8000 (format nil "plan-~a" id))))
                       (eval-call '#:run-prompt session
                                  (format nil "~a~%~%An engineer's plan for this request -- a spec and a skeleton of MODEL that compiles as a start; follow it, complete it and check it:~%~%~a" prompt plan))))
                    (:reviewed
