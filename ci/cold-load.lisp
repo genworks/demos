@@ -1148,8 +1148,16 @@ loaded) its page too."
                               ;; client does not follow a second redirect
                               (unless (page-ok? (format nil "~a/viewer?deployed=~a" prefix name))
                                 (error "the deployed model's page did not open"))
-                              (unless (search "define-object model" (http :get (format nil "~a/source" address)))
-                                (error "an open deployment did not serve its source"))
+                              (let ((source (http :get (format nil "~a/source" address))))
+                                (unless (search "define-object model" source)
+                                  (error "an open deployment did not serve its source"))
+                                ;; the Corresponding Source names every component and
+                                ;; its version, and the model file as a download
+                                (dolist (component '("The prompt lab" "demos-common" "Monocle" "Gendl" "source?download=model"))
+                                  (unless (search component source)
+                                    (error "the source page does not name ~a" component)))
+                                (unless (or (search "commit " source) (search "build " source))
+                                  (error "the source page names no version of any component")))
                               ;; the download it priced is its owner's alone for now;
                               ;; the one it did not is anyone's
                               (unless (eql 402 (status drawing))

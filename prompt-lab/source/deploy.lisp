@@ -1187,6 +1187,128 @@ author's (the user's ruling, 2026-10-14)."
                   (dolist (paragraph paragraphs) (htm (:p (esc paragraph))))
                   (when back (htm (:p (:a :href back (esc back-label)))))))))
 
+;;
+;; THE SOURCE PAGE (ruling 95): an open deployment's Corresponding Source, as
+;; the GNU AGPL section 13 asks of a program offered over a network -- every
+;; component the deployment runs, each with the commit it was loaded from,
+;; the model file inline and as a download, at no charge.  The commits are
+;; read when this file is LOADED (a checkout pulled later does not change
+;; what runs until a restart), from each system's git checkout without a
+;; subprocess (or, in a copy without .git such as a hangar VM's, from the
+;; COMMIT file the copy was made with); Gendl, built into the image, from
+;; GENDL_COMMIT or a COMMIT file beside the image's Gendl, else its build
+;; number, said as such.
+;;
+
+(defparameter *component-repositories*
+  '((:prompt-lab "The prompt lab" "https://github.com/genworks/demos")
+    (:demos-common "demos-common" "https://github.com/genworks/demos")
+    (:monocle "Monocle" "https://gitlab.common-lisp.net/clo/monocle")
+    (:gendl "Gendl" "https://gitlab.common-lisp.net/gendl/gendl"))
+  "List of (system label repository) for the source page.")
+
+(defun git-head-commit (directory)
+  "The commit checked out in the git repository holding DIRECTORY, read from
+its .git (a directory, or a worktree's gitdir file), or nil."
+  (ignore-errors
+   (labels ((read-line-of (file) (with-open-file (in file :if-does-not-exist nil)
+                                   (and in (string-trim '(#\Space #\Return #\Newline) (or (read-line in nil) "")))))
+            (git-dir (dir)
+              (loop for d = (uiop:ensure-directory-pathname dir) then (uiop:pathname-parent-directory-pathname d)
+                    for dot = (merge-pathnames ".git" d)
+                    repeat 12
+                    do (cond ((uiop:directory-exists-p (uiop:ensure-directory-pathname dot))
+                              (return (uiop:ensure-directory-pathname dot)))
+                             ((probe-file dot)
+                              (let ((line (read-line-of dot)))
+                                (when (and line (eql 0 (search "gitdir: " line)))
+                                  (return (uiop:ensure-directory-pathname (subseq line 8)))))))
+                    until (equal d (uiop:pathname-parent-directory-pathname d)))))
+     (let* ((dir (git-dir directory))
+            (head (and dir (read-line-of (merge-pathnames "HEAD" dir)))))
+       (cond ((null head) nil)
+             ((eql 0 (search "ref: " head))
+              (let ((ref (subseq head 5)))
+                (or (read-line-of (merge-pathnames ref dir))
+                    ;; a packed ref
+                    (with-open-file (in (merge-pathnames "packed-refs" dir) :if-does-not-exist nil)
+                      (and in (loop for line = (read-line in nil) while line
+                                    when (let ((space (position #\Space line)))
+                                           (and space (string= ref (string-trim '(#\Return) (subseq line (1+ space))))))
+                                      return (subseq line 0 (position #\Space line))))))))
+             (t head))))))
+
+(defun copied-commit (directory)
+  "The commit a COPY of a checkout records -- a COMMIT file at its root, as
+the hosted rootfs writes one where it leaves .git behind -- found walking
+up from DIRECTORY, or nil."
+  (ignore-errors
+   (loop for d = (uiop:ensure-directory-pathname directory) then (uiop:pathname-parent-directory-pathname d)
+         repeat 4
+         do (let ((text (ignore-errors (uiop:read-file-string (merge-pathnames "COMMIT" d)))))
+              (when (and (stringp text) (plusp (length (string-trim '(#\Space #\Newline #\Return) text))))
+                (return (string-trim '(#\Space #\Newline #\Return) text))))
+         until (equal d (uiop:pathname-parent-directory-pathname d)))))
+
+(defun gendl-commit ()
+  "Gendl's commit as the image records it -- GENDL_COMMIT, else a COMMIT
+file beside the image's Gendl -- as (values commit nil), else its build
+number as (values nil build)."
+  (let ((env (uiop:getenv "GENDL_COMMIT"))
+        (file (ignore-errors (uiop:read-file-string "/opt/gendl/COMMIT"))))
+    (cond ((and (stringp env) (plusp (length env))) (values (string-trim '(#\Space #\Newline) env) nil))
+          ((and (stringp file) (plusp (length file))) (values (string-trim '(#\Space #\Newline #\Return) file) nil))
+          (t (values nil (let ((v (find-symbol "*GENDL-VERSION*" :gendl)))
+                           (and v (boundp v) (princ-to-string (symbol-value v)))))))))
+
+(defun component-commits ()
+  "Each component of a deployment, a plist (:label :repository :commit
+:build), as loaded."
+  (mapcar #'(lambda (entry)
+              (destructuring-bind (system label repository) entry
+                (if (eq system :gendl)
+                    (multiple-value-bind (commit build) (gendl-commit)
+                      (list :label label :repository repository :commit commit :build build))
+                    (list :label label :repository repository
+                          :commit (let ((dir (ignore-errors (asdf:system-source-directory system))))
+                                    (and dir (or (git-head-commit dir) (copied-commit dir))))))))
+          *component-repositories*))
+
+(defvar *loaded-commits* nil
+  "The components' commits as this image loaded them (component-commits,
+set at load), for the source page.")
+
+(setq *loaded-commits* (ignore-errors (component-commits)))
+
+(defun source-page (name record)
+  "The source page of open deployment NAME (RECORD): every component with
+its commit, the model file inline, and the model file as a download."
+  (let* ((file (merge-pathnames "model.lisp" (deployment-directory name)))
+         (body (file-model-body file))
+         (title (format nil "Source of ~a" (gethash "title" record))))
+    (with-lhtml-string ()
+      (:html (:head (:meta :charset "utf-8")
+                    (:meta :name "viewport" :content "width=device-width, initial-scale=1")
+                    (:link :rel "icon" :href "data:,")
+                    (:title (esc title)))
+             (:body :style "font-family: system-ui, sans-serif; max-width: 52rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5"
+                    (:h1 :style "font-size: 1.4rem" (esc title))
+                    (:p "This application is free software under the GNU Affero General Public License, version 3 or later.  Its complete source is the model file below and the components it runs on, each at the version listed.")
+                    (:ul
+                     (:li "The model file: "
+                          (:a :href (format nil "~a/source?download=model" (deployment-path name)) (esc (format nil "~a.lisp" name)))
+                          (fmt " (SHA-256 ~a)" (or (watch-sha256-hex body) "not computed")))
+                     (dolist (c *loaded-commits*)
+                       (htm (:li (esc (getf c :label)) ": "
+                                 (:a :href (getf c :repository) (esc (getf c :repository)))
+                                 (cond ((getf c :commit) (htm (fmt ", commit ~a" (getf c :commit))))
+                                       ((getf c :build) (htm (fmt ", build ~a (this image records no commit)" (getf c :build))))
+                                       (t (htm ", version not recorded in this image")))))))
+                    (:h2 :style "font-size: 1.1rem" "The model file")
+                    (:pre :style "white-space: pre-wrap; font-size: .85rem; background: #f3f4f6; padding: .6rem; border-radius: 4px"
+                          (esc body))
+                    (:p (:a :href (deployment-url name) "Back to the application")))))))
+
 (defun deployed-door (req ent)
   "GET <prefix>/d/<name>: the deployment, for whoever may use it -- a web
 app as its own page, a model in the viewer.  <prefix>/d/<name>/source: an
@@ -1209,13 +1331,17 @@ the same functions as <prefix>/<door>, under the deployment's address
            (respond-deployment req ent (deployment-page "Nothing is deployed here" (list "There is no deployment of that name here."))
                          :response net.aserve:*response-not-found* :type "text/html; charset=utf-8"))
           ((equal what "source")
-           (if (truthy? (gethash "closed" record))
-               (respond-deployment req ent "This deployment's source is closed." :response net.aserve:*response-not-found*)
-               (respond-deployment req ent
-                             (format nil ";; ~a -- deployed from the prompt lab at ~a.~%;; GNU Affero General Public License, version 3 or later.~%~%~a"
-                                     (gethash "title" record) (deployment-url name)
-                                     (file-model-body (merge-pathnames "model.lisp" (deployment-directory name))))
-                             :attachment (format nil "~a.lisp" name))))
+           (cond ((truthy? (gethash "closed" record))
+                  (respond-deployment req ent "This deployment's source is closed." :response net.aserve:*response-not-found*))
+                 ;; the model file itself, as a download
+                 ((equal (query-value req "download") "model")
+                  (respond-deployment req ent
+                                      (format nil ";; ~a -- deployed from the prompt lab at ~a.~%;; GNU Affero General Public License, version 3 or later.~%~%~a"
+                                              (gethash "title" record) (deployment-url name)
+                                              (file-model-body (merge-pathnames "model.lisp" (deployment-directory name))))
+                                      :attachment (format nil "~a.lisp" name)))
+                 ;; the Corresponding Source: every component with its commit (ruling 95)
+                 (t (respond-deployment req ent (source-page name record) :type "text/html; charset=utf-8"))))
           ;; a problem with the page, the payment or the author: the way
           ;; to the house, named here and nowhere on the page itself
           ((equal what "report")
