@@ -1283,11 +1283,22 @@ commit nil); else its build number as (values nil build)."
   "Where an image lists the repositories built into it, one line each:
 name commit branch origin.")
 
+(defparameter *image-commits-shown* '("quicklisp")
+  "The repositories of an image's COMMITS the source page lists: the
+bundled libraries' tree.  An image may record more (a build's every
+checkout); those are not the page's to name.")
+
+(defparameter *public-origin-hosts* '("gitlab.common-lisp.net" "github.com")
+  "Hosts whose https addresses the source page links; an origin anywhere
+else (a private forge, an ssh address) is shown as name and commit only.")
+
 (defun image-commits ()
-  "The repositories the image records beside Gendl (its COMMITS file):
-plists (:label :repository :commit), the repository only where its
-origin is a public https address.  Gendl itself, and the checkouts the
-lab lists of its own, are left to component-commits."
+  "The repositories the image records beside Gendl (its COMMITS file) that
+the source page shows -- those named in *image-commits-shown* --
+as plists (:label :repository :commit), the repository only where its
+origin is an https address on a public host (*public-origin-hosts*).
+Gendl itself, and the checkouts the lab lists of its own, are left to
+component-commits; anything else an image records is not the page's."
   (let ((text (some #'(lambda (file) (ignore-errors (uiop:read-file-string file))) *image-commits-files*)))
     (when (stringp text)
       (loop for line in (uiop:split-string text :separator '(#\Newline))
@@ -1295,11 +1306,12 @@ lab lists of its own, are left to component-commits."
                                                         :separator '(#\Space #\Tab))
                                  :test #'string=)
             for (name commit nil origin) = fields
-            when (and name commit
-                      (not (member name '("gendl" "demos" "monocle") :test #'string-equal)))
+            when (and name commit (member name *image-commits-shown* :test #'string-equal))
               collect (list :label name :commit commit
-                            :repository (and (stringp origin) (eql 0 (search "https://" origin))
-                                             (not (find #\@ origin))
+                            :repository (and (stringp origin)
+                                             (some #'(lambda (host)
+                                                       (eql 0 (search (format nil "https://~a/" host) origin)))
+                                                   *public-origin-hosts*)
                                              origin))))))
 
 (defun component-commits ()

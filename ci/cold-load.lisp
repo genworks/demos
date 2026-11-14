@@ -686,27 +686,33 @@ loaded) its page too."
                        (declare (ignore body))
                        (unless (eql status 404) (error "a stranger's source download answered ~a" status)))
                      t)))
-          ;; THE SOURCE PAGE's image record (ruling 95, deploy.lisp): the
-          ;; repositories an image lists in its COMMITS file join the
-          ;; components; Gendl and the lab's own checkouts are not repeated;
-          ;; only a public https origin is linked
-          (smoke "prompt-lab source page: the image's COMMITS read, Gendl not repeated, only https linked"
+          ;; THE SOURCE PAGE's image record (ruling 95, deploy.lisp): of the
+          ;; repositories an image lists in its COMMITS file, the bundled
+          ;; libraries' tree joins the components; nothing else an image
+          ;; records is named; only a public host's https origin is linked
+          (smoke "prompt-lab source page: the image's COMMITS read, only the libraries named, only public hosts linked"
                  (lambda ()
                    (let ((file (merge-pathnames "ci-COMMITS" (uiop:temporary-directory)))
                          (saved (symbol-value (lab '#:*image-commits-files*))))
                      (with-open-file (out file :direction :output :if-exists :supersede)
                        (format out "gendl 1111111111111111111111111111111111111111 devo https://gitlab.common-lisp.net/gendl/gendl.git~%~
-                                    quicklisp 2222222222222222222222222222222222222222 devo https://gitlab.common-lisp.net/dcooper/quicklisp.git~%~
-                                    private-thing 3333333333333333333333333333333333333333 main git@example.com:x/y.git~%"))
+                                    quicklisp 2222222222222222222222222222222222222222 devo https://private.example.com/genworks/quicklisp.git~%~
+                                    build-scripts 3333333333333333333333333333333333333333 main https://github.com/example/build-scripts.git~%"))
                      (setf (symbol-value (lab '#:*image-commits-files*)) (list (namestring file)))
                      (unwind-protect
                           (let ((rows (uiop:symbol-call :prompt-lab :image-commits)))
-                            (unless (and (= (length rows) 2)
+                            ;; quicklisp alone, its private origin not linked
+                            (unless (and (= (length rows) 1)
                                          (equal (getf (first rows) :label) "quicklisp")
                                          (equal (getf (first rows) :commit) "2222222222222222222222222222222222222222")
-                                         (search "https://" (getf (first rows) :repository))
-                                         (null (getf (second rows) :repository)))
+                                         (null (getf (first rows) :repository)))
                               (error "the image's COMMITS were read as ~s" rows))
+                            ;; a repository the page shows, on a public host, is linked
+                            (progv (list (lab '#:*image-commits-shown*)) (list (list "quicklisp" "build-scripts"))
+                              (let ((public (find "build-scripts" (uiop:symbol-call :prompt-lab :image-commits)
+                                                  :key (lambda (row) (getf row :label)) :test #'equal)))
+                                (unless (and public (search "https://github.com/" (getf public :repository)))
+                                  (error "a public host's origin was not linked: ~s" public))))
                             t)
                        (setf (symbol-value (lab '#:*image-commits-files*)) saved)))))
           ;; THE CLICKWRAP (ruling 94, guards.lisp): versioned texts with their
