@@ -898,18 +898,48 @@ defines NAME; with no such form, add SOURCE at the end of the file."
 (defun slot-entry-text (slot value)
   (format nil "(~a ~a)" slot (string-trim '(#\Space #\Tab #\Newline #\Return) value)))
 
+(defparameter *child-recipe*
+  "A child is ONE entry of the objects section, named for itself: add_slot with object \"model\", section \"objects\", slot \"shelf\" and value \":type 'box :width (the width) :length 300 :height 18 :center (translate (the center) :up 100)\" adds it; set_slot with slot \"shelf\" and a new value changes it; remove_slot with slot \"shelf\" removes it.  One child per call, and VALUE starts at :type -- no parentheses around it, no list of children."
+  "How a child object is added, changed and removed: said by every refusal
+that catches a section or a list of children where one child belongs.")
+
+(defun section-name? (slot)
+  "True when SLOT names a define-object section (objects, :input-slots ...)
+rather than an entry of one."
+  (and (stringp slot)
+       (member (concatenate 'string ":" (string-downcase (string-left-trim ":" (string-trim " " slot))))
+               *slot-sections* :test #'string=)))
+
+(defun section-refusal (slot)
+  (structural-refusal "Nothing written: ~a is a section of the define-object, not a slot in it; these tools take ONE entry by its own name.  ~a"
+                      slot *child-recipe*))
+
+(defun child-value-problem (section value)
+  "For an entry of SECTION (objects or hidden-objects), a refusal text when
+VALUE is not one child's inputs -- a list of children, or the child in its
+own parentheses; else nil."
+  (when (and (member section '(":objects" ":hidden-objects") :test #'string=)
+             (stringp value)
+             (let ((v (string-left-trim '(#\Space #\Tab #\Newline #\Return) value)))
+               (and (plusp (length v)) (char= (char v 0) #\())))
+    (format nil "Nothing written: VALUE begins with a parenthesis, but a child's VALUE is its inputs alone.  ~a" *child-recipe*)))
+
 (defun set-slot-tool (session object slot value)
   "Replace SLOT of the define-object OBJECT -- an input, a computed slot, a
 child, a function -- with (SLOT VALUE)."
+  (when (section-name? slot)
+    (return-from set-slot-tool (section-refusal slot)))
   (let ((problem (fragment-problem value)))
     (when problem (return-from set-slot-tool (structural-refusal "Nothing written: VALUE ~a" problem))))
   (with-object session object
     #'(lambda (text span elements)
         (declare (ignore span))
         (multiple-value-bind (section entry) (find-slot text elements slot)
-          (if (null section)
-              (structural-refusal "~a has no slot named ~a; add_slot adds one." object slot)
-              (write-model session (splice text (car entry) (cdr entry) (slot-entry-text slot value))))))))
+          (cond ((null section)
+                 (structural-refusal "~a has no slot named ~a; add_slot adds one." object slot))
+                ((child-value-problem section value)
+                 (structural-refusal "~a" (child-value-problem section value)))
+                (t (write-model session (splice text (car entry) (cdr entry) (slot-entry-text slot value)))))))))
 
 (defun add-slot-tool (session object section slot value)
   "Add (SLOT VALUE) to SECTION of the define-object OBJECT, making the
@@ -918,7 +948,10 @@ section when it has none."
         (section (string-downcase (if (and (stringp section) (plusp (length section)) (char/= (char section 0) #\:))
                                       (concatenate 'string ":" section)
                                       (or section "")))))
-    (cond (problem (structural-refusal "Nothing written: VALUE ~a" problem))
+    (cond ((section-name? slot) (section-refusal slot))
+          (problem (structural-refusal "Nothing written: VALUE ~a" problem))
+          ((child-value-problem section value)
+           (structural-refusal "~a" (child-value-problem section value)))
           ((not (member section *slot-sections* :test #'string=))
            (structural-refusal "SECTION is one of ~{~a~^, ~}." (mapcar #'(lambda (s) (subseq s 1)) *slot-sections*)))
           (t (with-object session object
@@ -936,6 +969,8 @@ section when it has none."
 
 (defun remove-slot-tool (session object slot)
   "Remove SLOT from the define-object OBJECT."
+  (when (section-name? slot)
+    (return-from remove-slot-tool (section-refusal slot)))
   (with-object session object
     #'(lambda (text span elements)
         (declare (ignore span))
@@ -1049,13 +1084,13 @@ touches and overlaps what, what floats, and its symmetry."
    #'(lambda (tool) (and (not *house-view?*) (equal (cdr (assoc "name" tool :test #'string=)) "view_model")))
    (list
    `(("name" . "set_slot")
-     ("description" . "Change ONE slot of a define-object by name -- an input, a computed slot, a child under :objects, or a function: the tool writes (SLOT VALUE) in place of the old entry and compiles, so you write only VALUE and never the parentheses around it. For a child, VALUE is its keyword inputs, e.g. \":type 'box :width (the width) :center (translate (the center) :up 10)\". For a function, VALUE is \"(args) body\". VALUE must balance; it is checked before anything is written.")
+     ("description" . "Change ONE slot of a define-object by name -- an input, a computed slot, a child under :objects, or a function: the tool writes (SLOT VALUE) in place of the old entry and compiles, so you write only VALUE and never the parentheses around it. For a child, VALUE is its keyword inputs, e.g. \":type 'box :width (the width) :center (translate (the center) :up 10)\". For a function, VALUE is \"(args) body\". VALUE must balance; it is checked before anything is written. SLOT is never a section's name (objects, input-slots ...): to change a child named shelf, SLOT is \"shelf\".")
      ("input_schema" . ,(schema `(("object" . (("type" . "string") ("description" . "The define-object's name, e.g. model.")))
                                   ("slot" . (("type" . "string") ("description" . "The slot's, child's or function's name.")))
                                   ("value" . (("type" . "string") ("description" . "What follows the name inside the entry."))))
                                 '("object" "slot" "value"))))
    `(("name" . "add_slot")
-     ("description" . "Add ONE entry to a section of a define-object -- input-slots, computed-slots, objects, hidden-objects or functions -- making the section when it has none. You give the name and VALUE (as for set_slot); the tool writes the parentheses. A name already used in the object is refused.")
+     ("description" . "Add ONE entry to a section of a define-object -- input-slots, computed-slots, objects, hidden-objects or functions -- making the section when it has none. You give the name and VALUE (as for set_slot); the tool writes the parentheses. A name already used in the object is refused. A CHILD OBJECT is one call per child: section \"objects\", slot the child's own name, value its type and inputs, e.g. {\"object\": \"model\", \"section\": \"objects\", \"slot\": \"shelf\", \"value\": \":type 'box :width (the width) :length 300 :height 18 :center (translate (the center) :up 100)\"} -- never a list of children, never the child in parentheses.")
      ("input_schema" . ,(schema `(("object" . (("type" . "string")))
                                   ("section" . (("type" . "string") ("description" . "input-slots, computed-slots, objects, hidden-objects or functions.")))
                                   ("slot" . (("type" . "string")))

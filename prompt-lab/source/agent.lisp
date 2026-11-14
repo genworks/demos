@@ -593,6 +593,11 @@ answer, and a large read-sequence would wait to fill its buffer.)"
     (error (condition)
       (error "The call to ~a failed: ~a" (or (url-host url) url) (condition-text condition)))))
 
+(defparameter *unparsed-arguments-key* "lab_unparsed_arguments"
+  "String.  The key a streamed tool call's input carries, holding the end of
+its arguments, when they did not parse as JSON; the loop answers such a call
+with a tool error instead of running it.")
+
 (defun stream-messages-api (session body headers)
   "One call with the reply streamed.  Values: the message put back
 together (a hash table, as a whole answer parses to), the status, and
@@ -647,7 +652,15 @@ no stream (a refusal), its parsed body and status."
                                  (let ((text (format nil "~{~a~}" (reverse (gethash index json-parts)))))
                                    (setf (gethash "input" block)
                                          (if (plusp (length text))
-                                             (yason:parse text)
+                                             ;; arguments that are not JSON (a model that
+                                             ;; closed its string early) go back to it as
+                                             ;; a tool error, not as the prompt's end
+                                             (handler-case (yason:parse text)
+                                               (error ()
+                                                 (let ((input (make-hash-table :test #'equal)))
+                                                   (setf (gethash *unparsed-arguments-key* input)
+                                                         (subseq text (max 0 (- (length text) 200))))
+                                                   input)))
                                              (make-hash-table :test #'equal)))))))))
                      ((equal name "message_delta")
                       (when message
@@ -921,7 +934,12 @@ the session busy (start-prompt!)."
                                                      ;; a tool that signals is an error
                                                      ;; result, never a tool_use left
                                                      ;; unanswered
-                                                     (handler-case (run-tool session name input)
+                                                     (handler-case
+                                                         (let ((unparsed (cdr (assoc *unparsed-arguments-key* input :test #'string=))))
+                                                           (if unparsed
+                                                               (values (list (text-result "Nothing was run: this call's arguments did not arrive as valid JSON (they end: ~s).  Call ~a again with complete arguments; a long source is safer in smaller pieces (set_slot, add_slot)." unparsed name))
+                                                                       t)
+                                                               (run-tool session name input)))
                                                        (error (condition)
                                                          (values (list (text-result "~a failed: ~a" name (condition-text condition))) t)))
                                                    (when error?

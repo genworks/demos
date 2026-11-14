@@ -147,6 +147,19 @@ only what a person would change; derived values go in
    its name -- the tool writes the parentheses around it); add_slot adds
    one; remove_slot removes one; replace_form replaces a whole
    define-object or defun.  They cannot unbalance the file.
+   A CHILD OBJECT is one entry of `:objects`, named for itself, so it
+   is added, changed and removed by ITS name, one child per call:
+
+   ```
+   add_slot     object "model"  section "objects"  slot "shelf"
+                value  ":type 'box :width (the width) :length 300
+                        :height 18 :center (translate (the center) :up 100)"
+   set_slot     object "model"  slot "shelf"  value ":type 'box ... :height 25 ..."
+   remove_slot  object "model"  slot "shelf"
+   ```
+
+   SLOT is never `objects` (that is the section), and VALUE starts at
+   `:type`: no parentheses around the child, no list of children.
 6. When the numbers match and view_model shows the parts where they
    belong, stop and reply.  A simple model that is right beats an
    elaborate one that does not compile.

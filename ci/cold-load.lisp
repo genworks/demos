@@ -836,6 +836,25 @@ loaded) its page too."
                               (when (search "gap" (body)) (error "remove_slot left the entry"))
                               (unless (nth-value 1 (tool "replace_form" "name" "model" "source" "(defun other () 1)"))
                                 (error "replace_form took a form that defines something else"))
+                              ;; a CHILD goes by its own name, one a call: a section's
+                              ;; name or a list of children is refused with the recipe
+                              (let ((before (body)))
+                                (dolist (call '(("set_slot" "object" "model" "slot" "objects" "value" "((shelf :type 'box))")
+                                                ("add_slot" "object" "model" "section" "objects" "slot" "objects" "value" ":type 'box")
+                                                ("add_slot" "object" "model" "section" "objects" "slot" "shelf"
+                                                 "value" "(shelf :type 'box :width 10 :length 10 :height 10)")
+                                                ("set_slot" "object" "model" "slot" "leg" "value" "((leg :type 'box))")
+                                                ("remove_slot" "object" "model" "slot" ":objects")))
+                                  (multiple-value-bind (text error?) (apply #'tool call)
+                                    (unless (and error? (search "add_slot with object" text) (equal before (body)))
+                                      (error "~a was not refused with the child recipe: ~a" (first call) text)))))
+                              (multiple-value-bind (text error?)
+                                  (tool "add_slot" "object" "model" "section" "objects" "slot" "shelf"
+                                        "value" ":type 'box :width 100 :length 100 :height 10 :center (translate (the center) :up 50)")
+                                (when (or error? (not (search "(shelf :type 'box" (body))))
+                                  (error "add_slot did not add a child: ~a" text)))
+                              (tool "remove_slot" "object" "model" "slot" "shelf")
+                              (when (search "shelf" (body)) (error "remove_slot left the child"))
                               (let ((view (tool "view_model")))
                                 (unless (and (search "on the floor" view) (search "touches" view) (search "Symmetry" view)
                                              (not (search "FLOATS" view)))
@@ -863,6 +882,56 @@ loaded) its page too."
                               (pl :set-session-model! s nil)
                               (when (member "set_slot" (names s) :test #'equal) (error "a session on the lab's model got the house tools"))
                               t)
+                         (ignore-errors (pl :delete-session s))
+                         (pl :funnel-count! "sessions" -1))))))
+          ;; a streamed tool call whose arguments are not JSON (a house model
+          ;; that closed its string early, 2026-11-14) comes back to the model
+          ;; as a tool error it can retry, not as the prompt's end: the stream
+          ;; is scripted by standing in for post-sse
+          (smoke "prompt-lab a tool call whose arguments are not JSON is a tool error, not the prompt's end"
+                 (lambda ()
+                   (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
+                     (let* ((sse (lab '#:post-sse))
+                            (saved (fdefinition sse))
+                            (calls 0)
+                            (seen nil)
+                            (s (pl :open-session! "10.9.8.3" nil)))
+                       (unwind-protect
+                            (progv (list (lab '#:*stream-replies?*)) (list t)
+                              (setf (fdefinition sse)
+                                    (lambda (url body &key headers seconds on-event)
+                                      (declare (ignore url headers seconds))
+                                      (push body seen)
+                                      (flet ((event (name json) (funcall on-event name json)))
+                                        (event "message_start" "{\"message\": {\"role\": \"assistant\", \"content\": [], \"usage\": {\"input_tokens\": 10}}}")
+                                        (cond ((= (incf calls) 1)
+                                               (event "content_block_start" "{\"index\": 0, \"content_block\": {\"type\": \"tool_use\", \"id\": \"toolu_x1\", \"name\": \"write_model\", \"input\": {}}}")
+                                               (event "content_block_delta" "{\"index\": 0, \"delta\": {\"type\": \"input_json_delta\", \"partial_json\": \"{\\\"source\\\": \\\"(define-object model (base-object)\"}}")
+                                               (event "content_block_stop" "{\"index\": 0}")
+                                               (event "message_delta" "{\"delta\": {\"stop_reason\": \"tool_use\"}, \"usage\": {\"output_tokens\": 5}}"))
+                                              (t
+                                               (event "content_block_start" "{\"index\": 0, \"content_block\": {\"type\": \"text\", \"text\": \"\"}}")
+                                               (event "content_block_delta" "{\"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"done\"}}")
+                                               (event "content_block_stop" "{\"index\": 0}")
+                                               (event "message_delta" "{\"delta\": {\"stop_reason\": \"end_turn\"}, \"usage\": {\"output_tokens\": 1}}"))))
+                                      (values 200 nil nil)))
+                              (pl :run-prompt s "a box")
+                              (let ((log (pl :session-log s)))
+                                (unless (and (= calls 2)
+                                             (find-if (lambda (e) (and (eq (second e) :tool-error) (search "did not arrive as valid JSON" (third e)))) log)
+                                             (find :done log :key #'second))
+                                  (error "the call with arguments that are not JSON was not answered as a tool error: ~a calls, ~s"
+                                         calls (mapcar #'second log))))
+                              ;; the second request carried the error back as the call's result
+                              (unless (search "\"is_error\":true" (remove #\Space (first seen)))
+                                (error "the tool error did not reach the model"))
+                              t)
+                         (setf (fdefinition sse) saved)
+                         ;; the prompt, its tool error and its done counted in the funnel's
+                         ;; tally, given back: a later smoke counts it exactly
+                         (pl :funnel-count! "prompts" -1)
+                         (pl :funnel-count! "tool-errors" -1)
+                         (pl :funnel-count! "builds-done" -1)
                          (ignore-errors (pl :delete-session s))
                          (pl :funnel-count! "sessions" -1))))))
           ;; a model or an expression that recurses without end overflows the
