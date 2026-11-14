@@ -394,7 +394,17 @@ house model and STRONG planning or reviewing.  Results as eval-run's, with
                         (last-kind (let ((entry (find-if (lambda (e) (member (eval-log-kind e) '(:done :stopped))) (reverse log))))
                                      (and entry (eval-log-kind entry))))
                         (usage (eval-call '#:session-usage session))
-                        (strong-cents (eval-cents strong strong-usage))
+                        ;; the strong model's tokens, and the builder's when it costs
+                        ;; money too (a hosted model as the first try, not a house one);
+                        ;; under :escalate the builder's session also holds the strong
+                        ;; model's usage, so its own share is the difference
+                        (strong-cents (+ (eval-cents strong strong-usage)
+                                         (eval-cents builder
+                                                     (loop for key in '(:input :output :cache-read :cache-write)
+                                                           append (list key (max 0 (- (or (getf usage key) 0)
+                                                                                      (if (eq mode :escalate)
+                                                                                          (or (getf strong-usage key) 0)
+                                                                                          0))))))))
                         (result (list :id (getf item :id) :model builder :mode mode :strong strong
                                       :session id :started started :ended (eval-call '#:utc-time (get-universal-time))
                                       :finished (if (eq mode :fallback)
