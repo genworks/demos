@@ -1680,7 +1680,18 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                       (format nil "~a?~:[session~;replay~]=~a&format=source"
                                                               (door-path "download") (session-replay? session)
                                                               (session-id session)))))
-                                            "Source (.lisp)")))
+                                            "Source (.lisp)")
+                                   ;; the authorship record: prompts, versions, writers, hashes (ruling 96)
+                                   (:button :type "button" :class "pl-download"
+                                            :data-doc "What you asked for, what you wrote by hand and what an agent wrote, version by version, with each version's hash"
+                                            :|data-on:click|
+                                            (escape-string-minimal-plus-quotes
+                                             (format nil "plDownload(~a, $owner)"
+                                                     (js-string-literal
+                                                      (format nil "~a?~:[session~;replay~]=~a&format=authorship"
+                                                              (door-path "download") (session-replay? session)
+                                                              (session-id session)))))
+                                            "Authorship record")))
                             ;; the model file in the host's terminal, for its owner
                             (let ((console (and session (the owner?) (not (session-replay? session))
                                                 (ignore-errors (console-url session)))))
@@ -1826,7 +1837,8 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
               ((not (stringp source)) (the (tell-error! "No source given.")))
               ((not (claim! session)) (the (tell-error! "Wait for the agent to finish first.")))
               (t (multiple-value-bind (blocks error?)
-                     (unwind-protect (write-model (touch session) source)
+                     ;; the author's own hand, for the authorship record (archive.lisp)
+                     (unwind-protect (let ((*model-writer* :author)) (write-model (touch session) source))
                        (setf (session-busy? session) nil))
                    (let ((text (or (cdr (assoc "text" (first blocks) :test #'string=)) "")))
                      (log-event session :reload "Your edit: ~a" text)

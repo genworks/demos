@@ -652,6 +652,29 @@ loaded) its page too."
                             t)
                        (setf (symbol-value (lab '#:*external-agent?*)) saved)
                        (ignore-errors (uiop:symbol-call :prompt-lab :delete-session own))))))
+          ;; THE AUTHORSHIP RECORD (ruling 96): a hand edit is kept as the
+          ;; author's in versions.jsonl, and the owner's download says so
+          (smoke "prompt-lab authorship record: a hand edit marked, the owner's alone"
+                 (lambda ()
+                   (let* ((found (uiop:symbol-call :prompt-lab :find-session session))
+                          (source (uiop:symbol-call :prompt-lab :model-body found))
+                          (edited (format nil "~a~%;; a hand edit for the authorship record~%" source)))
+                     (unless (eql 200 (nth-value 1 (http :post (door "model") :headers (owner-headers)
+                                                         :json (table "session" session "source" edited))))
+                       (error "the hand edit was refused"))
+                     (let* ((url (format nil "~a?session=~a&format=authorship" (door "download") session))
+                            (record (http :get url :headers (owner-headers))))
+                       (unless (and (stringp record)
+                                    (search "# Authorship record" record)
+                                    (search "HAND EDIT: the author, by hand" record)
+                                    (search "a hand edit for the authorship record" record)
+                                    (search "SHA-256" record))
+                         (error "the authorship record does not mark the hand edit"))
+                       (unless (eql 404 (nth-value 1 (http :get url)))
+                         (error "a stranger got the authorship record")))
+                     ;; the file put back as it was, for the smokes after this one
+                     (http :post (door "model") :headers (owner-headers) :json (table "session" session "source" source))
+                     t)))
           ;; the author takes their own source at any time; nobody else does
           (smoke "prompt-lab source download: the owner's file, a stranger's 404"
                  (lambda ()

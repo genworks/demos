@@ -103,10 +103,19 @@ record, transcript and model.lisp stayed as they first were (2026-09-28)."
     (rename-file tmp file)
     file))
 
-(defun archive-model-file! (file directory)
+(defvar *model-writer* :agent
+  "Who is writing the model file now, for the authorship record (ruling 96):
+:agent (the lab's own agent), :own-agent (the author's own agent, over MCP),
+:author (the author's edit, from the page), :terminal (the file reloaded
+after an edit in the terminal), :seed (a file the session started from).
+Bound by each caller of write-model and load-model-file; the lab's own
+loop is the default.")
+
+(defun archive-model-file! (file directory &optional (writer *model-writer*))
   "Keep the model FILE in DIRECTORY: as model.lisp, and as the next
-model-NNN.lisp when it differs from the newest version kept there.
-Never signals."
+model-NNN.lisp when it differs from the newest version kept there -- and
+then a line in versions.jsonl naming the version, its WRITER, the time and
+the file's SHA-256, for the authorship record.  Never signals."
   (ignore-errors
    (when (and directory (probe-file file))
      (ensure-directories-exist directory)
@@ -114,8 +123,19 @@ Never signals."
                             #'string<))
             (newest (car (last versions))))
        (unless (and newest (same-text-file? file newest))
-         (copy-file! file (merge-pathnames (format nil "model-~3,'0d.lisp" (1+ (length versions)))
-                                           directory))))
+         (let* ((number (1+ (length versions)))
+                (name (format nil "model-~3,'0d.lisp" number)))
+           (copy-file! file (merge-pathnames name directory))
+           (ignore-errors
+            (with-open-file (out (merge-pathnames "versions.jsonl" directory)
+                                 :direction :output :if-exists :append :if-does-not-exist :create
+                                 :external-format :utf-8)
+              (yason:encode (h "version" number "file" name
+                               "writer" (string-downcase (symbol-name writer))
+                               "time" (get-universal-time)
+                               "sha256" (or (watch-sha256-hex (uiop:read-file-string file :external-format :utf-8)) ""))
+                            out)
+              (terpri out))))))
      (copy-file! file (merge-pathnames "model.lisp" directory))
      directory)))
 

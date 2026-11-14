@@ -268,6 +268,145 @@ viewer, is told there is no such session.  Not metered: nothing runs."
           (t (respond-deployment req ent (uiop:read-file-string file :external-format :utf-8)
                                  :attachment (format nil "prompt-lab-~a.lisp" (session-id session)))))))
 
+(defun line-diff (old new)
+  "The lines of NEW against OLD as a list of (:same|:add|:del . line), by
+the longest common subsequence; nil when the two are too big to compare
+(the record then gives the counts alone)."
+  (let* ((a (coerce old 'vector)) (b (coerce new 'vector))
+         (n (length a)) (m (length b)))
+    (when (<= (* (1+ n) (1+ m)) 4000000)
+      (let ((table (make-array (list (1+ n) (1+ m)) :element-type 'fixnum :initial-element 0)))
+        (loop for i from (1- n) downto 0
+              do (loop for j from (1- m) downto 0
+                       do (setf (aref table i j)
+                                (if (string= (aref a i) (aref b j))
+                                    (1+ (aref table (1+ i) (1+ j)))
+                                    (max (aref table (1+ i) j) (aref table i (1+ j)))))))
+        (let ((i 0) (j 0) (out nil))
+          (loop while (or (< i n) (< j m))
+                do (cond ((and (< i n) (< j m) (string= (aref a i) (aref b j)))
+                          (push (cons :same (aref a i)) out) (incf i) (incf j))
+                         ((and (< j m) (or (>= i n) (>= (aref table i (1+ j)) (aref table (1+ i) j))))
+                          (push (cons :add (aref b j)) out) (incf j))
+                         (t (push (cons :del (aref a i)) out) (incf i))))
+          (nreverse out))))))
+
+(defparameter *writer-labels*
+  '(("agent" . "the lab's agent")
+    ("own-agent" . "the author's own agent, over MCP")
+    ("author" . "the author, by hand")
+    ("terminal" . "the author, by hand in the terminal")
+    ("seed" . "a file the session started from"))
+  "How the authorship record names each writer (archive.lisp *model-writer*).")
+
+(defun authorship-versions (directory log)
+  "The versions kept in archive DIRECTORY, oldest first, each a plist (:number
+:file :writer :time :sha256 :inferred): from versions.jsonl where it has the
+version, else inferred from LOG (the record's log) by the last edit or tool
+call at or before the file's date."
+  (let ((rows (make-hash-table)))
+    (ignore-errors
+     (with-open-file (in (merge-pathnames "versions.jsonl" directory) :external-format :utf-8 :if-does-not-exist nil)
+       (when in
+         (loop for line = (read-line in nil nil) while line
+               do (let ((row (ignore-errors (yason:parse line))))
+                    (when (and (hash-table-p row) (integerp (gethash "version" row)))
+                      (setf (gethash (gethash "version" row) rows) row)))))))
+    (loop for path in (sort (mapcar #'namestring (directory (merge-pathnames "model-*.lisp" directory))) #'string<)
+          for number from 1
+          collect (let ((row (gethash number rows))
+                        (text (ignore-errors (uiop:read-file-string path :external-format :utf-8))))
+                    (if row
+                        (list :number number :file (file-namestring path) :writer (gethash "writer" row)
+                              :time (gethash "time" row) :sha256 (gethash "sha256" row) :text text)
+                        (let* ((date (ignore-errors (file-write-date path)))
+                               (event (and date
+                                           (find-if #'(lambda (e)
+                                                        (and (consp e) (realp (first e)) (<= (first e) (+ date 2))
+                                                             (member (second e) '("reload" "tool") :test #'equal)))
+                                                    (reverse (coerce (or log '()) 'list)))))
+                               (said (and event (third event))))
+                          (list :number number :file (file-namestring path)
+                                :writer (cond ((null event) "agent")
+                                              ((equal (second event) "tool") "agent")
+                                              ((and (stringp said) (search "Reloaded from disk" said)) "terminal")
+                                              ((and (stringp said) (search "Started from a model file" said)) "seed")
+                                              (t "author"))
+                                :time date :sha256 (and text (watch-sha256-hex text)) :inferred t :text text)))))))
+
+(defun authorship-text (id directory)
+  "The authorship record of session ID from its archive DIRECTORY, Markdown:
+the author's prompts, the uploads, each version with its writer, its hash
+and its changes against the one before (hand edits marked), and the totals."
+  (let* ((json (read-record (merge-pathnames "session.json" directory)))
+         (log (and json (coerce (or (gethash "log" json) '()) 'list)))
+         (versions (authorship-versions directory log))
+         (totals (make-hash-table :test #'equal))
+         (previous nil))
+    (flet ((when-text (ut) (if (realp ut) (utc-time (round ut)) "time not kept"))
+           (label (writer) (or (cdr (assoc writer *writer-labels* :test #'equal)) writer)))
+      (with-output-to-string (out)
+        (format out "# Authorship record: prompt-lab session ~a~%~%" id)
+        (format out "What the author asked for, what the author wrote by hand and what an agent wrote, version by version, as the lab's archive keeps them; each version's SHA-256 is that of the file kept in the archive.  Writers marked 'inferred' are read from the session's log by time: the session predates the record kept with each version.~%~%")
+        (format out "## The author's prompts~%~%")
+        (let ((n 0))
+          (dolist (e log)
+            (when (and (consp e) (equal (second e) "prompt"))
+              (format out "~d. ~a -- ~a~%" (incf n) (when-text (first e)) (third e))))
+          (when (zerop n) (format out "None.~%")))
+        (format out "~%## Files the author uploaded~%~%")
+        (let ((any nil))
+          (dolist (e log)
+            (when (and (consp e) (equal (second e) "note") (stringp (third e)) (eql 0 (search "Uploaded " (third e))))
+              (setq any t)
+              (format out "- ~a -- ~a~%" (when-text (first e)) (third e))))
+          (unless any (format out "None.~%")))
+        (format out "~%## Versions~%")
+        (dolist (v versions)
+          (let* ((writer (getf v :writer))
+                 (hand? (member writer '("author" "terminal") :test #'equal))
+                 (lines (and (stringp (getf v :text)) (uiop:split-string (getf v :text) :separator '(#\Newline))))
+                 (diff (line-diff (or previous '()) (or lines '())))
+                 (added (count :add diff :key #'car))
+                 (removed (count :del diff :key #'car)))
+            (incf (gethash writer totals 0) added)
+            (format out "~%### Version ~d -- ~a -- ~:[~;HAND EDIT: ~]~a~:[~; (inferred)~]~%~%"
+                    (getf v :number) (when-text (getf v :time)) hand? (label writer) (getf v :inferred))
+            (format out "File ~a, SHA-256 ~a.  ~d line~:p added, ~d removed against the version before.~%"
+                    (getf v :file) (or (getf v :sha256) "not kept") added removed)
+            (when (and diff (or (plusp added) (plusp removed)))
+              (format out "~%```diff~%")
+              (let ((shown 0))
+                (dolist (d diff)
+                  (unless (eq (car d) :same)
+                    (when (< shown 400)
+                      (format out "~a ~a~%" (if (eq (car d) :add) "+" "-") (cdr d)))
+                    (incf shown)))
+                (when (> shown 400) (format out "... ~d more changed lines~%" (- shown 400))))
+              (format out "```~%"))
+            (setq previous lines)))
+        (when (null versions) (format out "~%No version of the model file was kept.~%"))
+        (format out "~%## Totals~%~%Lines added, by writer, over every version:~%~%")
+        (maphash #'(lambda (writer n) (format out "- ~a: ~d~%" (label writer) n)) totals)))))
+
+(defun authorship-download (req ent session key deployed?)
+  "Answer SESSION's authorship record to its owner (KEY), as the source
+download does; anyone else, or a deployed model's viewer, is told there is
+no such session."
+  (let* ((replay? (session-replay? session))
+         (directory (cond (deployed? nil)
+                          (replay? (archived-directory (session-id session)))
+                          (t (archive-directory session))))
+         (json (and directory (read-record (merge-pathnames "session.json" directory))))
+         (owner? (if replay?
+                     (and json (stringp key) (equal (gethash "owner" json) key))
+                     (owner? session key))))
+    (cond ((not (and directory owner?)) (no-such-session req ent))
+          ((not (probe-file (merge-pathnames "session.json" directory)))
+           (refuse req ent "This session has no record in the archive yet."))
+          (t (respond-deployment req ent (authorship-text (session-id session) directory)
+                                 :attachment (format nil "authorship-~a.md" (session-id session)))))))
+
 (defun download-door (req ent)
   "GET <prefix>/api/download?session=<id>&format=<name> (or replay=<id>
 for an archived session's replay; owner=<key> for a private one; or
@@ -298,6 +437,8 @@ credits are spent.  A grant is spent when its file is served."
           ;; the model file itself: its author's, at any time, open or
           ;; closed, with nothing to unlock (the user's ruling, 2026-11-12)
           ((equal kind "source") (source-download req ent session key (stringp deployed)))
+          ;; the authorship record: prompts, versions, writers, hashes (ruling 96)
+          ((equal kind "authorship") (authorship-download req ent session key (stringp deployed)))
           ((null entry) (refuse req ent "No such download here: ~a." kind))
           ;; a deployed model's priced download: its owner's, or bought on its page
           ((and record (not (deployment-admits? record kind (or key (query-value req "owner")) grant)))

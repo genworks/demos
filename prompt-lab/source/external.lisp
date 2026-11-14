@@ -303,7 +303,7 @@ agent's side of one prompt.  The events:
                                    ;; a model to start from, before the prompt is heard
                                    (when (stringp seed)
                                      (log-event session :reload "Started from a model file: ~a"
-                                                (or (cdr (assoc "text" (first (write-model session seed))
+                                                (or (cdr (assoc "text" (first (let ((*model-writer* :seed)) (write-model session seed)))
                                                                 :test #'string=))
                                                     ""))))
                                  (log-event session :prompt "~a" (said))
@@ -387,10 +387,12 @@ loop logs it.  Returns the MCP result."
     (note-external-claim! session))
   (multiple-value-bind (blocks error?)
       (bt:with-lock-held ((external-lock session))
-        (handler-case (run-tool session name (and (hash-table-p arguments)
-                                                  (alexandria:hash-table-alist arguments)))
-          (error (condition)
-            (values (list (text-result "~a" condition)) t))))
+        ;; the author's own agent, for the authorship record (archive.lisp)
+        (let ((*model-writer* :own-agent))
+          (handler-case (run-tool session name (and (hash-table-p arguments)
+                                                    (alexandria:hash-table-alist arguments)))
+            (error (condition)
+              (values (list (text-result "~a" condition)) t)))))
     (when error?
       (log-event session :tool-error "~a: ~a" name
                  (or (cdr (assoc "text" (first blocks) :test #'string=)) "failed")))

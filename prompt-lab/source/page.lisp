@@ -968,7 +968,8 @@ model file, written, compiled and loaded like the agent's."
           ;; would compile the same model file at the same time
           ((not (claim! session)) (refuse req ent "Wait for the agent to finish first."))
           (t (multiple-value-bind (blocks error?)
-                 (unwind-protect (write-model (touch session) source)
+                 ;; the author's own hand, for the authorship record (archive.lisp)
+                 (unwind-protect (let ((*model-writer* :author)) (write-model (touch session) source))
                    (setf (session-busy? session) nil))
                (let ((text (or (cdr (assoc "text" (first blocks) :test #'string=)) "")))
                  (log-event session :reload "Your edit: ~a" text)
@@ -985,7 +986,8 @@ it is on disk, after an edit made in the terminal."
           ((not (probe-file (session-model-file session))) (refuse req ent "There is no model file yet."))
           ((not (claim! session)) (refuse req ent "Wait for the agent to finish first."))
           (t (multiple-value-bind (blocks error?)
-                 (unwind-protect (load-model-file (touch session))
+                 ;; an edit made in the terminal: the author's, for the authorship record
+                 (unwind-protect (let ((*model-writer* :terminal)) (load-model-file (touch session)))
                    (setf (session-busy? session) nil))
                (let ((text (or (cdr (assoc "text" (first blocks) :test #'string=)) "")))
                  (log-event session :reload "Reloaded from disk: ~a" text)
