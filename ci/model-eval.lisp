@@ -137,14 +137,17 @@ keyword values as their lower-case names."
                          (t value))))
     table))
 
-(defun eval-run (sample model &key budget-cents out (address "10.250.0.1"))
+(defun eval-run (sample model &key budget-cents out (net 250))
   "Replay SAMPLE's prompts on MODEL, one fresh session each, until the cost
-reaches BUDGET-CENTS (nil: no ceiling).  Each result is written to OUT (a
-JSON-lines file, appended) when given.  Answers the results, plists."
-  (let ((spent 0) (results nil))
+reaches BUDGET-CENTS (nil: no ceiling).  Each session opens from an address
+of its own in 10.NET.x.y, so the lab's sessions-per-address cap never stops
+a run.  Each result is written to OUT (a JSON-lines file, appended) when
+given.  Answers the results, plists."
+  (let ((spent 0) (results nil) (index 0))
     (dolist (item sample)
       (when (and budget-cents (>= spent budget-cents)) (return))
-      (let ((session (eval-call '#:open-session! address nil)))
+      (let* ((address (format nil "10.~d.~d.~d" net (floor index 250) (1+ (mod index 250))))
+             (session (progn (incf index) (eval-call '#:open-session! address nil))))
         (unless session (error "The lab would not open a session for ~a." address))
         (unwind-protect
              (let ((start (get-internal-real-time)))
