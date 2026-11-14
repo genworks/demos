@@ -687,8 +687,8 @@ loaded) its page too."
                        (unless (eql status 404) (error "a stranger's source download answered ~a" status)))
                      t)))
           ;; THE CLICKWRAP (ruling 94, guards.lisp): versioned texts with their
-          ;; hashes; Build, the own agent, an external agent, Deploy and Declare
-          ;; each wait for the tick; the acceptance log is chained, names no
+          ;; hashes; Build, the own agent, an external agent and Deploy each wait
+          ;; for the tick, Declare for none (ruling 99); the acceptance log is chained, names no
           ;; owner key and is kept out of the archive
           (let* ((root (merge-pathnames "ci-terms/" (uiop:temporary-directory)))
                  (log-root (merge-pathnames "ci-acceptances/" (uiop:temporary-directory)))
@@ -713,7 +713,7 @@ loaded) its page too."
                   (symbol-value (lab '#:*free-lab?*)) nil)
             (funcall fresh)
             (unwind-protect
-                 (smoke "prompt-lab clickwrap: versioned texts, the tick at Build, agent, Deploy and Declare, the log"
+                 (smoke "prompt-lab clickwrap: versioned texts, the tick at Build, agent and Deploy, none at Declare, the log"
                         (lambda ()
                           (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args))
                                  (refused? (reason) (search "First accept" (or reason ""))))
@@ -776,20 +776,18 @@ loaded) its page too."
                                        (error "a deployment went ahead without the tick"))
                                      (when (refused? (nth-value 1 (pl :deploy-session! s :name "ci-terms" :accepted t)))
                                        (error "a ticked deployment was still refused for the terms"))
-                                     ;; DECLARE: the tick accepts the texts, and is asked for
-                                     (let ((cid (pl :session-id closed)) (ckey (pl :session-owner closed)))
-                                       (unless (refused? (nth-value 1 (pl :decide-closed-work! cid ckey "declare")))
-                                         (error "a declaration went ahead without the tick"))
-                                       (unless (pl :decide-closed-work! cid ckey "declare" :accepted t)
-                                         (error "a ticked declaration was refused"))
-                                       (pl :accept-terms! :declare :session closed :address "10.9.8.6" :via "ci"))
+                                     ;; DECLARE: nothing to tick (ruling 99)
+                                     (unless (pl :decide-closed-work! (pl :session-id closed) (pl :session-owner closed) "declare")
+                                       (error "a declaration was refused with nothing to tick"))
                                      ;; THE LOG: chained, the texts' versions and hashes, no owner key, not in the archive
                                      (let* ((file (pl :terms-log-file))
                                             (text (uiop:read-file-string file)))
                                        (unless (pl :terms-log-verify file) (error "the acceptance log's chain does not verify"))
-                                       (unless (and (search "\"scope\":\"build\"" text) (search "\"scope\":\"declare\"" text)
-                                                    (search "ci-1" text) (search "agent door" text))
+                                       (unless (and (search "\"scope\":\"build\"" text) (search "ci-1" text)
+                                                    (search "agent door" text))
                                          (error "the log does not record the acceptances"))
+                                       (when (search "\"scope\":\"declare\"" text)
+                                         (error "a declaration was logged as an acceptance"))
                                        (when (or (search (pl :session-owner s) text) (search (pl :session-owner closed) text))
                                          (error "the log holds an owner key"))
                                        (let ((archive (symbol-value (lab '#:*archive-root*))))
@@ -798,7 +796,7 @@ loaded) its page too."
                                        ;; a line changed afterwards breaks the chain
                                        (let ((copy (merge-pathnames "tampered.jsonl" log-root)))
                                          (with-open-file (out copy :direction :output :if-exists :supersede)
-                                           (write-string (uiop:frob-substrings text '("10.9.8.6") "10.9.8.7") out))
+                                           (write-string (uiop:frob-substrings text '("agent door") "agent doer") out))
                                          (when (pl :terms-log-verify copy) (error "a tampered log verified"))))
                                      t)
                                 (ignore-errors (pl :delete-session s))

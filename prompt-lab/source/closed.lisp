@@ -18,11 +18,9 @@
 ;;
 ;;   HOST     a deployment with us (Monetize, where this lab deploys);
 ;;   DECLARE  their choice to host it themselves or distribute binaries
-;;            built from it; no promise asked (the user's ruling,
-;;            2026-11-13) -- the panel reminds them of the quarterly report,
-;;            which the license and the terms carry.  Where the lab has
-;;            texts for it (guards.lisp, THE CLICKWRAP) the one tick accepts
-;;            those texts;
+;;            built from it; nothing to tick and no promise asked (the user's
+;;            rulings, 2026-11-13 and 99) -- the panel reminds them of the
+;;            quarterly report, which the license and the terms carry;
 ;;   PUBLIC   opened now, under the AGPL;
 ;;   DELETE   everything the lab keeps of it, gone.
 ;;
@@ -58,7 +56,7 @@
 (defparameter *closed-declaration-text*
   "I will host this work myself or distribute binaries built from it."
   "String.  The words of the author's choice, kept with the declaration.  A
-choice, not a promise (the user's ruling, 2026-11-13): no promise is ticked.")
+choice, not a promise: nothing is ticked (the user's ruling, 2026-11-13).")
 
 (defparameter *closed-reminder-text*
   "A reminder: closed Gendl-built work that you host or distribute is reported each quarter at genworks.com/royalties/ -- a $0 quarter is fine -- unless you hold a Genworks GDL commercial license."
@@ -283,11 +281,9 @@ upload and thumbnail.  The monitor's audit log keeps its lines."
                            "priority" "default" "tags" "page_facing_up")))
     declaration))
 
-(defun decide-closed-work! (id key action &key email accepted)
+(defun decide-closed-work! (id key action &key email)
   "The owner's (KEY) exit for closed work ID: ACTION one of \"public\",
 \"delete\" or \"declare\" (EMAIL optional: an address the house may use).
-Where the lab asks its texts to be accepted at a declaration (guards.lisp,
-THE CLICKWRAP), \"declare\" waits for ACCEPTED; the caller logs it.
 Values: a notice for the author, or nil and the reason."
   (multiple-value-bind (session json directory) (closed-work id key)
     (let ((email (and (stringp email) (plusp (length email)) email)))
@@ -301,12 +297,10 @@ Values: a notice for the author, or nil and the reason."
                  (progn (delete-closed-work! id :session session :directory directory)
                         "Your work is deleted: the lab keeps nothing of it.")))
             ((equal action "declare")
-             ;; a choice, not a promise (the user's ruling, 2026-11-13): no
-             ;; promise is ticked -- the one tick, where the lab has texts for
-             ;; it, accepts those (ruling 94); an address only if given
-             (cond ((and (not accepted) (terms-required? :declare))
-                    (values nil (terms-refusal :declare)))
-                   ((and email (not (valid-email? email)))
+             ;; a choice, not a promise: nothing to tick (the user's rulings,
+             ;; 2026-11-13 and 99 -- not even the clickwrap's texts); an
+             ;; address only if the author gives one
+             (cond ((and email (not (valid-email? email)))
                     (values nil "That address does not look right; leave it empty if you prefer."))
                    (t (declare-closed-work! id email :session session :json json :directory directory)
                       (format nil "Noted: the work stays closed, and it is yours to host or distribute.  ~a"

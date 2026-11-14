@@ -407,8 +407,9 @@ lab just sends the visitor on."
 ;;
 ;; THE CLICKWRAP.  The texts a person accepts with a tick: at a
 ;; session's first Build (or when their own agent is connected, or an
-;; external agent's first prompt under a key), at every Deploy and at a
-;; closed work's Declare.  Each text is a file, versioned by its first
+;; external agent's first prompt under a key) and at every Deploy -- not
+;; at a closed work's Declare, which ticks nothing (the user's rulings of
+;; 2026-11-13 and 99).  Each text is a file, versioned by its first
 ;; line and fingerprinted by its SHA-256, both recorded with the
 ;; acceptance in an append-only log -- one JSON line an acceptance, each
 ;; chained to the line before by hash -- kept beside the workspace,
@@ -423,11 +424,11 @@ each as <id>.md whose first line reads `Version: <version>'.  Nil: no
 clickwrap -- nothing is asked and nothing logged.")
 
 (defparameter *terms-documents*
-  '((:id "terms" :title "Terms of Service" :at (:build :deploy :declare))
+  '((:id "terms" :title "Terms of Service" :at (:build :deploy))
     (:id "open-source" :title "open-source notice" :at (:build))
-    (:id "author-agreement" :title "Author Agreement" :at (:deploy :declare)))
-  "The texts and the moments each is accepted at: :build, :deploy,
-:declare.  A text with no file is left out of what is asked.")
+    (:id "author-agreement" :title "Author Agreement" :at (:deploy)))
+  "The texts and the moments each is accepted at: :build, :deploy.  A
+text with no file is left out of what is asked.")
 
 (defparameter *terms-default-directory*
   ;; the SOURCE file's place, read at compile time (as *static-directory*)
@@ -482,7 +483,7 @@ or nil when it has no file."
               doc))))))
 
 (defun terms-set (scope)
-  "The texts accepted at SCOPE (:build :deploy :declare) as they stand,
+  "The texts accepted at SCOPE (:build :deploy) as they stand,
 plists in the order of *terms-documents*; nil without a clickwrap."
   (when (clickwrap?)
     (loop for spec in *terms-documents*

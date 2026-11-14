@@ -564,8 +564,7 @@ behind this room and the sibling lab on the other engine, if any."
                            "pot" (pot-state)
                            ;; the texts accepted by clickwrap, by moment (guards.lisp); null without
                            "terms" (and (clickwrap?)
-                                        (h "build" (terms-state :build) "deploy" (terms-state :deploy)
-                                           "declare" (terms-state :declare))))))
+                                        (h "build" (terms-state :build) "deploy" (terms-state :deploy))))))
 
 (defun open-session! (address &optional wallet &key closed?)
   "Open a session for a visitor at ADDRESS, naming WALLET if any; CLOSED?

@@ -762,7 +762,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, modelnow: ~a, agentmode: ~a, ownagent: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', tagree: false, termsneed: ~a, dagree: false, cagree: false, private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, modelnow: ~a, agentmode: ~a, ownagent: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', tagree: false, termsneed: ~a, dagree: false, private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; and of its last staged hosting (hosting.lisp)
@@ -1625,7 +1625,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                      (escape-string-minimal-plus-quotes
                                       (format nil "~@[confirm(~a) && ~](($cact = '~a'), ~a)"
                                               (and confirm (js-string-literal confirm)) what
-                                              (the (datastar-action :closed-decide :options "{filterSignals: {include: /^(cact|cemail|cagree|owner)$/}}")))))))
+                                              (the (datastar-action :closed-decide :options "{filterSignals: {include: /^(cact|cemail|owner)$/}}")))))))
                           (with-lhtml-string ()
                             (:div :class "pl-card pl-closed-work"
                                   (:h2 "Closed work")
@@ -1647,16 +1647,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                               (:a :href "https://genworks.com/royalties/" :target "_blank" :rel "noopener" "genworks.com/royalties/")
                                               " -- a $0 quarter is fine -- or a Genworks GDL commercial license.  Nothing else to sign.")
                                           (:div :class "pl-declare" :|data-ignore-morph| ""
-                                                ;; the clickwrap (guards.lisp): the texts, not a promise
-                                                (when (terms-required? :declare)
-                                                  (htm (:label :class "pl-pick pl-terms"
-                                                               (:input :type "checkbox" :id "pl-cagree" :|data-bind:cagree| "")
-                                                               " I accept the " (str (terms-links-html :declare)))))
                                                 (:div :class "pl-row"
                                                       (:input :type "email" :maxlength "200" :|data-bind:cemail| ""
                                                               :placeholder "Your address (optional)")
                                                       (:button :type "button" :class "pl-download"
-                                                               :|data-attr:disabled| (if (terms-required? :declare) "!$cagree" "false")
                                                                :|data-on:click| (funcall act "declare" nil)
                                                                "I will host or distribute it myself")))
                                           (:div :class "pl-row"
@@ -2034,11 +2028,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
           (the (tell-error! "This is no closed work of yours."))
           (multiple-value-bind (notice reason)
               (decide-closed-work! (session-id session) (the owner-key) action
-                                   :email (let ((e (gethash "cemail" signals))) (and (stringp e) (string-trim " " e)))
-                                   ;; the clickwrap's tick, at a declaration
-                                   :accepted (eq (gethash "cagree" signals) t))
-            (when (and notice (equal action "declare"))
-              (accept-terms! :declare :session session :address (client-address *datastar-request*) :via "sheet"))
+                                   :email (let ((e (gethash "cemail" signals))) (and (stringp e) (string-trim " " e))))
             (cond ((null notice) (the (tell-error! reason)))
                   ((equal action "delete")
                    ;; nothing is left to show: back to the lab's front door
