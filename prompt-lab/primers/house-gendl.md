@@ -46,12 +46,16 @@ draws nothing, when it is broken:
   - Accepted but leave them alone -- they replace what the lab measures
     your model by: `bounding-box`, `volume`, `area`, `root`,
     `vertex-list`.
-  - THE RULE BENDS for MODEL's own inputs: `width`, `length` and
-    `height` (its envelope), `center`, `orientation` and
-    `display-controls` are inputs every object has; giving them a
-    default here is how a model sets its size, place, turn and colour,
-    and it is meant.  A computed slot may give `width`, `length` or
-    `height` a derived value too.
+  - THE RULE BENDS for the inputs every object has: `width`, `length`
+    and `height` (MODEL's envelope), `center`, `orientation` and
+    `display-controls` are never reserved, and MODEL may define any of
+    them either way, with the same effect:
+    - as an INPUT, `(height 750)` under `:input-slots` -- the visitor
+      gets a control for it in the viewer;
+    - as a COMPUTED slot, `(height (* 2 (the width)))` under
+      `:computed-slots` -- derived from the inputs, and no control.
+    Make the envelope an input when a person should change it, computed
+    when it follows from other inputs.
   - The safe pattern for your own names: a specific noun, often two
     words -- `leg-height`, `top-center`, `spoke-count`, `bolt-circle`.
 - A function's arguments are distinct names: `(plate-area (w l) ...)`,
