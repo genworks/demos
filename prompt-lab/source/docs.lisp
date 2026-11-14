@@ -50,6 +50,15 @@ lisply-search.  Nil withholds the tool.")
 (defparameter *search-query-length* 300
   "Integer. Characters a query may have.")
 
+(defparameter *search-mode* "hybrid"
+  "String or nil. The ranking search_docs asks for: \"lexical\", \"semantic\"
+(by meaning) or \"hybrid\" (both rankings fused); nil leaves it to the
+ready room's default.  It is asked for only where the ready room's
+lisply-search knows the modes, and the ready room answers lexically, without
+a warning, whenever it has no embeddings to rank by (lisply-mcp CORPUS.md,
+section 7) -- so on any ship the agent gets results, and the best ranking
+that ship can give.")
+
 (defparameter *describe-base-types*
   '((:surf :brep
      "As a brep solid it also takes brep-tolerance and tessellation-parameters, answers volume, and takes and answers everything a geometric object does: center, orientation, width, length, height, display-controls (e.g. (list :color :steelblue)), bounding-box, leaves.")
@@ -87,9 +96,13 @@ as inputs on a mixin.")
   "The expression the ready room evaluates: lisply-search, its answer
 encoded as JSON there so it comes back as data.  QUERY travels as a
 string literal (~s escapes the quote and the backslash the way Emacs
-reads them), so a query cannot become code."
-  (format nil "(json-encode (let ((r (lisply-search '(:query ~s :k ~a :max-snippet-tokens ~a)))) (list :hits (plist-get r :hits) :warning (plist-get r :warning))))"
-          query hits *search-snippet-tokens*))
+reads them), so a query cannot become code.  *search-mode* is asked for
+only when that Emacs's lisply-search has the modes (an older one would
+answer with a warning, which the agent would read)."
+  (format nil "(json-encode (let ((r (lisply-search (list :query ~s :k ~a :max-snippet-tokens ~a :search-mode (and (fboundp 'lisply-search--parse-search-mode) ~a))))) (list :hits (plist-get r :hits) :warning (plist-get r :warning))))"
+          query hits *search-snippet-tokens*
+          ;; Emacs reads NIL as a symbol, not as nil
+          (if (stringp *search-mode*) (format nil "~s" *search-mode*) "nil")))
 
 (defun collapse-whitespace (text)
   "TEXT with runs of whitespace as one space, trimmed."
