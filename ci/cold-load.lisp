@@ -713,6 +713,15 @@ loaded) its page too."
                                                   :key (lambda (row) (getf row :label)) :test #'equal)))
                                 (unless (and public (search "https://github.com/" (getf public :repository)))
                                   (error "a public host's origin was not linked: ~s" public))))
+                            ;; a private origin with a public mirror links the mirror
+                            (progv (list (lab '#:*origin-mirrors*))
+                                (list (list (cons "https://private.example.com/genworks/quicklisp"
+                                                  "https://gitlab.common-lisp.net/example/quicklisp")))
+                              (let ((row (first (uiop:symbol-call :prompt-lab :image-commits))))
+                                (unless (equal (getf row :repository) "https://gitlab.common-lisp.net/example/quicklisp")
+                                  (error "a mirrored origin was not linked to its mirror: ~s" row))))
+                            (when (symbol-value (lab '#:*origin-mirrors*))
+                              (error "the lab ships a mirror table before a mirror exists"))
                             t)
                        (setf (symbol-value (lab '#:*image-commits-files*)) saved)))))
           ;; THE CLICKWRAP (ruling 94, guards.lisp): versioned texts with their

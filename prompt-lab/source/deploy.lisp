@@ -1292,11 +1292,31 @@ checkout); those are not the page's to name.")
   "Hosts whose https addresses the source page links; an origin anywhere
 else (a private forge, an ssh address) is shown as name and commit only.")
 
+(defparameter *origin-mirrors* nil
+  "Alist (origin . public address): a repository an image was built from
+where it is private, and the public mirror carrying the same commits.  The
+source page links the mirror for an origin that begins with the key (a
+trailing .git ignored).  Empty until a mirror exists, so the page never
+links an address that does not answer.")
+
+(defun public-repository (origin)
+  "Where the source page may send a reader for ORIGIN: its public mirror
+(*origin-mirrors*), else ORIGIN itself when it is an https address on a
+public host, else nil."
+  (when (stringp origin)
+    (flet ((bare (address) (if (and (> (length address) 4) (string= ".git" address :start2 (- (length address) 4)))
+                               (subseq address 0 (- (length address) 4))
+                               address)))
+      (or (cdr (find-if #'(lambda (entry) (eql 0 (search (bare (car entry)) (bare origin)))) *origin-mirrors*))
+          (and (some #'(lambda (host) (eql 0 (search (format nil "https://~a/" host) origin)))
+                     *public-origin-hosts*)
+               origin)))))
+
 (defun image-commits ()
   "The repositories the image records beside Gendl (its COMMITS file) that
 the source page shows -- those named in *image-commits-shown* --
-as plists (:label :repository :commit), the repository only where its
-origin is an https address on a public host (*public-origin-hosts*).
+as plists (:label :repository :commit), the repository only where it has
+a public address (public-repository: a mirror, or a public host).
 Gendl itself, and the checkouts the lab lists of its own, are left to
 component-commits; anything else an image records is not the page's."
   (let ((text (some #'(lambda (file) (ignore-errors (uiop:read-file-string file))) *image-commits-files*)))
@@ -1307,12 +1327,7 @@ component-commits; anything else an image records is not the page's."
                                  :test #'string=)
             for (name commit nil origin) = fields
             when (and name commit (member name *image-commits-shown* :test #'string-equal))
-              collect (list :label name :commit commit
-                            :repository (and (stringp origin)
-                                             (some #'(lambda (host)
-                                                       (eql 0 (search (format nil "https://~a/" host) origin)))
-                                                   *public-origin-hosts*)
-                                             origin))))))
+              collect (list :label name :commit commit :repository (public-repository origin))))))
 
 (defun component-commits ()
   "Each component of a deployment, a plist (:label :repository :commit
