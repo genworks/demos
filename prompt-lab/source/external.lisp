@@ -91,6 +91,45 @@ session, so a tool that is slow in one keeps no other waiting.")
 (defun external-off (req ent)
   (refuse req ent net.aserve:*response-not-found* "This lab takes no external agent."))
 
+;;
+;; A session run by its author's OWN AGENT (2026-11-13, the user: 'these
+;; authors can hook up their own agents through MCP ... which removes the
+;; whole paying-for-agent question away from our side entirely, if they
+;; choose that option').  An author key may choose it for a session from
+;; the first screen: the sheet opens the session under the key and marks
+;; it, the lab's own agent is never called for it (begin-prompt! refuses),
+;; and the page shows how to connect -- the session's MCP address, the
+;; owner key it carries, client configurations and the system prompt,
+;; which the MCP door also gives as its instructions.  What stays on the
+;; lab's side: the tools run here (compile, check, render), the archive,
+;; hosting and the caps.  Kept beside the struct, like the kind and the
+;; model, and in session.json as "agent": "own".
+;;
+
+(defvar *own-agent-sessions* (make-hash-table :test #'equal)
+  "Session id -> t: sessions whose author builds with their own agent.")
+
+(defun own-agent? (session)
+  (and session (bt:with-lock-held (*sessions-lock*) (gethash (session-id session) *own-agent-sessions*)) t))
+
+(defun set-own-agent! (session on?)
+  "Mark SESSION as run by its author's own agent (ON? true) or by the lab's."
+  (bt:with-lock-held (*sessions-lock*)
+    (if on?
+        (setf (gethash (session-id session) *own-agent-sessions*) t)
+        (remhash (session-id session) *own-agent-sessions*)))
+  on?)
+
+(defun own-agent-offered? (wallet)
+  "Whether this lab offers WALLET's author a session run by their own agent."
+  (and (external-admits? wallet) t))
+
+(defun mcp-instructions (session)
+  "What the MCP door tells an agent as it connects: the system prompt the
+lab's own agent gets for SESSION, so an author's agent builds as well."
+  (format nil "You are working on one prompt-lab session through its tools; the author gives you the prompts.  Work exactly as the lab's own agent does, by these instructions:~%~%~a"
+          (system-text session)))
+
 (defun tool-name (tool)
   (cdr (assoc "name" tool :test #'string=)))
 
@@ -315,7 +354,7 @@ loop logs it.  Returns the MCP result."
                                    (first *mcp-protocol-versions*))
                                "capabilities" (h "tools" (h))
                                "serverInfo" (h "name" "prompt-lab" "version" "1")
-                               "instructions" "The tools of one prompt-lab session: its model file, its package, its checks.")))
+                               "instructions" (mcp-instructions session))))
             ((equal method "ping") (rpc-result id (h)))
             ((equal method "tools/list")
              (rpc-result id (h "tools" (map 'list #'mcp-tool (tool-definitions session)))))

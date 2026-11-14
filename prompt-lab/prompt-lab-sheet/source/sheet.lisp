@@ -374,7 +374,7 @@ SESSION's balance -- or nil."
 .pl-file-link{display:inline-flex;gap:.4rem;align-items:center;cursor:pointer;color:var(--pl-link,#1550a8);text-decoration:underline;text-underline-offset:2px}
 .pl-file-link:hover{text-decoration-thickness:2px}#pl-file:focus-visible+.pl-file-link,.pl-file-link:focus-within{outline:2px solid var(--pl-focus,#36c);outline-offset:2px}
 .pl-fee b{color:var(--pl-ink,#111)}
-.pl-kinds{margin:0 0 .45rem;gap:.7rem;flex-wrap:wrap;font-size:.9em}.pl-kinds .pl-line{margin:0}.pl-models{margin:0 0 .45rem;gap:.5rem;align-items:center;flex-wrap:wrap;font-size:.9em}.pl-models .pl-line{margin:0}.pl-models select{font:inherit;max-width:100%}
+.pl-kinds{margin:0 0 .45rem;gap:.7rem;flex-wrap:wrap;font-size:.9em}.pl-kinds .pl-line{margin:0}.pl-models{margin:0 0 .45rem;gap:.5rem;align-items:center;flex-wrap:wrap;font-size:.9em}.pl-models .pl-line{margin:0}.pl-models select{font:inherit;max-width:100%}.pl-own-agent .pl-code{white-space:pre-wrap;word-break:break-all;font-size:.8em;padding:.4rem .5rem;margin:.2rem 0 .5rem;border-radius:4px;background:rgba(127,127,127,.12)}.pl-own-agent details{margin:.4rem 0}.pl-own-agent details .pl-code{max-height:16rem;overflow:auto}
 .pl-pick{display:inline-flex;gap:.3rem;align-items:center;cursor:pointer}.pl-pick input{accent-color:var(--pl-accent,#366fc5);margin:0}
 .pl-open-app{font-weight:600;color:var(--pl-link,#1550a8)}
 .pl-project a{color:var(--pl-link,#1550a8);text-decoration:underline}
@@ -594,6 +594,8 @@ not hold."
    (tiles (list (list :object (the prompt-tile) :place :left :tab "Prompt")
                 ;; what was asked and the agent's answer, under the prompt
                 (list :object (the reply-section) :place :left :tab "Prompt")
+                ;; a session built by its author's own agent: how to connect it (external.lisp)
+                (list :object (the agent-section) :place :left :tab "Prompt")
                 ;; a visitor's own project, from GitLab (project.lisp)
                 (list :object (the project-tile) :place :left :tab "Prompt")
                 (list :object (the app-section) :place :left :tab "Prompt")
@@ -618,7 +620,7 @@ not hold."
    (user-mode?-default t)
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
-   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :author :author-name :closed-decide :wear-skin :shade-desk :upload :adopt
+   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :author :author-name :closed-decide :connect-agent :agent-mode :wear-skin :shade-desk :upload :adopt
                            :deploy :undeploy :connect :open-project :push-project :deploy-project))
 
    ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
@@ -760,7 +762,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
    (initial-signals
-    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, modelnow: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, modelnow: ~a, agentmode: ~a, ownagent: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; and of its last staged hosting (hosting.lisp)
@@ -793,6 +795,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
             (js-string-literal (if (the session) (session-model (the session)) (default-session-model)))
             ;; and the one it built with last, for the switch's warning
             (js-string-literal (if (the session) (session-model (the session)) (default-session-model)))
+            ;; whose agent builds it: the lab's, or the author's own over MCP
+            ;; (external.lisp) -- the choice, and whether the session is marked
+            (if (and (the session) (own-agent? (the session))) "'own'" "'lab'")
+            (json-boolean (and (the session) (own-agent? (the session))))
             (json-boolean (or (the archive-id) (the archive-pending)))
             (if (the cancelled?) "'The payment was cancelled; nothing was charged.'" "''")
             (json-boolean (and (the session) (session-busy? (the session))))
@@ -839,7 +845,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               ;; where it offers a choice; one not answering is greyed
                               (let ((menu (model-menu)))
                                 (when menu
-                                  (htm (:div :class "pl-row pl-models"
+                                  (htm (:div :class "pl-row pl-models" :|data-show| "$agentmode != 'own'"
                                              :data-doc "Which model the agent builds with, from this prompt on.  Each costs your AI allowance at its own rate, shown beside it; one marked 'keeps working' goes on past the allowance."
                                              (:label :class "pl-line" :for "pl-model" "Model")
                                              (:select :id "pl-model" :|data-bind:model| ""
@@ -853,7 +859,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                   ;; a switch deep in a session costs once: each model
                                   ;; keeps its own cache, and the thinking is dropped
                                   (htm (:p :class "pl-line pl-dim" :style "display:none"
-                                           :|data-show| "$opened && $model != $modelnow"
+                                           :|data-show| "$opened && $agentmode != 'own' && $model != $modelnow"
                                            "Switching models: the next prompt reads the whole session again at the new model's full rate (each model keeps its own cache), and the conversation's earlier thinking is left behind.")))))
                               ;; closed source is chosen here, before the session
                               ;; opens with the first build or upload (deploy.lisp)
@@ -886,13 +892,34 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                          "This is the free public lab: building here costs you nothing -- each build's AI is paid from a community pot that Genworks keeps filled, and an author key has a monthly AI allowance of its own.  Everything made here -- your prompts, the model and its code -- is public the moment it is made, in the archive for anyone to read and reuse under the GNU Affero General Public License, version 3 or later -- the license of Gendl, which it runs on.  Nothing is sold here; a private lab of your own, where you can sell what you make, is a rung up "
                                          (:a :href "https://genworks.com/authors/" :target "_blank" :rel "noopener" "the ladder")
                                          ".")))
-                              (:textarea :id "pl-prompt" :rows "4" :|data-bind:prompt| ""
+                              ;; whose agent builds: the lab's, or the author's own over
+                              ;; MCP (external.lisp) -- offered where the lab takes one,
+                              ;; to an author key on a public lab
+                              (when *external-agent?*
+                                (htm (:div :class "pl-row pl-kinds" :role "radiogroup" :style "display:none"
+                                           :|data-show| (if (eq *external-agent?* t) "$editable" "$editable && $wallet")
+                                           :data-doc "Who builds: the lab's agent, on the lab's AI, or your own agent -- Claude Code, Cursor, any MCP client -- on your own sign-in, through this session's tools"
+                                           (:span :class "pl-line" "Agent")
+                                           (:label :class "pl-pick"
+                                                   (:input :type "radio" :name "pl-agentmode" :value "lab" :|data-bind:agentmode| "")
+                                                   " the lab's")
+                                           (:label :class "pl-pick"
+                                                   (:input :type "radio" :name "pl-agentmode" :value "own" :|data-bind:agentmode| "")
+                                                   " my own, over MCP"))
+                                     (:div :class "pl-row" :style "display:none" :|data-show| "$agentmode == 'own' && !$ownagent"
+                                           (:button :type "button" :class "pl-build"
+                                                    :|data-on:click| (the (datastar-action :connect-agent :options "{filterSignals: {include: /^(owner|wallet|kind|closedPick)$/}}"))
+                                                    "Connect my own agent")
+                                           (:span :class "pl-line" "Opens this session for your agent: its address and set-up appear below.  The lab calls no AI for it."))
+                                     (:p :class "pl-line" :style "display:none" :|data-show| "$agentmode == 'own' && $ownagent"
+                                         "Your own agent builds this session: give it the prompts.  How to connect it is under 'Your own agent' below.")))
+                              (:textarea :id "pl-prompt" :rows "4" :|data-bind:prompt| "" :|data-show| "$agentmode != 'own'"
                                          :|data-attr:placeholder| "$kind == 'app' ? 'Describe the web app, e.g. a page that sizes a shelf bracket from its load and shows it' : 'Describe what to build, e.g. a picnic table with two benches'"
                                          :placeholder "Describe what to build, e.g. a picnic table with two benches")
                               (when *turnstile-site-key*
                                 (htm (:div :class "cf-turnstile" :data-sitekey *turnstile-site-key* :data-callback "plTurnstile")))
                               (:input :type "hidden" :id "pl-turnstile" :|data-bind:turnstile| "")
-                              (:div :class "pl-row"
+                              (:div :class "pl-row" :|data-show| "$agentmode != 'own'"
                                     (:button :class "pl-build"
                                              :|data-on:click| (the (datastar-action :build :options "{filterSignals: {include: /^(prompt|turnstile|owner|wallet|kind|model|closedPick)$/}}"))
                                              :|data-indicator:sending| ""
@@ -1494,6 +1521,51 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                         (:button :type "button" :class "pl-download" :onclick "plClosePayment()" "Close")
                                         (:a :href "#" :id "pl-pay-more" :onclick "plMoreOptions(); return false" "more payment options"))))))))
 
+   ;; YOUR OWN AGENT's panel, for the owner of a session marked for it
+   ;; (external.lisp): the session's MCP address, carrying its owner key;
+   ;; set-ups for the common clients; the system prompt the lab's agent
+   ;; works by, which the MCP door also sends as its instructions; what
+   ;; still runs here; and the way back to the lab's agent.
+   (agent-section
+    :type 'base-html-div
+    :inner-html (progn
+                  (the revision)
+                  (let ((session (the session)))
+                    (if (not (and session (own-agent? session) (the owner?)))
+                        ""
+                        (let* ((address (format nil "window.location.origin + ~a + $owner"
+                                                (js-string-literal (format nil "~a/mcp?session=~a&owner=" *url-prefix* (session-id session)))))
+                               (shown (lambda (expression) (escape-string-minimal-plus-quotes expression))))
+                          (with-lhtml-string ()
+                            (:div :class "pl-card pl-own-agent"
+                                  (:h2 "Your own agent")
+                                  (:p :class "pl-line"
+                                      "This session is built by your own agent over MCP, the Model Context Protocol.  The lab calls no AI model for it: your agent's tokens are your own business.  What still runs here: the tools your agent calls -- writing, compiling and checking the model, drawing it -- the archive, and the hosting when you deploy.")
+                                  (:p :class "pl-line" "The session's address.  It carries the session's owner key: keep it to yourself, as you would a password.")
+                                  (:pre :class "pl-code" (:code :|data-text| (funcall shown address)))
+                                  (:p :class "pl-line" (:b "Claude Code") ", in a terminal:")
+                                  (:pre :class "pl-code"
+                                        (:code :|data-text| (funcall shown (format nil "'claude mcp add --transport http prompt-lab \"' + ~a + '\"'" address))))
+                                  (:p :class "pl-line" (:b "Cursor") ", in .cursor/mcp.json:")
+                                  (:pre :class "pl-code"
+                                        (:code :|data-text| (funcall shown (format nil "'{\"mcpServers\": {\"prompt-lab\": {\"url\": \"' + ~a + '\"}}}'" address))))
+                                  (:p :class "pl-line" (:b "Claude Desktop") ", in claude_desktop_config.json, through the mcp-remote bridge (needs Node):")
+                                  (:pre :class "pl-code"
+                                        (:code :|data-text| (funcall shown (format nil "'{\"mcpServers\": {\"prompt-lab\": {\"command\": \"npx\", \"args\": [\"-y\", \"mcp-remote\", \"' + ~a + '\"]}}}'" address))))
+                                  (:p :class "pl-line" (:b "Any other MCP client")
+                                      ": the Streamable HTTP transport -- POST one JSON-RPC message at a time to the address, answered in plain JSON; no stream is offered.  The owner key may go in an X-Prompt-Lab-Owner header instead of the address.")
+                                  (:details
+                                   (:summary "The instructions the lab's own agent works by")
+                                   (:p :class "pl-line" "Your agent receives these as the MCP server's instructions when it connects.  If it does not use them, paste them into its first prompt.")
+                                   (:pre :class "pl-code" (esc (system-text session))))
+                                  (:p :class "pl-line"
+                                      (fmt "Limits: ~:[no daily limit on tool calls~;~:*~a tool calls a day for each author key~], and one tool at a time in a session."
+                                           (and (eq *external-agent?* :authors) *external-calls-per-key*)))
+                                  (:div :class "pl-row"
+                                        (:button :type "button" :class "pl-download"
+                                                 :|data-on:click| (the (datastar-action :agent-mode :options "{filterSignals: {include: /^(owner)$/}}"))
+                                                 "Use the lab's agent for this session instead")))))))))
+
    ;; A CLOSED WORK's panel, for its owner alone (closed.lisp): the date it
    ;; must be decided by and the exits -- host (Monetize, where this lab
    ;; deploys), declare, make public, delete.  No request for more time is
@@ -1840,6 +1912,44 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                              s)))))
               (t (the (tell-error! reason)))))
       (the spent-token!)))
+
+   (connect-agent
+    (signals)
+    ;; the author's own agent builds this session (external.lisp): opened
+    ;; under the author key when there is none yet, marked, and the panel
+    ;; shown; the lab's agent is never called for it
+    (let* ((address (client-address *datastar-request*))
+           (wallet (gethash "wallet" signals))
+           (new? (null (the session))))
+      (cond ((and (the session) (not (the owner?)))
+             (the (tell-error! "This session is someone else's; start your own.")))
+            ((not (own-agent-offered? (if (the session) (session-wallet (the session)) wallet)))
+             (the (tell-error! "Your own agent can build here under an author key: get one on this page first.")))
+            ((and (the session) (session-busy? (the session)))
+             (the (tell-error! "The lab's agent is still working on this session; switch when it has finished.")))
+            ((the (own-session! address wallet (eq (gethash "closedPick" signals) t)))
+             (let ((session (the session)))
+               (when new?
+                 (let ((kind (parse-kind (gethash "kind" signals))))
+                   (when kind (ignore-errors (set-session-kind! session kind)))))
+               (set-own-agent! session t)
+               (log-event session :note "This session is built by its author's own agent over MCP; the lab calls no AI model for it.")
+               (save-session! session)
+               (the (set-slot! :revision (1+ (the revision))))
+               (sheet-send! self (datastar-signals-event "{\"agentmode\": \"own\", \"ownagent\": true, \"error\": \"\"}")))))))
+
+   (agent-mode
+    (signals)
+    (declare (ignore signals))
+    ;; back to the lab's own agent for this session
+    (let ((session (the session)))
+      (cond ((not (and session (the owner?)))
+             (the (tell-error! "This is no session of yours.")))
+            (t (set-own-agent! session nil)
+               (log-event session :note "This session is built by the lab's agent again.")
+               (save-session! session)
+               (the (set-slot! :revision (1+ (the revision))))
+               (sheet-send! self (datastar-signals-event "{\"agentmode\": \"lab\", \"ownagent\": false}"))))))
 
    (closed-decide
     (signals)

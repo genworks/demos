@@ -613,6 +613,10 @@ value, where it belongs -- a plist of :engine, :reason and :url."
         ((> (length prompt) *max-prompt-length*)
          (values nil (format nil "A prompt may have ~a characters at most." *max-prompt-length*)
                  net.aserve:*response-bad-request*))
+        ;; a session its author runs with their own agent: the lab's is not called
+        ((own-agent? session)
+         (values nil "This session works with your own agent: give the prompt to your agent, or switch this session to the lab's agent."
+                 *response-conflict*))
         ;; a community pot with nothing in it builds for nobody
         ((pot-empty?)
          (values nil (unit-text (if (topups-offered?)

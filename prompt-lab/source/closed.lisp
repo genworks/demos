@@ -242,6 +242,7 @@ upload and thumbnail.  The monitor's audit log keeps its lines."
       (remhash id *session-locks*))
     (ignore-errors (forget-session-kind! session))
     (ignore-errors (forget-session-model! session))
+    (ignore-errors (set-own-agent! session nil))
     (let ((package (find-package (session-package-name session))))
       (when package (ignore-errors (delete-package package))))
     (ignore-errors (uiop:delete-directory-tree (pathname (session-directory session))

@@ -591,6 +591,47 @@ loaded) its page too."
                                (fdefinition api-fn) saved-api)
                          (uiop:symbol-call :prompt-lab :set-session-model! found nil)
                          (set-messages messages))))))
+          ;; BRING YOUR OWN AGENT as a first choice (2026-11-13): a session
+          ;; marked for the author's own agent refuses the lab's, its MCP door
+          ;; hands over the lab's system prompt, the mark is kept in the
+          ;; record, and the page offers the choice where the lab takes one
+          (smoke "prompt-lab own agent: chosen, the lab's agent refused, the MCP instructions, kept"
+                 (lambda ()
+                   (let ((saved (symbol-value (lab '#:*external-agent?*)))
+                         (own (uiop:symbol-call :prompt-lab :open-session! "10.9.8.7" nil)))
+                     (setf (symbol-value (lab '#:*external-agent?*)) t)
+                     (unwind-protect
+                          (progn
+                            (unless (search "pl-agentmode" (http :get prefix))
+                              (error "the page offers no choice of agent"))
+                            (uiop:symbol-call :prompt-lab :set-own-agent! own t)
+                            (unless (uiop:symbol-call :prompt-lab :own-agent? own) (error "the mark did not take"))
+                            (multiple-value-bind (started reason)
+                                (uiop:symbol-call :prompt-lab :begin-prompt! own "a box" "10.9.8.7" nil :route? nil)
+                              (when (or started (not (search "your own agent" (or reason ""))))
+                                (error "the lab's agent was not refused: ~a" reason)))
+                            (let* ((answer (uiop:symbol-call :prompt-lab :mcp-answer own
+                                                             (table "jsonrpc" "2.0" "id" 1 "method" "initialize"
+                                                                    "params" (table "protocolVersion" "2025-06-18"))))
+                                   (instructions (gethash "instructions" (gethash "result" answer))))
+                              (unless (and (stringp instructions)
+                                           (search (subseq (uiop:symbol-call :prompt-lab :system-text own) 0 60) instructions))
+                                (error "the MCP door does not hand over the lab's system prompt")))
+                            (uiop:symbol-call :prompt-lab :save-session! own)
+                            (let ((json (uiop:symbol-call :prompt-lab :read-record
+                                                          (merge-pathnames "session.json"
+                                                                           (uiop:symbol-call :prompt-lab :session-directory own)))))
+                              (unless (and json (equal (gethash "agent" json) "own"))
+                                (error "the record does not keep whose agent builds")))
+                            (uiop:symbol-call :prompt-lab :set-own-agent! own nil)
+                            (multiple-value-bind (started reason)
+                                (uiop:symbol-call :prompt-lab :begin-prompt! own "" "10.9.8.7" nil :route? nil)
+                              (declare (ignore started))
+                              (when (search "your own agent" (or reason ""))
+                                (error "the lab's agent is still refused after switching back")))
+                            t)
+                       (setf (symbol-value (lab '#:*external-agent?*)) saved)
+                       (ignore-errors (uiop:symbol-call :prompt-lab :delete-session own))))))
           ;; the author takes their own source at any time; nobody else does
           (smoke "prompt-lab source download: the owner's file, a stranger's 404"
                  (lambda ()
