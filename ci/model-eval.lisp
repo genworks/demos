@@ -217,6 +217,9 @@ the cents in all.  A plist."
 ;;;;   (eval-run-planned  *sample* "house-1" :budget-cents 250 :out "/tmp/eval-planned.jsonl")
 ;;;;   (eval-run-reviewed *sample* "house-1" :budget-cents 250 :out "/tmp/eval-reviewed.jsonl")
 ;;;;
+;;;; FALLBACK: the house model builds; a prompt it leaves unfinished is
+;;;; built afresh by the strong model in a session of its own.
+;;;;
 ;;;; ESCALATE: the house model builds; a prompt it leaves unfinished (not
 ;;;; done, or no model) goes to the strong model in the lab's own loop, on a
 ;;;; fresh conversation over the same model file; only that costs.
@@ -293,7 +296,7 @@ turn.  Values: the reply's text, and its usage as the lab's plist
          (eval-call '#:->json block))))
 
 (defun eval-hybrid-run (sample builder mode &key budget-cents out (net 230) (strong *eval-strong-model*))
-  "The hybrid arm MODE, :planned, :reviewed or :escalate, on SAMPLE with BUILDER as the
+  "The hybrid arm MODE, :planned, :reviewed, :escalate or :fallback, on SAMPLE with BUILDER as the
 house model and STRONG planning or reviewing.  Results as eval-run's, with
 :mode, :strong-cents, :reviews and :verdict."
   (let ((spent 0) (results nil) (index 0))
@@ -340,6 +343,30 @@ house model and STRONG planning or reviewing.  Results as eval-run's, with
                                    (eval-call '#:run-prompt session correction)
                                    (return))))
                     (unless verdict (setq verdict :not-passed)))
+                   (:fallback
+                    ;; the house builds; what it leaves unfinished the strong model
+                    ;; builds AFRESH, in a session of its own -- the house's file
+                    ;; costs it nothing to read or repair
+                    (eval-call '#:run-prompt session prompt)
+                    (let ((last (find-if (lambda (e) (member (eval-log-kind e) '(:done :stopped)))
+                                         (reverse (coerce (eval-call '#:session-log session) 'list)))))
+                      (if (and last (eq (eval-log-kind last) :done) (built?))
+                          (setq verdict :house)
+                          (let ((fresh (eval-call '#:open-session! (format nil "10.~d.250.~d" net (mod index 250)) nil)))
+                            (setq verdict :fallback)
+                            (incf reviews)
+                            (unwind-protect
+                                 (progn
+                                   (eval-call '#:set-session-model! fresh strong)
+                                   (eval-call '#:run-prompt fresh prompt)
+                                   (setq strong-usage (eval-call '#:session-usage fresh))
+                                   ;; the result is the fresh session's
+                                   (let ((last (find-if (lambda (e) (member (eval-log-kind e) '(:done :stopped)))
+                                                        (reverse (coerce (eval-call '#:session-log fresh) 'list)))))
+                                     (setq verdict (if (and last (eq (eval-log-kind last) :done)
+                                                            (ignore-errors (eval-call '#:model-defined? fresh)))
+                                                       :fallback-done :fallback-failed))))
+                              (ignore-errors (eval-call '#:delete-session fresh)))))))
                    (:escalate
                     ;; the house builds; only what it leaves unfinished goes to the
                     ;; strong model, in the lab's own loop, on a fresh conversation
@@ -368,8 +395,12 @@ house model and STRONG planning or reviewing.  Results as eval-run's, with
                         (strong-cents (eval-cents strong strong-usage))
                         (result (list :id (getf item :id) :model builder :mode mode :strong strong
                                       :session id :started started :ended (eval-call '#:utc-time (get-universal-time))
-                                      :finished (and (eq last-kind :done) (built?) (not (eq verdict :not-passed)))
-                                      :built (built?)
+                                      :finished (if (eq mode :fallback)
+                                                    (and (member verdict '(:house :fallback-done)) t)
+                                                    (and (eq last-kind :done) (built?) (not (eq verdict :not-passed))))
+                                      :built (if (eq mode :fallback)
+                                                 (or (built?) (eq verdict :fallback-done))
+                                                 (built?))
                                       :verdict verdict :reviews reviews
                                       :seconds (float (/ (- (get-internal-real-time) start) internal-time-units-per-second) 1.0)
                                       :rounds (count :tool log :key #'eval-log-kind)
