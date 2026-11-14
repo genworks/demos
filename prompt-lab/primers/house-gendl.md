@@ -36,14 +36,24 @@ draws nothing, when it is broken:
   "No such toplevel define-object keyword exists".
 - No docstring after the name, and no `:documentation` string.
 - A slot is `(name default)`.  The default is any expression.
-- NAMES.  Every name in one define-object -- inputs, computed slots,
-  children, functions -- is used ONCE ("duplicate slot name" otherwise).
-  And names Gendl already gives every object are not yours to define:
-  `index`, `center`, `orientation`, `half-width`, `half-length`,
-  `half-height`, `bounding-box`, `leaves`, `children`, `parent`, `root`,
-  `faces`, `vertex-list`, `volume`, `area` ("reserved word" otherwise).
-  Only `width`, `length` and `height` may be MODEL's inputs.  Name your
-  own things specifically: `leg-height`, `top-center`, `spoke-count`.
+- NAMES -- a recipe:
+  - Every name in one define-object -- inputs, computed slots, children,
+    functions -- is used ONCE ("duplicate slot name" otherwise).
+  - A clash with Gendl shows as "The symbol listed below is a reserved
+    word ..." with the name under it.  Rename and write again.
+  - Refused outright, Gendl's own: `index`, `leaves`, `children`,
+    `parent`, `half-width`, `half-length`, `half-height`.
+  - Accepted but leave them alone -- they replace what the lab measures
+    your model by: `bounding-box`, `volume`, `area`, `root`,
+    `vertex-list`.
+  - THE RULE BENDS for MODEL's own inputs: `width`, `length` and
+    `height` (its envelope), `center`, `orientation` and
+    `display-controls` are inputs every object has; giving them a
+    default here is how a model sets its size, place, turn and colour,
+    and it is meant.  A computed slot may give `width`, `length` or
+    `height` a derived value too.
+  - The safe pattern for your own names: a specific noun, often two
+    words -- `leg-height`, `top-center`, `spoke-count`, `bolt-circle`.
 - A function's arguments are distinct names: `(plate-area (w l) ...)`,
   never `(plate-area (d d) ...)`.
 - Read a slot, inside define-object, with `(the name)` -- an input, a
@@ -122,13 +132,20 @@ only what a person would change; derived values go in
    is settled.
 2. write_model: the whole file -- helper definitions, then MODEL.  No
    `in-package`.
-3. ALWAYS check_model with expected_size after every write_model or
-   edit_model that compiles.  Read the leaf count, the overall size and
-   any pile warning.
-4. Fix what check_model shows with edit_model, changing as little as
-   possible.  A compiler error names the form: read it, fix that form.
-5. When the numbers match, stop and reply.  A simple model that is right
-   beats an elaborate one that does not compile.
+3. ALWAYS check_model with expected_size after every change that
+   compiles.  Read the leaf count, the overall size and any pile warning.
+4. Then view_model: it says, in words, where every part is, what touches
+   and what OVERLAPS what, and which parts FLOAT.  Compare it with the
+   request: legs under the top, a handle on the door, wheels touching the
+   ground.
+5. Fix what you see ONE ENTRY AT A TIME, by name: set_slot changes one
+   input, computed slot, child or function (you give only what follows
+   its name -- the tool writes the parentheses around it); add_slot adds
+   one; remove_slot removes one; replace_form replaces a whole
+   define-object or defun.  They cannot unbalance the file.
+6. When the numbers match and view_model shows the parts where they
+   belong, stop and reply.  A simple model that is right beats an
+   elaborate one that does not compile.
 
 - evaluate takes ONE expression; wrap several in `(progn ...)`.  It is
   Common Lisp: `handler-case` and `ignore-errors`, not Emacs Lisp's
@@ -141,10 +158,11 @@ only what a person would change; derived values go in
 ### 6. When check_model or the compiler complains
 
 - "Unexpected end of file" or "Reader error": the parentheses do not
-  balance.  Do not patch it with edit_model; write the whole file again
-  with write_model, closing every form as you go -- each child form
-  `(name :type 'box ...)` closed on its own last line, then `)` for
-  `:objects`, then `)` for the define-object.
+  balance, and the error says which form is left open.  Write that
+  define-object again with replace_form (or the file with write_model),
+  closing every form as you go -- each child form `(name :type 'box ...)`
+  closed on its own last line, then `)` for `:objects`, then `)` for the
+  define-object.  After that, change it with set_slot.
 - SIZE MISMATCH where a size is too big by about half the expected
   height (or width, or length): the parts were placed up from the center,
   not from the floor.  Use the recipe in section 2; do not change the
@@ -152,9 +170,6 @@ only what a person would change; derived values go in
 - SIZE MISMATCH where the parts are right and only your expected_size
   was a guess: say so in the reply and stop.  Two fixes for the same
   mismatch is the most to try.
-- edit_model wants OLD copied exactly from the file as read_model shows
-  it.  For a file under about 80 lines, write_model the whole file
-  instead.
 - In evaluate there is no `self`: `(the width)` fails there.  Ask the
   built model: `(the-object (make-object 'model) width)`.
 - When check_model says "Expected size matched" and lists the parts you

@@ -791,6 +791,75 @@ loaded) its page too."
                                 t)
                            (ignore-errors (pl :delete-session s))
                            (pl :funnel-count! "sessions" -1)))))))
+          ;; STRUCTURE AND SIGHT for a house model (tools.lisp): slots edited by
+          ;; name with the parentheses written for it, an unbalanced value
+          ;; refused before anything is written, and the model seen in words
+          (smoke "prompt-lab house structure and sight: slot edits, refusals, view_model"
+                 (lambda ()
+                   (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
+                     (let ((s (pl :open-session! "10.9.8.2" nil)))
+                       (unwind-protect
+                            (flet ((tool (name &rest pairs)
+                                     (multiple-value-bind (blocks error?)
+                                         (pl :run-tool s name (loop for (k v) on pairs by #'cddr collect (cons k v)))
+                                       (values (format nil "~{~a~}" (mapcar (lambda (b) (or (cdr (assoc "text" b :test #'string=)) "")) blocks))
+                                               error?)))
+                                   (body () (pl :model-body-text s))
+                                   (names (session) (mapcar (lambda (tool) (cdr (assoc "name" tool :test #'string=)))
+                                                            (coerce (pl :tool-definitions session) 'list))))
+                              (pl :set-session-model! s "house-1")
+                              (unless (and (member "set_slot" (names s) :test #'equal) (member "view_model" (names s) :test #'equal)
+                                           (not (member "edit_model" (names s) :test #'equal)))
+                                (error "a house session's tools are not the structural ones: ~s" (names s)))
+                              (pl :write-model s "(define-object model (base-object)
+  :input-slots ((width 600) (length 400) (height 300))
+  :objects ((top :type 'box :width (the width) :length (the length) :height 20
+                 :center (translate (the center) :up (- (half (the height)) 10)))
+            (leg :type 'box :width 20 :length 20 :height 280
+                 :center (translate (the center) :down 10))))")
+                              (multiple-value-bind (text error?) (tool "set_slot" "object" "model" "slot" "width" "value" "800")
+                                (when (or error? (not (search "(width 800)" (body)))) (error "set_slot did not set: ~a" text)))
+                              (let ((before (body)))
+                                (multiple-value-bind (text error?) (tool "set_slot" "object" "model" "slot" "width" "value" "(+ 1 2")
+                                  (unless (and error? (search "Nothing written" text) (equal before (body)))
+                                    (error "an unbalanced value was not refused: ~a" text))))
+                              (tool "add_slot" "object" "model" "section" "computed-slots" "slot" "gap" "value" "50")
+                              (unless (search "(gap 50)" (body)) (error "add_slot made no section entry: ~a" (body)))
+                              (unless (nth-value 1 (tool "add_slot" "object" "model" "section" "input-slots" "slot" "width" "value" "1"))
+                                (error "add_slot took a name already used"))
+                              (tool "remove_slot" "object" "model" "slot" "gap")
+                              (when (search "gap" (body)) (error "remove_slot left the entry"))
+                              (unless (nth-value 1 (tool "replace_form" "name" "model" "source" "(defun other () 1)"))
+                                (error "replace_form took a form that defines something else"))
+                              (let ((view (tool "view_model")))
+                                (unless (and (search "on the floor" view) (search "touches" view) (search "Symmetry" view)
+                                             (not (search "FLOATS" view)))
+                                  (error "view_model's account is wrong: ~a" view)))
+                              ;; lift the top off its leg: it floats
+                              (tool "set_slot" "object" "model" "slot" "top"
+                                    "value" ":type 'box :width (the width) :length (the length) :height 20 :center (translate (the center) :up 400)")
+                              (let ((view (tool "view_model")))
+                                (unless (search "FLOATS" view) (error "view_model did not see a floating part: ~a" view)))
+                              ;; a house model that sees gets render back (*house-vision-models*)
+                              (when (pl :render-offered?)
+                                (when (member "render" (names s) :test #'equal)
+                                  (error "a text-only house model was offered render"))
+                                (progv (list (lab '#:*house-vision-models*)) (list (list "house-1"))
+                                  (unless (member "render" (names s) :test #'equal)
+                                    (error "a house model that sees was not offered render")))
+                                ;; a text-only house model with a viewer named gets look_at_model
+                                (progv (list (lab '#:*house-viewer-model*)) (list "viewer-1")
+                                  (unless (member "look_at_model" (names s) :test #'equal)
+                                    (error "a text-only house model with a viewer was not offered look_at_model"))
+                                  (progv (list (lab '#:*house-vision-models*)) (list (list "house-1"))
+                                    (when (member "look_at_model" (names s) :test #'equal)
+                                      (error "a house model that sees was offered a viewer too")))))
+                              ;; the lab's own model keeps its tools
+                              (pl :set-session-model! s nil)
+                              (when (member "set_slot" (names s) :test #'equal) (error "a session on the lab's model got the house tools"))
+                              t)
+                         (ignore-errors (pl :delete-session s))
+                         (pl :funnel-count! "sessions" -1))))))
           ;; a model or an expression that recurses without end overflows the
           ;; stack -- a storage-condition, not an error -- which took a whole
           ;; Lisp down on 2026-11-14; the tools answer it as an error instead

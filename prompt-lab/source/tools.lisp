@@ -534,6 +534,14 @@ SESSION.  Values: content blocks, and true on failure."
         ((string= name "write_project_file")
          (write-project-file-tool session (input "path" input) (input "content" input)))
         ((string= name "check_profile") (check-profile-tool session))
+        ;; structure and sight for a house model (below)
+        ((string= name "set_slot") (set-slot-tool session (input "object" input) (input "slot" input) (input "value" input)))
+        ((string= name "add_slot") (add-slot-tool session (input "object" input) (input "section" input)
+                                                  (input "slot" input) (input "value" input)))
+        ((string= name "remove_slot") (remove-slot-tool session (input "object" input) (input "slot" input)))
+        ((string= name "replace_form") (replace-form-tool session (input "name" input) (input "source" input)))
+        ((string= name "view_model") (view-model session))
+        ((string= name "look_at_model") (look-at-model session))
         (t (values (list (text-result "Unknown tool ~a." name)) t))))
 
 (defun schema (properties &optional required)
@@ -544,6 +552,20 @@ SESSION.  Values: content blocks, and true on failure."
 (defun render-offered? ()
   "Whether the agent gets the render tool: allowed, and the PNG writer here."
   (and *render-tool?* (raster-available?)))
+
+(defparameter *house-vision-models* nil
+  "List of house model ids served with a vision projector: such a session
+is offered render, and looks at its own drawing.  Nil: every house model
+reads text only (view_model is its sight).")
+
+(defparameter *house-viewer-model* nil
+  "String or nil.  A vision model on the gate's menu that looks at a
+text-only house model's render for it and describes it (look_at_model): a
+coder and a separate viewer.  Nil: no viewer.")
+
+(defparameter *house-structure?* t
+  "Boolean.  Whether a house session edits by structure and has view_model
+(set_slot, add_slot, remove_slot, replace_form; edit_model withdrawn).")
 
 (defun tool-definitions (&optional session)
   "The tools, as the Messages API's tools array (a vector of alists);
@@ -562,12 +584,23 @@ and check_app only for a SESSION that builds a web app (kinds.lisp)."
             (setq tools (without name tools)))
           (dolist (name '("list_project" "read_project_file" "write_project_file" "check_profile"))
             (setq tools (without name tools))))
-      ;; a house model reads text only (agent.lisp): no picture to look at
-      (unless (and (render-offered?) (not (house-model? session)))
+      ;; a house model reads text only (agent.lisp) unless it is one that
+      ;; also sees (*house-vision-models*): then it renders and looks too
+      (unless (and (render-offered?)
+                   (or (not (house-model? session))
+                       (member (session-model session) *house-vision-models* :test #'equal)))
         (setq tools (without "render" tools)))
       (unless (search-offered?) (setq tools (without "search_docs" tools)))
       (unless (uploads-offered?)
         (setq tools (without "read_file" (without "list_files" tools))))
+      ;; a house model edits by structure and sees in words (below): the
+      ;; raw-text edit goes, which its unbalanced patches came through
+      (when (and (house-model? session) *house-structure?*)
+        (setq tools (concatenate 'vector (without "edit_model" tools) (house-tool-definitions))))
+      ;; a house model that cannot see may have a viewer look for it
+      (when (and (house-model? session) *house-viewer-model* (render-offered?)
+                 (not (member (session-model session) *house-vision-models* :test #'equal)))
+        (setq tools (concatenate 'vector tools (list (look-tool-definition)))))
       tools)))
 
 (defun %tool-definitions ()
@@ -667,6 +700,428 @@ and check_app only for a SESSION that builds a web app (kinds.lisp)."
      ("description" . "Check the project against the Monocle profile as far as reading can tell: image.sexp, PORT, the health path, DATA_DIR, monetize.sexp. Each rule comes back ok or TO DO with the reason.")
      ("input_schema" . ,(schema nil)))))
 
+
+;;
+;; STRUCTURE AND SIGHT FOR HOUSE MODELS (2026-11-14; the user, on the
+;; overnight report: 'the house models have trouble writing balanced
+;; parentheses.  Could we give them tools ... to help with that?' and 'the
+;; main thing is these prompt-lab sessions need to be able to
+;; render-view-iterate').  A house session edits its file by STRUCTURE --
+;; a whole top-level form by name, or one slot of a define-object by name,
+;; the tool writing every parenthesis around what the model gives -- and
+;; every fragment it gives is balance-checked before anything is written;
+;; and it SEES the built model as text (view_model): each part's size and
+;; place, what touches and overlaps what, what floats, the symmetry.  A
+;; session on the lab's own model keeps its tools as they were.
+;;
+
+(defun blank-end (text i)
+  "Past whitespace, ; comments and #| |# blocks of TEXT from I."
+  (let ((n (length text)))
+    (loop
+      (cond ((>= i n) (return n))
+            ((member (char text i) '(#\Space #\Tab #\Newline #\Return #\Page)) (incf i))
+            ((char= (char text i) #\;) (setq i (or (position #\Newline text :start i) n)))
+            ((and (char= (char text i) #\#) (< (1+ i) n) (char= (char text (1+ i)) #\|))
+             (setq i (let ((e (search "|#" text :start2 (+ i 2)))) (if e (+ e 2) n))))
+            (t (return i))))))
+
+(defun form-end (text i)
+  "The position just past the form that starts at I in TEXT, or nil when it
+does not end (a list left open, a string left unclosed, a stray ')')."
+  (let ((n (length text)))
+    (when (< i n)
+      (let ((c (char text i)))
+        (cond ((char= c #\()
+               (let ((j (1+ i)))
+                 (loop
+                   (setq j (blank-end text j))
+                   (cond ((>= j n) (return nil))
+                         ((char= (char text j) #\)) (return (1+ j)))
+                         (t (let ((e (form-end text j)))
+                              (if e (setq j e) (return nil))))))))
+              ((char= c #\)) nil)
+              ((char= c #\")
+               (let ((j (1+ i)))
+                 (loop
+                   (cond ((>= j n) (return nil))
+                         ((char= (char text j) #\\) (incf j 2))
+                         ((char= (char text j) #\") (return (1+ j)))
+                         (t (incf j))))))
+              ((member c '(#\' #\`))
+               (form-end text (blank-end text (1+ i))))
+              ((char= c #\,)
+               (form-end text (blank-end text (if (and (< (1+ i) n) (char= (char text (1+ i)) #\@)) (+ i 2) (1+ i)))))
+              ((and (char= c #\#) (< (1+ i) n) (char= (char text (1+ i)) #\'))
+               (form-end text (+ i 2)))
+              ((and (char= c #\#) (< (+ i 2) n) (char= (char text (1+ i)) #\\))
+               ;; a character: the one after the backslash, and the rest of
+               ;; a name such as Space
+               (let ((j (+ i 3)))
+                 (when (alpha-char-p (char text (+ i 2)))
+                   (loop while (and (< j n) (alphanumericp (char text j))) do (incf j)))
+                 (min j n)))
+              (t
+               (loop for j from i below n
+                     when (member (char text j) '(#\Space #\Tab #\Newline #\Return #\Page #\( #\) #\" #\;))
+                       return j
+                     finally (return n))))))))
+
+(defun form-elements (text open)
+  "The elements of the list whose '(' is at OPEN in TEXT, as (start . end)
+spans; a second value, the position of its ')', nil when it does not close."
+  (let ((n (length text)) (j (1+ open)) (elements nil))
+    (loop
+      (setq j (blank-end text j))
+      (cond ((>= j n) (return (values (nreverse elements) nil)))
+            ((char= (char text j) #\)) (return (values (nreverse elements) j)))
+            (t (let ((e (form-end text j)))
+                 (unless e (return (values (nreverse elements) nil)))
+                 (push (cons j e) elements)
+                 (setq j e)))))))
+
+(defun top-forms (text)
+  "TEXT's top-level forms as (start . end) spans; a second value, true when
+the whole text reads to its end."
+  (let ((n (length text)) (j 0) (forms nil))
+    (loop
+      (setq j (blank-end text j))
+      (when (>= j n) (return (values (nreverse forms) t)))
+      (let ((e (form-end text j)))
+        (unless e (return (values (nreverse forms) nil)))
+        (push (cons j e) forms)
+        (setq j e)))))
+
+(defun span-text (text span) (subseq text (car span) (cdr span)))
+
+(defun fragment-problem (fragment &key one-form?)
+  "Why FRAGMENT, a piece of Lisp an agent gave a structural tool, cannot be
+written as it is, or nil.  ONE-FORM? asks for exactly one form."
+  (cond ((not (and (stringp fragment) (plusp (length (string-trim '(#\Space #\Tab #\Newline #\Return) fragment)))))
+         "It is empty.")
+        ((paren-report fragment))
+        (t (multiple-value-bind (forms complete?) (top-forms fragment)
+             (cond ((not complete?) "It does not read to its end: a string or a list is left open.")
+                   ((and one-form? (/= (length forms) 1))
+                    (format nil "It holds ~d forms; give exactly one." (length forms))))))))
+
+(defparameter *definer-names* '("define-object" "defun" "defparameter" "defvar" "defmacro" "defmethod" "defgeneric")
+  "The heads of the top-level forms replace_form finds by name.")
+
+(defparameter *slot-sections* '(":input-slots" ":computed-slots" ":objects" ":hidden-objects" ":functions")
+  "The sections of a define-object whose entries the slot tools edit.")
+
+(defun model-body-text (session)
+  (let ((file (session-model-file session)))
+    (if (probe-file file) (file-model-body file) "")))
+
+(defun definitions-named (text name &optional (heads *definer-names*))
+  "TEXT's top-level forms that define NAME: a list of (span elements)."
+  (loop for span in (top-forms text)
+        for elements = (and (char= (char text (car span)) #\() (form-elements text (car span)))
+        when (and (>= (length elements) 2)
+                  (member (span-text text (first elements)) heads :test #'string-equal)
+                  (string-equal (span-text text (second elements)) name))
+          collect (list span elements)))
+
+(defun slot-entry-name (text span)
+  "The name of a define-object section's entry: its first element that is
+not a documentation string."
+  (when (char= (char text (car span)) #\()
+    (let ((first (find-if-not #'(lambda (e) (char= (char text (car e)) #\")) (form-elements text (car span)))))
+      (and first (string-downcase (span-text text first))))))
+
+(defun object-sections (text elements)
+  "The sections of a define-object whose ELEMENTS are given: an alist from
+the keyword's text, downcased, to the span of its list."
+  (loop for (key value) on (nthcdr 3 elements) by #'cddr
+        when (and key value (char= (char text (car key)) #\:) (char= (char text (car value)) #\())
+          collect (cons (string-downcase (span-text text key)) value)))
+
+(defun find-slot (text elements slot)
+  "Where SLOT is in the define-object of ELEMENTS: (values section span)."
+  (loop for (section . list-span) in (object-sections text elements)
+        when (member section *slot-sections* :test #'string=)
+          do (dolist (entry (form-elements text (car list-span)))
+               (when (equal (slot-entry-name text entry) (string-downcase slot))
+                 (return-from find-slot (values section entry))))))
+
+(defun structural-refusal (control &rest args)
+  (values (list (apply #'text-result control args)) t))
+
+(defun with-object (session object function)
+  "Call FUNCTION with the file's text and the define-object OBJECT's span
+and elements, or refuse when it is not there just once, or the file itself
+does not read."
+  (let* ((text (model-body-text session)))
+    (multiple-value-bind (forms complete?) (top-forms text)
+      (declare (ignore forms))
+      (cond ((not complete?)
+             (structural-refusal "The model file does not read to its end now, so it cannot be edited by structure.  ~a  Write it whole again with write_model."
+                                 (or (paren-report text) "")))
+            (t (let ((found (definitions-named text object '("define-object"))))
+                 (case (length found)
+                   (0 (structural-refusal "There is no define-object named ~a in the model file.  replace_form with a whole (define-object ~a ...) adds one." object object))
+                   (1 (funcall function text (first (first found)) (second (first found))))
+                   (t (structural-refusal "The model file defines ~a ~d times; keep one, with replace_form." object (length found))))))))))
+
+(defun splice (text start end new)
+  (concatenate 'string (subseq text 0 start) new (subseq text end)))
+
+(defun replace-form-tool (session name source)
+  "Replace the top-level form defining NAME with SOURCE, one whole form that
+defines NAME; with no such form, add SOURCE at the end of the file."
+  (let ((problem (fragment-problem source :one-form? t)))
+    (when problem (return-from replace-form-tool (structural-refusal "Nothing written: ~a" problem))))
+  (let* ((source (string-trim '(#\Space #\Tab #\Newline #\Return) source))
+         (own (form-elements source 0)))
+    (unless (and (char= (char source 0) #\() (>= (length own) 2)
+                 (string-equal (span-text source (second own)) name))
+      (return-from replace-form-tool
+        (structural-refusal "Nothing written: SOURCE must be one form that defines ~a -- (define-object ~a ...), (defun ~a ...) or the like." name name name)))
+    (let ((text (model-body-text session)))
+      (multiple-value-bind (forms complete?) (top-forms text)
+        (declare (ignore forms))
+        (unless complete?
+          (return-from replace-form-tool
+            (structural-refusal "The model file does not read to its end now.  ~a  Write it whole again with write_model."
+                                (or (paren-report text) ""))))
+        (let ((found (definitions-named text name)))
+          (case (length found)
+            (0 (write-model session (if (plusp (length (string-trim '(#\Space #\Newline) text)))
+                                        (format nil "~a~%~%~a" (string-right-trim '(#\Space #\Newline) text) source)
+                                        source)))
+            (1 (let ((span (first (first found))))
+                 (write-model session (splice text (car span) (cdr span) source))))
+            (t (structural-refusal "The model file defines ~a ~d times; write it whole with write_model." name (length found)))))))))
+
+(defun slot-entry-text (slot value)
+  (format nil "(~a ~a)" slot (string-trim '(#\Space #\Tab #\Newline #\Return) value)))
+
+(defun set-slot-tool (session object slot value)
+  "Replace SLOT of the define-object OBJECT -- an input, a computed slot, a
+child, a function -- with (SLOT VALUE)."
+  (let ((problem (fragment-problem value)))
+    (when problem (return-from set-slot-tool (structural-refusal "Nothing written: VALUE ~a" problem))))
+  (with-object session object
+    #'(lambda (text span elements)
+        (declare (ignore span))
+        (multiple-value-bind (section entry) (find-slot text elements slot)
+          (if (null section)
+              (structural-refusal "~a has no slot named ~a; add_slot adds one." object slot)
+              (write-model session (splice text (car entry) (cdr entry) (slot-entry-text slot value))))))))
+
+(defun add-slot-tool (session object section slot value)
+  "Add (SLOT VALUE) to SECTION of the define-object OBJECT, making the
+section when it has none."
+  (let ((problem (fragment-problem value))
+        (section (string-downcase (if (and (stringp section) (plusp (length section)) (char/= (char section 0) #\:))
+                                      (concatenate 'string ":" section)
+                                      (or section "")))))
+    (cond (problem (structural-refusal "Nothing written: VALUE ~a" problem))
+          ((not (member section *slot-sections* :test #'string=))
+           (structural-refusal "SECTION is one of ~{~a~^, ~}." (mapcar #'(lambda (s) (subseq s 1)) *slot-sections*)))
+          (t (with-object session object
+               #'(lambda (text span elements)
+                   (cond ((find-slot text elements slot)
+                          (structural-refusal "~a already has a slot named ~a: set_slot changes it.  A name is used once in a define-object." object slot))
+                         (t (let ((list-span (cdr (assoc section (object-sections text elements) :test #'string=)))
+                                  (entry (slot-entry-text slot value)))
+                              (write-model session
+                                           (if list-span
+                                               (let ((close (1- (cdr list-span))))
+                                                 (splice text close close (format nil "~%   ~a" entry)))
+                                               (let ((close (1- (cdr span))))
+                                                 (splice text close close (format nil "~%~%  ~a~%  (~a)" section entry))))))))))))))
+
+(defun remove-slot-tool (session object slot)
+  "Remove SLOT from the define-object OBJECT."
+  (with-object session object
+    #'(lambda (text span elements)
+        (declare (ignore span))
+        (multiple-value-bind (section entry) (find-slot text elements slot)
+          (if (null section)
+              (structural-refusal "~a has no slot named ~a." object slot)
+              ;; the entry and the blank before it
+              (let ((start (or (position-if-not #'(lambda (c) (member c '(#\Space #\Tab #\Newline #\Return)))
+                                                text :end (car entry) :from-end t)
+                               (car entry))))
+                (write-model session (splice text (1+ start) (cdr entry) ""))))))))
+
+(defun leaf-name (leaf)
+  (let ((path (ignore-errors (the-object leaf root-path))))
+    (if path (format nil "~{~(~a~)~^ ~}" path) "model")))
+
+(defun axis-word (vector)
+  "X, Y or Z with its sign when VECTOR lies along an axis, else the vector."
+  (let ((axis (position (reduce #'max (map 'list #'abs vector)) (map 'list #'abs vector))))
+    (if (> (abs (aref vector axis)) 0.999)
+        (format nil "~:[-~;+~]~a" (plusp (aref vector axis)) (char "XYZ" axis))
+        (format nil "(~{~,2f~^ ~})" (coerce vector 'list)))))
+
+(defparameter *view-max-parts* 40
+  "Parts view_model describes one by one; a bigger model is summed up by type.")
+
+(defun view-model (session)
+  "The built model in words: every part's type, size and place, what
+touches and overlaps what, what floats, and its symmetry."
+  (handler-case
+      (with-time-limit (*eval-seconds* "view")
+        (let* ((model (make-model session))
+               (leaves (the-object model leaves))
+               (boxes (mapcar #'leaf-box leaves))
+               (env (or (ignore-errors (the-object model bounding-box)) (union-box boxes)))
+               (n (length leaves))
+               (lines nil))
+          (flet ((lo (box axis) (aref (first box) axis))
+                 (hi (box axis) (aref (second box) axis))
+                 (say (control &rest args) (push (apply #'format nil control args) lines)))
+            (when env
+              (say "MODEL's envelope: X ~,1f..~,1f  Y ~,1f..~,1f  Z ~,1f..~,1f  (~,1f x ~,1f x ~,1f)."
+                   (lo env 0) (hi env 0) (lo env 1) (hi env 1) (lo env 2) (hi env 2)
+                   (- (hi env 0) (lo env 0)) (- (hi env 1) (lo env 1)) (- (hi env 2) (lo env 2))))
+            (cond
+              ((zerop n) (say "No parts: MODEL has no leaves to draw."))
+              ((> n *view-max-parts*)
+               (say "~d parts, too many to list; by type: ~{~a~^, ~}." n
+                    (let ((counts nil))
+                      (dolist (leaf leaves) (incf (getf counts (type-of leaf) 0)))
+                      (loop for (type count) on counts by #'cddr collect (format nil "~d ~(~a~)" count type)))))
+              (t
+               (let ((names (mapcar #'leaf-name leaves))
+                     (floor-z (and env (lo env 2))))
+                 (say "~d part~:p:" n)
+                 (loop for leaf in leaves for box in boxes for name in names for i from 0
+                       do (if (null box)
+                              (say "- ~a (~(~a~)): its geometry does not compute." name (type-of leaf))
+                              (let ((touching nil) (overlapping nil))
+                                (loop for other in boxes for other-name in names for k from 0
+                                      when (and other (/= i k))
+                                        do (let ((gap (loop for axis below 3
+                                                            maximize (max (- (lo box axis) (hi other axis))
+                                                                          (- (lo other axis) (hi box axis)))))
+                                                 (depth (loop for axis below 3
+                                                              minimize (- (min (hi box axis) (hi other axis))
+                                                                          (max (lo box axis) (lo other axis))))))
+                                             (cond ((> depth 1) (push other-name overlapping))
+                                                   ((<= gap 0.5) (push other-name touching)))))
+                                (say "- ~a (~(~a~)): ~,1f x ~,1f x ~,1f, X ~,1f..~,1f Y ~,1f..~,1f Z ~,1f..~,1f~@[, axis ~a~]~:[~;, on the floor~]~@[; touches ~{~a~^, ~}~]~@[; OVERLAPS ~{~a~^, ~}~]~:[~;; FLOATS: touches nothing, off the floor~]"
+                                     name (type-of leaf)
+                                     (- (hi box 0) (lo box 0)) (- (hi box 1) (lo box 1)) (- (hi box 2) (lo box 2))
+                                     (lo box 0) (hi box 0) (lo box 1) (hi box 1) (lo box 2) (hi box 2)
+                                     (when (member (type-of leaf) '(cylinder cone) :test #'(lambda (a b) (string-equal (symbol-name a) (symbol-name b))))
+                                       (ignore-errors (axis-word (the-object leaf (face-normal-vector :rear)))))
+                                     (and floor-z (<= (abs (- (lo box 2) floor-z)) 0.5))
+                                     (reverse touching) (reverse overlapping)
+                                     (and floor-z (null touching) (null overlapping) (> n 1)
+                                          (> (- (lo box 2) floor-z) 0.5))))))
+                 ;; symmetry: a part with a twin of its type and size, mirrored
+                 ;; across the envelope's middle
+                 (when env
+                   (flet ((twins (axis)
+                            (let ((mid (/ (+ (lo env axis) (hi env axis)) 2)))
+                              (loop for leaf in leaves for box in boxes
+                                    count (and box
+                                               (find-if #'(lambda (pair)
+                                                            (let ((other (cdr pair)))
+                                                              (and other (eq (type-of (car pair)) (type-of leaf))
+                                                                   (loop for a below 3
+                                                                         always (< (abs (- (- (hi box a) (lo box a)) (- (hi other a) (lo other a)))) 1))
+                                                                   (< (abs (- (+ (lo box axis) (hi box axis) (lo other axis) (hi other axis))
+                                                                              (* 4 mid)))
+                                                                      2)
+                                                                   (loop for a below 3
+                                                                         always (or (= a axis)
+                                                                                    (< (abs (- (+ (lo box a) (hi box a)) (+ (lo other a) (hi other a)))) 2))))))
+                                                        (mapcar #'cons leaves boxes)))))))
+                     (say "Symmetry: ~d of ~d parts have a mirror twin across X (left-right), ~d across Y (front-back)."
+                          (twins 0) n (twins 1)))))))
+            (values (list (text-result "~a" (clip (format nil "~{~a~^~%~}" (reverse lines))))) nil))))
+    (serious-condition (condition)
+      (values (list (text-result "MODEL does not build with default inputs: ~a" condition)) t))))
+
+(defparameter *house-view?* t
+  "Boolean.  Whether a house session is offered view_model, its text view.")
+
+(defun house-tool-definitions ()
+  "The structural edit tools and view_model, for a house session."
+  (remove-if
+   #'(lambda (tool) (and (not *house-view?*) (equal (cdr (assoc "name" tool :test #'string=)) "view_model")))
+   (list
+   `(("name" . "set_slot")
+     ("description" . "Change ONE slot of a define-object by name -- an input, a computed slot, a child under :objects, or a function: the tool writes (SLOT VALUE) in place of the old entry and compiles, so you write only VALUE and never the parentheses around it. For a child, VALUE is its keyword inputs, e.g. \":type 'box :width (the width) :center (translate (the center) :up 10)\". For a function, VALUE is \"(args) body\". VALUE must balance; it is checked before anything is written.")
+     ("input_schema" . ,(schema `(("object" . (("type" . "string") ("description" . "The define-object's name, e.g. model.")))
+                                  ("slot" . (("type" . "string") ("description" . "The slot's, child's or function's name.")))
+                                  ("value" . (("type" . "string") ("description" . "What follows the name inside the entry."))))
+                                '("object" "slot" "value"))))
+   `(("name" . "add_slot")
+     ("description" . "Add ONE entry to a section of a define-object -- input-slots, computed-slots, objects, hidden-objects or functions -- making the section when it has none. You give the name and VALUE (as for set_slot); the tool writes the parentheses. A name already used in the object is refused.")
+     ("input_schema" . ,(schema `(("object" . (("type" . "string")))
+                                  ("section" . (("type" . "string") ("description" . "input-slots, computed-slots, objects, hidden-objects or functions.")))
+                                  ("slot" . (("type" . "string")))
+                                  ("value" . (("type" . "string"))))
+                                '("object" "section" "slot" "value"))))
+   `(("name" . "remove_slot")
+     ("description" . "Remove ONE entry -- input, computed slot, child or function -- from a define-object, by name.")
+     ("input_schema" . ,(schema `(("object" . (("type" . "string"))) ("slot" . (("type" . "string"))))
+                                '("object" "slot"))))
+   `(("name" . "replace_form")
+     ("description" . "Replace a whole top-level form -- (define-object NAME ...), (defun NAME ...) -- by its NAME with SOURCE, one form that defines NAME; with no such form, SOURCE is added to the file. SOURCE must balance and is checked before anything is written. For a change inside a define-object, set_slot is smaller and safer.")
+     ("input_schema" . ,(schema `(("name" . (("type" . "string")))
+                                  ("source" . (("type" . "string") ("description" . "One whole form defining NAME."))))
+                                '("name" "source"))))
+   `(("name" . "view_model")
+     ("description" . "See the built model, in words: MODEL's envelope; every part's type, size and place; what touches and what OVERLAPS what; which parts FLOAT (touch nothing, off the floor); cylinders' axes; left-right and front-back symmetry. Use it after check_model to judge whether the parts are where the request wants them, then fix what it shows.")
+     ("input_schema" . ,(schema nil))))))
+
+(defparameter *look-question*
+  "This is a wireframe line drawing of a 3D model built for this design request:~%~%~a~%~%The drawing shows an isometric view and front, top and side views.  In under 200 words, say what you see: the parts, where each sits relative to the others, and anything that floats, passes through another part, is turned the wrong way, is missing, or is out of proportion for the request.  Be concrete; do not praise."
+  "What the viewer is asked of a drawing (look_at_model); ~a is the request.")
+
+(defun latest-request (session)
+  "The visitor's latest prompt: the last text block of the last user turn
+that has one."
+  (dolist (message (reverse (session-messages session)) "")
+    (when (and (hash-table-p message) (equal (gethash "role" message) "user"))
+      (let ((content (gethash "content" message)))
+        (cond ((stringp content) (return content))
+              (t (let ((text (find-if #'(lambda (block) (and (hash-table-p block) (equal (gethash "type" block) "text")))
+                                      (reverse (coerce content 'list)))))
+                   (when text (return (gethash "text" text))))))))))
+
+(defun look-at-model (session)
+  "Render SESSION's model and have *house-viewer-model* describe the
+drawing against the request; answer its words."
+  (multiple-value-bind (blocks error?) (render session :layout "isometric-plus-ortho")
+    (if error?
+        (values blocks t)
+        (handler-case
+            (let ((body (encode (h "model" *house-viewer-model* "max_tokens" 1024
+                                   "messages" (list (h "role" "user"
+                                                       "content" (list (->json (first blocks))
+                                                                       (h "type" "text"
+                                                                          "text" (format nil *look-question* (latest-request session))))))))))
+              (multiple-value-bind (status text)
+                  ;; read at run time: *messages-url* is agent.lisp's, which loads after this file
+                  (post-json (symbol-value '*messages-url*) body
+                             :headers (list (cons "anthropic-version" "2023-06-01")
+                                            (cons *session-header* (session-id session)))
+                             :seconds 180)
+                (let ((json (ignore-errors (yason:parse text))))
+                  (if (and (eql status 200) (hash-table-p json))
+                      (values (list (text-result "What a viewer sees in a drawing of your model:~%~{~a~}"
+                                                 (loop for block in (coerce (gethash "content" json) 'list)
+                                                       when (and (hash-table-p block) (equal (gethash "type" block) "text"))
+                                                         collect (gethash "text" block))))
+                              nil)
+                      (values (list (text-result "The viewer did not answer (~a); judge by check_model and view_model." status)) t)))))
+          (serious-condition (condition)
+            (values (list (text-result "The viewer could not be asked: ~a" condition)) t))))))
+
+(defun look-tool-definition ()
+  `(("name" . "look_at_model")
+    ("description" . "Have a vision model look at a drawing of your built model (isometric, front, top and side) and tell you in words what it sees against the request: what is where, what floats, passes through another part, is turned the wrong way or is missing. Use it after check_model and view_model, then fix what it reports.")
+    ("input_schema" . ,(schema nil))))
 
 ;;
 ;; The primer, from the Gendl guide.
