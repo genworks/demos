@@ -252,10 +252,12 @@ when it declares none or does not build.  Read once per compile."
                                                                :defaults (session-model-file session)))))
          (kept (bt:with-lock-held (*kinds-lock*) (gethash key *built-tolls*))))
     (unless (and kept stamp (eql (first kept) stamp))
-      (let* ((object (ignore-errors
-                      (with-time-limit (*eval-seconds* "build")
-                        (let ((symbol (built-symbol session)))
-                          (and symbol (find-class symbol nil) (make-object symbol))))))
+      (let* ((object (handler-case
+                         (with-time-limit (*eval-seconds* "build")
+                           (let ((symbol (built-symbol session)))
+                             (and symbol (find-class symbol nil) (make-object symbol))))
+                       ;; a stack overflow too: ignore-errors lets it through (agent.lisp)
+                       (serious-condition () nil)))
              (tolls (and object (ignore-errors (remove-if-not #'valid-toll? (the-object object tolls)))))
              (file-tolls (and object tolls (ignore-errors (the-object object file-tolls)))))
         (setq kept (list stamp tolls (and (listp file-tolls) file-tolls)))

@@ -231,11 +231,13 @@ when one runs, when thumbnails are off, or when there is no rasteriser."
                               (loop ;; the archive listing's summaries read too, so the
                                     ;; first visitor after a restart does not wait while
                                     ;; every record is parsed (~13 ms a record, browse.lisp)
+                                    ;; serious-condition: an archived model that overflows
+                                    ;; the stack must not take the image down (agent.lisp)
                                     (handler-case (archive-summaries)
-                                      (error (condition)
+                                      (serious-condition (condition)
                                         (format *error-output* "~&prompt-lab summaries: ~a~%" condition)))
                                     (handler-case (draw-thumbnails!)
-                                      (error (condition)
+                                      (serious-condition (condition)
                                         (format *error-output* "~&prompt-lab thumbnails: ~a~%" condition)))
                                     (sleep *thumb-interval*)))
                           :name "prompt-lab thumbnails")))

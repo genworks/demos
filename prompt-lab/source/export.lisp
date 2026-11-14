@@ -464,7 +464,8 @@ credits are spent.  A grant is spent when its file is served."
                           (with-time-limit (*render-seconds* "download")
                             (let ((*package* (session-package session)))
                               (write-download kind (make-model session) file)))
-                        (error (condition) (values nil (format nil "The model did not write: ~a" condition))))
+                        ;; a stack overflow too, answered as a 422 (agent.lisp)
+                        (serious-condition (condition) (values nil (format nil "The model did not write: ~a" condition))))
                     (if (not ok?)
                         (refuse req ent (net.aserve::make-resp 422 "Unprocessable Entity") "~a" note)
                         (progn

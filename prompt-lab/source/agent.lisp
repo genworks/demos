@@ -817,7 +817,10 @@ session builds from this prompt on (kinds.lisp)."
     (bt:make-thread
      #'(lambda ()
          (handler-case (run-prompt session prompt :claimed? t)
-           (error (condition)
+           ;; serious-condition: a stack overflow in a thread of its own is
+           ;; caught by no one else, and takes the whole image down in batch
+           ;; mode on CCL and Allegro alike (probed 2026-11-14)
+           (serious-condition (condition)
              (log-event session :stopped "The agent stopped: ~a" (condition-text condition))
              (close-dangling-tool-uses! session "the agent stopped")
              (setf (session-busy? session) nil))))

@@ -809,6 +809,13 @@ loaded) its page too."
   :objects ((plate :type 'box :width (the depth) :length 10 :height 10)))")
                               (multiple-value-bind (blocks error?) (pl :check-model s)
                                 (unless error? (error "check_model of an endless recursion did not answer an error: ~s" blocks)))
+                              ;; outside the tools: the Monetize read and the download door
+                              (when (pl :built-tolls s) (error "built-tolls read tolls from a model that cannot build"))
+                              (let ((status (nth-value 1 (http :get (format nil "~a?session=~a&format=pdf" (door "download") (pl :session-id s))
+                                                               :headers (list (cons "X-Prompt-Lab-Owner" (pl :session-owner s)))))))
+                                (unless (eql status 422)
+                                  (error "the download door answered ~a for a model that overflows the stack" status)))
+                              (unless (page-ok? prefix) (error "the lab stopped answering after the overflows"))
                               t)
                          (ignore-errors (pl :delete-session s))
                          (pl :funnel-count! "sessions" -1))))))
