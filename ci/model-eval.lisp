@@ -211,3 +211,159 @@ the cents in all.  A plist."
               :median-seconds (nth (floor n 2) seconds)
               :mean-rounds (float (/ (reduce #'+ rows :key (lambda (r) (or (getf r :rounds) 0))) n) 1.0)
               :cents (float (reduce #'+ rows :key (lambda (r) (or (getf r :cents) 0))) 1.0)))))
+
+;;;; THE HYBRID ARMS: a strong model and a house model on one prompt.
+;;;;
+;;;;   (eval-run-planned  *sample* "house-1" :budget-cents 250 :out "/tmp/eval-planned.jsonl")
+;;;;   (eval-run-reviewed *sample* "house-1" :budget-cents 250 :out "/tmp/eval-reviewed.jsonl")
+;;;;
+;;;; PLANNED: the strong model writes a short spec and a define-object
+;;;; skeleton (one call, no tools); the house model builds from the request
+;;;; and the plan, in the lab's own loop.  REVIEWED: the house model builds;
+;;;; then, up to *eval-max-reviews* times, the free checks first (a model
+;;;; that does not build is sent back with check_model's own words, at no
+;;;; cost), else the strong model sees the request, the model file,
+;;;; check_model's numbers and a render, and answers PASS or corrections,
+;;;; which the house model gets as its next prompt.  Only the strong
+;;;; model's tokens cost money; BUDGET-CENTS stops a run before the next
+;;;; prompt once they reach it.  A reviewed prompt counts as finished only
+;;;; when the reviewer said PASS.
+
+(defparameter *eval-strong-model* "claude-opus-5-5"
+  "The model that plans or reviews in the hybrid arms.")
+
+(defparameter *eval-max-reviews* 3
+  "Review rounds at most for one prompt in the reviewed arm.")
+
+(defparameter *eval-engine-grammar*
+  "Gendl grammar: (define-object model (base-object) :input-slots ((name default) ...) :computed-slots ((name expression) ...) :objects ((part :type 'box :width ... :length ... :height ... :center (translate (the center) :up ...)) ...)), the keyword pairs never wrapped in one more list; slots are read with (the name), a sequence member's index with (the-child index) under :sequence (:size n).  MODEL's own width, length and height are its envelope, a box centered on (the center): every part goes inside it.  This engine has box (width X, length Y, height Z), cylinder and cone (axis along their own Y; upright with :orientation (alignment :rear (the (face-normal-vector :top)))), sphere and global-polygon-projection; no booleans."
+  "What the strong model is told of Gendl when it plans or reviews.")
+
+(defparameter *eval-plan-system*
+  (format nil "You plan a parametric Gendl model for a less experienced modeling agent, which builds it in the prompt lab with tools that compile and check it.  Given the design request, write (1) a short spec: the overall envelope in mm (x y z), each part with its size and where it sits relative to the model's center, and the few inputs a person would want to change; and (2) a skeleton of MODEL as one define-object that compiles: input-slots with defaults, computed-slots for derived values, and every part under :objects with its :type, sizes and :center.  The builder completes and corrects it.  ~a  Keep the skeleton under 60 lines; no prose beyond the spec."
+          *eval-engine-grammar*))
+
+(defparameter *eval-review-system*
+  (format nil "You review a parametric Gendl model that a less experienced modeling agent built for a design request.  You get the request, the model file, the lab's check numbers and a wireframe render (isometric and three orthographic views).  If the model builds what was asked -- the right parts, in the right places, at plausible sizes -- answer PASS on the first line and nothing else.  Otherwise answer CORRECTIONS on the first line, then at most five numbered corrections the builder can act on: which part, what is wrong, and the fix in Gendl terms.  No praise.  ~a"
+          *eval-engine-grammar*))
+
+(defun eval-ask (model system content &key (max-tokens 4000) (label "eval-ask"))
+  "One Messages call to MODEL through the lab's gate, no tools, low effort:
+SYSTEM, and CONTENT (a list of content blocks, hash tables) as the user's
+turn.  Values: the reply's text, and its usage as the lab's plist
+(:input :output :cache-read :cache-write)."
+  (let ((body (with-output-to-string (s)
+                (yason:encode (eval-call '#:h "model" model "max_tokens" max-tokens
+                                         "output_config" (eval-call '#:h "effort" "low")
+                                         "system" system
+                                         "messages" (list (eval-call '#:h "role" "user" "content" content)))
+                              s))))
+    (multiple-value-bind (status text)
+        (eval-call '#:post-json (symbol-value (eval-lab '#:*messages-url*)) body
+                   :headers (list (cons "anthropic-version" "2023-06-01")
+                                  (cons (symbol-value (eval-lab '#:*session-header*)) label))
+                   :seconds 300)
+      (let ((json (ignore-errors (yason:parse text))))
+        (unless (and (eql status 200) (hash-table-p json))
+          (error "~a answered ~a: ~a" model status (subseq text 0 (min 300 (length text)))))
+        (let ((usage (gethash "usage" json)))
+          (values (format nil "~{~a~}" (loop for block in (coerce (gethash "content" json) 'list)
+                                             when (equal (eval-get block "type") "text")
+                                               collect (eval-get block "text")))
+                  (list :input (or (eval-get usage "input_tokens") 0)
+                        :output (or (eval-get usage "output_tokens") 0)
+                        :cache-read (or (eval-get usage "cache_read_input_tokens") 0)
+                        :cache-write (or (eval-get usage "cache_creation_input_tokens") 0))))))))
+
+(defun eval-text-block (text) (eval-call '#:h "type" "text" "text" text))
+
+(defun eval-check-text (session)
+  "check_model's own words for SESSION's model."
+  (format nil "~{~a~}" (mapcar (lambda (b) (or (cdr (assoc "text" b :test #'string=)) ""))
+                               (eval-call '#:check-model session))))
+
+(defun eval-render-block (session)
+  "A render of SESSION's model for the reviewer, as a content block, or nil."
+  (let ((block (first (ignore-errors (eval-call '#:render session :layout "isometric-plus-ortho")))))
+    (and block (equal (cdr (assoc "type" block :test #'string=)) "image")
+         (eval-call '#:->json block))))
+
+(defun eval-hybrid-run (sample builder mode &key budget-cents out (net 230) (strong *eval-strong-model*))
+  "The hybrid arm MODE, :planned or :reviewed, on SAMPLE with BUILDER as the
+house model and STRONG planning or reviewing.  Results as eval-run's, with
+:mode, :strong-cents, :reviews and :verdict."
+  (let ((spent 0) (results nil) (index 0))
+    (dolist (item sample)
+      (when (and budget-cents (>= spent budget-cents)) (return))
+      (let* ((address (format nil "10.~d.~d.~d" net (floor index 250) (1+ (mod index 250))))
+             (session (progn (incf index) (eval-call '#:open-session! address nil)))
+             (strong-usage nil) (reviews 0) (verdict nil)
+             (prompt (getf item :prompt)))
+        (unless session (error "The lab would not open a session for ~a." address))
+        (flet ((ask (system content max-tokens label)
+                 (multiple-value-bind (text usage) (eval-ask strong system content :max-tokens max-tokens :label label)
+                   (setq strong-usage (loop for (key value) on usage by #'cddr
+                                            append (list key (+ value (or (getf strong-usage key) 0)))))
+                   text))
+               (built? () (and (ignore-errors (eval-call '#:model-defined? session)) t)))
+          (unwind-protect
+               (let ((start (get-internal-real-time))
+                     (started (eval-call '#:utc-time (get-universal-time)))
+                     (id (eval-call '#:session-id session)))
+                 (eval-call '#:set-session-model! session builder)
+                 (ecase mode
+                   (:planned
+                    (let ((plan (ask *eval-plan-system* (list (eval-text-block prompt)) 4000 (format nil "plan-~a" id))))
+                      (eval-call '#:run-prompt session
+                                 (format nil "~a~%~%An engineer's plan for this request -- a spec and a skeleton of MODEL that compiles as a start; follow it, complete it and check it:~%~%~a" prompt plan))))
+                   (:reviewed
+                    (eval-call '#:run-prompt session prompt)
+                    (loop while (< reviews *eval-max-reviews*)
+                          do (incf reviews)
+                             (let ((correction
+                                     (if (not (built?))
+                                         ;; the free check first: no strong model for a model that does not build
+                                         (format nil "The model does not build yet.  check_model says:~%~a~%Fix it." (eval-check-text session))
+                                         (let ((answer (ask *eval-review-system*
+                                                            (remove nil (list (eval-text-block (format nil "The request:~%~a~%~%The model file:~%~a~%~%check_model:~%~a"
+                                                                                                       prompt (eval-call '#:model-body session) (eval-check-text session)))
+                                                                              (eval-render-block session)))
+                                                            2000 (format nil "review-~a-~d" id reviews))))
+                                           (if (eql 0 (search "PASS" (string-left-trim '(#\Space #\Newline) answer)))
+                                               (progn (setq verdict :pass) nil)
+                                               (format nil "A reviewer looked at your model and the render.  Make these corrections, then check_model:~%~a" answer))))))
+                               (if correction
+                                   (eval-call '#:run-prompt session correction)
+                                   (return))))
+                    (unless verdict (setq verdict :not-passed))))
+                 (let* ((log (coerce (eval-call '#:session-log session) 'list))
+                        (last-kind (let ((entry (find-if (lambda (e) (member (eval-log-kind e) '(:done :stopped))) (reverse log))))
+                                     (and entry (eval-log-kind entry))))
+                        (usage (eval-call '#:session-usage session))
+                        (strong-cents (eval-cents strong strong-usage))
+                        (result (list :id (getf item :id) :model builder :mode mode :strong strong
+                                      :session id :started started :ended (eval-call '#:utc-time (get-universal-time))
+                                      :finished (and (eq last-kind :done) (built?) (not (eq verdict :not-passed)))
+                                      :built (built?)
+                                      :verdict verdict :reviews reviews
+                                      :seconds (float (/ (- (get-internal-real-time) start) internal-time-units-per-second) 1.0)
+                                      :rounds (count :tool log :key #'eval-log-kind)
+                                      :input (getf usage :input) :output (getf usage :output)
+                                      :strong-input (getf strong-usage :input) :strong-output (getf strong-usage :output)
+                                      :cents (float strong-cents 1.0)
+                                      :archived-outcome (getf item :archived-outcome))))
+                   (incf spent strong-cents)
+                   (push result results)
+                   (when out
+                     (with-open-file (stream out :direction :output :if-exists :append :if-does-not-exist :create
+                                                 :external-format :utf-8)
+                       (yason:encode (eval-json-object result) stream)
+                       (terpri stream)))))
+            (ignore-errors (eval-call '#:delete-session session))))))
+    (nreverse results)))
+
+(defun eval-run-planned (sample builder &rest keys)
+  (apply #'eval-hybrid-run sample builder :planned keys))
+
+(defun eval-run-reviewed (sample builder &rest keys)
+  (apply #'eval-hybrid-run sample builder :reviewed keys))
