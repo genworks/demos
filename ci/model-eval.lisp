@@ -377,7 +377,9 @@ house model and STRONG planning or reviewing.  Results as eval-run's, with
                                          (reverse (coerce (eval-call '#:session-log session) 'list)))))
                       (if (and last (eq (eval-log-kind last) :done) (built?))
                           (setq verdict :house)
-                          (let ((before (eval-call '#:session-usage session)))
+                          ;; a copy: the lab adds to the usage plist in place (agent.lisp add-usage),
+                          ;; so the list itself would read as 'after' too and the difference as 0
+                          (let ((before (copy-list (eval-call '#:session-usage session))))
                             (setq verdict :escalated)
                             (incf reviews)
                             (eval-call '#:set-session-model! session strong)
