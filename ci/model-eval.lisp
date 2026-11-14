@@ -150,7 +150,8 @@ given.  Answers the results, plists."
              (session (progn (incf index) (eval-call '#:open-session! address nil))))
         (unless session (error "The lab would not open a session for ~a." address))
         (unwind-protect
-             (let ((start (get-internal-real-time)))
+             (let ((start (get-internal-real-time))
+                   (started (eval-call '#:utc-time (get-universal-time))))
                (eval-call '#:set-session-model! session model)
                (eval-call '#:run-prompt session (getf item :prompt))
                (let* ((log (eval-call '#:session-log session))
@@ -160,6 +161,9 @@ given.  Answers the results, plists."
                       (usage (eval-call '#:session-usage session))
                       (cents (eval-cents model usage))
                       (result (list :id (getf item :id) :model model
+                                    ;; when and as which session, to pair with the server's own timings
+                                    :session (eval-call '#:session-id session)
+                                    :started started :ended (eval-call '#:utc-time (get-universal-time))
                                     :finished (eq last-kind :done)
                                     :built (and (ignore-errors (eval-call '#:model-defined? session)) t)
                                     :seconds (float (/ (- (get-internal-real-time) start) internal-time-units-per-second) 1.0)
