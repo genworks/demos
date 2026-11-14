@@ -771,7 +771,7 @@ loaded) its page too."
                               (progn
                                 (pl :set-session-model! s "house-1")
                                 (unless (and (search "Worked examples" (pl :system-text s))
-                                             (search "after EVERY write_model" (pl :system-text s)))
+                                             (search "after EVERY change that compiles, then view_model" (pl :system-text s)))
                                   (error "a house session's system text lacks the house primer"))
                                 (when (find "render" (coerce (pl :tool-definitions s) 'list)
                                             :key (lambda (tool) (cdr (assoc "name" tool :test #'string=))) :test #'equal)
@@ -811,6 +811,11 @@ loaded) its page too."
                               (unless (and (member "set_slot" (names s) :test #'equal) (member "view_model" (names s) :test #'equal)
                                            (not (member "edit_model" (names s) :test #'equal)))
                                 (error "a house session's tools are not the structural ones: ~s" (names s)))
+                              ;; and its rules name those tools and the table's colour keys
+                              (let ((text (pl :model-system-text s)))
+                                (when (or (search "edit_model" text) (not (search "set_slot" text))
+                                          (search "saddle" text))
+                                  (error "a house session's rules still name edit_model or a colour the table lacks")))
                               (pl :write-model s "(define-object model (base-object)
   :input-slots ((width 600) (length 400) (height 300))
   :objects ((top :type 'box :width (the width) :length (the length) :height 20

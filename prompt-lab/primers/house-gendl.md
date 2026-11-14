@@ -156,7 +156,7 @@ only what a person would change; derived values go in
   `condition-case`.  To look at the model:
   `(the-object (make-object 'model) bounding-box)`.
 - Colours: `:display-controls (list :color :steel-blue)` -- e.g.
-  `:steel-blue`, `:slate-gray`, `:dim-gray`, `:saddle-brown`,
+  `:steel-blue`, `:slate-gray`, `:dim-gray`, `:sienna`,
   `:dark-olive-green`, `:firebrick`, `:goldenrod`.
 
 ### 6. When check_model or the compiler complains
@@ -196,7 +196,7 @@ A table: a top and four legs from one sequence, inside the envelope.
   ((top :type 'box
         :width (the width) :length (the length) :height (the top-thickness)
         :center (translate (the center) :up (- (half (the height)) (half (the top-thickness))))
-        :display-controls (list :color :saddle-brown))
+        :display-controls (list :color :sienna))
    (legs :type 'box
          :sequence (:size 4)
          :width (the leg-size) :length (the leg-size) :height (the leg-height)
@@ -253,7 +253,7 @@ A bookshelf: two sides and a changeable number of shelves, inside the envelope.
           :center (translate (the center)
                              :right (* (if (zerop (the-child index)) -1 1)
                                        (- (half (the width)) (half (the board)))))
-          :display-controls (list :color :saddle-brown))
+          :display-controls (list :color :sienna))
    (shelves :type 'box
             :sequence (:size (the shelf-count))
             :width (the inner-width) :length (the length) :height (the board)

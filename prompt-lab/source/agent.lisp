@@ -329,8 +329,8 @@ How to work:
 Rules:
 - Units are millimetres.  The model is always the object named MODEL, built by (make-object 'model) with no arguments.
 - The visitor may have edited the model file by hand.  Before changing an existing model, read_model and work from what is there.
-- Change a file that is already long with edit_model (one passage that occurs once in the file, replaced), not by writing it whole again.  A reply holds about 30,000 tokens in all, thinking included; one that runs out is lost entirely, nothing written.  A table of many rows is built up over several edits.
-- Give every visible part a colour: :display-controls (list :color <name>) with medium-toned, varied, plausible colours (named colours such as :steelblue, :saddlebrown, :darkolivegreen, :slategray, :firebrick, :goldenrod; not pale ones like :wheat or :beige, which vanish as wireframe lines on the light background), so both the shaded and the wireframe views read.
+- ~a
+- Give every visible part a colour: :display-controls (list :color <name>) with medium-toned, varied, plausible colours (named colours such as ~a; not pale ones like :wheat or :beige, which vanish as wireframe lines on the light background), so both the shaded and the wireframe views read.
 - ~a
 - Unsure what a type takes or which type to use?  describe_object names a type's inputs and documented messages~:[~;, and search_docs finds definitions, guide sections and examples~].  Ask them rather than guess an input name.
 ~a~:[- Charging, only when the visitor asks for it: a model that is deployed for others may ask a price for its downloads, and it says so in two computed-slots of MODEL.  (tolls (list (list :key :cad :label \"STEP or STL file\" :cents 300))) declares what is paid for -- MONEY, in cents of the author's currency (~a): :cents 300 is $3.00, which the model's users pay by card at the author's prices; the ~a this visitor builds with here are the lab's own unit, never a user's -- and (file-tolls (list :step :cad :stl :cad)) puts download formats behind a toll (:pdf :svg :png anywhere; :step :iges :stl on a solids engine); a format not named stays free.  Write nothing else about payment: the lab's page for the deployed model takes it.  Say in your reply what costs what, and that Monetize now opens.~;- Nothing here is for sale: this is the free public lab, where everything made is public the moment it is made.  Write no tolls and no file-tolls; if the visitor asks to charge for something, say that charging opens in a private lab, a rung up the ladder from here.~2*~]
@@ -339,11 +339,22 @@ Rules:
 
 ~a"
           *brand*
-          (cond ((house-model? session)
+          (cond ((and (house-model? session) *house-structure?*)
+                 " after EVERY change that compiles, then view_model, and read both closely: the visitor sees the model in a live viewer beside your reply")
+                ((house-model? session)
                  " after EVERY write_model or edit_model that compiles, and read its numbers closely: the visitor sees the model in a live viewer beside your reply")
                 ((render-offered?)
                  ", then render (layout isometric-plus-ortho) and look")
                 (t " and read its numbers closely: there is no render on this host, and the visitor sees the model in a live viewer beside your reply"))
+          ;; how a long file is changed: a house session edits by structure
+          ;; (tools.lisp), any other with edit_model
+          (if (and (house-model? session) *house-structure?*)
+              "Change a file that is already written with set_slot, add_slot, remove_slot or replace_form (one slot or one whole form at a time), not by writing it whole again; then view_model to see what you built.  A reply holds about 30,000 tokens in all, thinking included; one that runs out is lost entirely, nothing written."
+              "Change a file that is already long with edit_model (one passage that occurs once in the file, replaced), not by writing it whole again.  A reply holds about 30,000 tokens in all, thinking included; one that runs out is lost entirely, nothing written.  A table of many rows is built up over several edits.")
+          ;; colour names: a house model copies them, so give it the table's own keys
+          (if (house-model? session)
+              ":steel-blue, :dark-olive-green, :slate-gray, :firebrick, :goldenrod, :dim-gray"
+              ":steelblue, :saddlebrown, :darkolivegreen, :slategray, :firebrick, :goldenrod")
           ;; which engine this room runs (parameters.lisp)
           (engine-note)
           ;; the reference tools (docs.lisp): search only where a ready room is named
