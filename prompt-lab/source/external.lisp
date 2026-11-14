@@ -235,7 +235,7 @@ done or stopped before the reaper releases it.")
      "kind" (kind-name (session-kind session))
      "model" (session-model session)
      "effort" *effort*
-     "max_rounds" *max-rounds*
+     "max_rounds" (max-rounds session)
      "mcp" (format nil "~a/mcp?session=~a" *url-prefix* (session-id session))
      "tools" (map 'list #'tool-name (tool-definitions session))))
 

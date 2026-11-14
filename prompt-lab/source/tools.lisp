@@ -246,7 +246,8 @@ version that fails to compile is kept too."
               (values (list (text-result "Compiled and loaded.~:[  No object named ~a is defined!~;~*~]~@[~%Warnings:~%~{- ~a~%~}~]"
                                         defined? (built-name session) (reverse warnings)))
                       (not defined?)))))
-      (error (condition)
+      ;; a stack overflow too (see evaluate-expression)
+      (serious-condition (condition)
         (values (list (text-result "Error compiling or loading the model file: ~a~@[~%Warnings first:~%~{- ~a~%~}~]~@[~%~a~]"
                                   condition (reverse warnings)
                                   ;; a house model loses count of its parentheses
@@ -343,7 +344,10 @@ Wrap several forms in progn, or put definitions in the model with write_model.")
                               (text-result "~s~@[~%Output:~%~a~]"
                                           result (when (plusp (length output)) output))))
                       nil))
-          (error (condition)
+          ;; serious-condition, not error: a model that recurses into
+          ;; itself overflows the stack, a storage-condition, which took
+          ;; the whole Lisp down when only errors were caught (2026-11-14)
+          (serious-condition (condition)
             (values (list (text-result "Error: ~a" condition)) t)))))))
 
 
@@ -441,7 +445,8 @@ of 2026-09-25)."
                                                      (loop for (format . cents) in prices
                                                            collect (format nil "~a $~,2f" format (/ cents 100))))))))))
          (and (or pile? broken mismatches) t))))
-    (error (condition)
+    ;; a stack overflow too (see evaluate-expression)
+    (serious-condition (condition)
       (values (list (text-result "MODEL does not build with default inputs: ~a" condition)) t))))
 
 
@@ -483,7 +488,8 @@ lens and rasterised in process (raster.lisp): no Ghostscript."
                  (let ((png (render-svg-to-png (uiop:read-file-string file :external-format :utf-8))))
                    (values (list (image-block (png-base64 png))) nil)))
             (when (probe-file file) (ignore-errors (delete-file file))))))
-    (error (condition)
+    ;; a stack overflow too (see evaluate-expression)
+    (serious-condition (condition)
       (values (list (text-result "Render failed: ~a" condition)) t))))
 
 

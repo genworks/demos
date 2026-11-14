@@ -217,6 +217,10 @@ the cents in all.  A plist."
 ;;;;   (eval-run-planned  *sample* "house-1" :budget-cents 250 :out "/tmp/eval-planned.jsonl")
 ;;;;   (eval-run-reviewed *sample* "house-1" :budget-cents 250 :out "/tmp/eval-reviewed.jsonl")
 ;;;;
+;;;; ESCALATE: the house model builds; a prompt it leaves unfinished (not
+;;;; done, or no model) goes to the strong model in the lab's own loop, on a
+;;;; fresh conversation over the same model file; only that costs.
+;;;;
 ;;;; PLANNED: the strong model writes a short spec and a define-object
 ;;;; skeleton (one call, no tools); the house model builds from the request
 ;;;; and the plan, in the lab's own loop.  REVIEWED: the house model builds;
@@ -289,7 +293,7 @@ turn.  Values: the reply's text, and its usage as the lab's plist
          (eval-call '#:->json block))))
 
 (defun eval-hybrid-run (sample builder mode &key budget-cents out (net 230) (strong *eval-strong-model*))
-  "The hybrid arm MODE, :planned or :reviewed, on SAMPLE with BUILDER as the
+  "The hybrid arm MODE, :planned, :reviewed or :escalate, on SAMPLE with BUILDER as the
 house model and STRONG planning or reviewing.  Results as eval-run's, with
 :mode, :strong-cents, :reviews and :verdict."
   (let ((spent 0) (results nil) (index 0))
@@ -335,7 +339,28 @@ house model and STRONG planning or reviewing.  Results as eval-run's, with
                                (if correction
                                    (eval-call '#:run-prompt session correction)
                                    (return))))
-                    (unless verdict (setq verdict :not-passed))))
+                    (unless verdict (setq verdict :not-passed)))
+                   (:escalate
+                    ;; the house builds; only what it leaves unfinished goes to the
+                    ;; strong model, in the lab's own loop, on a fresh conversation
+                    ;; over the same model file (so it does not read the house's
+                    ;; whole transcript)
+                    (eval-call '#:run-prompt session prompt)
+                    (let ((last (find-if (lambda (e) (member (eval-log-kind e) '(:done :stopped)))
+                                         (reverse (coerce (eval-call '#:session-log session) 'list)))))
+                      (if (and last (eq (eval-log-kind last) :done) (built?))
+                          (setq verdict :house)
+                          (let ((before (eval-call '#:session-usage session)))
+                            (setq verdict :escalated)
+                            (incf reviews)
+                            (eval-call '#:set-session-model! session strong)
+                            (funcall (fdefinition (list 'setf (eval-lab '#:session-messages))) nil session)
+                            (eval-call '#:run-prompt session
+                                       (format nil "The visitor asked: ~a~%~%Another agent started this and left it unfinished.  read_model, then fix and finish the model." prompt))
+                            (let ((after (eval-call '#:session-usage session)))
+                              (setq strong-usage
+                                    (loop for key in '(:input :output :cache-read :cache-write)
+                                          append (list key (- (or (getf after key) 0) (or (getf before key) 0)))))))))))
                  (let* ((log (coerce (eval-call '#:session-log session) 'list))
                         (last-kind (let ((entry (find-if (lambda (e) (member (eval-log-kind e) '(:done :stopped))) (reverse log))))
                                      (and entry (eval-log-kind entry))))

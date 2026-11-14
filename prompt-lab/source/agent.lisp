@@ -224,6 +224,17 @@ minutes, which 300 seconds cut off with nothing to show.  The gate's
   "Whether SESSION builds with a house model."
   (and session (member (session-model session) *house-models* :test #'equal) t))
 
+(defparameter *house-max-rounds* 12
+  "Integer. Tool rounds allowed a house model for one prompt.  Its rounds
+cost the house only power, so the cap may differ from *max-rounds*; but
+24 was tried on 2026-11-14 (GLM-4.7-Flash with the primer) and finished
+no more of the same prompts than 12, at twice the time: the rounds past
+twelve went on a model that was not converging.")
+
+(defun max-rounds (&optional session)
+  "Tool rounds allowed for one prompt of SESSION: more for a house model."
+  (if (house-model? session) *house-max-rounds* *max-rounds*))
+
 (defun call-seconds (&optional session)
   "Seconds one call for SESSION may take: longer for a house model."
   (if (house-model? session) *house-call-seconds* *call-seconds*))
@@ -880,10 +891,10 @@ the session busy (start-prompt!)."
                           (log-event session :text "~a" (gethash "text" block)))))
                     (cond
                       ((equal stop "tool_use")
-                       (when (> round *max-rounds*)
+                       (when (> round (max-rounds session))
                          (close-dangling-tool-uses! session "the round cap was reached")
                          (return (log-event session :stopped "Stopped after ~a rounds of tool calls."
-                                            *max-rounds*)))
+                                            (max-rounds session))))
                        (let ((results
                                (loop for block in content
                                      when (equal (block-type block) "tool_use")

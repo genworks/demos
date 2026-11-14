@@ -767,6 +767,8 @@ loaded) its page too."
                                   (error "a house session is offered render"))
                                 (unless (eql (pl :call-seconds s) (symbol-value (lab '#:*house-call-seconds*)))
                                   (error "a house session's calls keep the short limit"))
+                                (unless (eql (pl :max-rounds s) (symbol-value (lab '#:*house-max-rounds*)))
+                                  (error "a house session keeps the lab model's round cap"))
                                 ;; the parenthesis report a house model gets on a file that does not read
                                 (unless (and (search "line 1" (or (pl :paren-report (format nil "(define-object model (base-object)~% :objects ((a :type 'box))")) ""))
                                              (search "extra ')' on line 2" (or (pl :paren-report (format nil "(a)~%(b))")) ""))
@@ -778,6 +780,27 @@ loaded) its page too."
                                 t)
                            (ignore-errors (pl :delete-session s))
                            (pl :funnel-count! "sessions" -1)))))))
+          ;; a model or an expression that recurses without end overflows the
+          ;; stack -- a storage-condition, not an error -- which took a whole
+          ;; Lisp down on 2026-11-14; the tools answer it as an error instead
+          (smoke "prompt-lab tools survive a stack overflow"
+                 (lambda ()
+                   (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
+                     (let ((s (pl :open-session! "10.9.8.4" nil)))
+                       (unwind-protect
+                            (multiple-value-bind (blocks error?)
+                                (pl :evaluate-expression s "(labels ((deeper (n) (+ 1 (deeper n)))) (deeper 1))")
+                              (unless (and error? (search "rror" (cdr (assoc "text" (first blocks) :test #'string=))))
+                                (error "an endless recursion was not answered as an error: ~s" blocks))
+                              (pl :write-model s "(defun deeper (n) (+ 1 (deeper n)))
+(define-object model (base-object)
+  :computed-slots ((depth (deeper 1)))
+  :objects ((plate :type 'box :width (the depth) :length 10 :height 10)))")
+                              (multiple-value-bind (blocks error?) (pl :check-model s)
+                                (unless error? (error "check_model of an endless recursion did not answer an error: ~s" blocks)))
+                              t)
+                         (ignore-errors (pl :delete-session s))
+                         (pl :funnel-count! "sessions" -1))))))
           ;; THE CLICKWRAP (ruling 94, guards.lisp): versioned texts with their
           ;; hashes; Build, the own agent, an external agent and Deploy each wait
           ;; for the tick, Declare for none (ruling 99); the acceptance log is chained, names no
