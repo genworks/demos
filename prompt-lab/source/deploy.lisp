@@ -1263,28 +1263,60 @@ up from DIRECTORY, or nil."
          until (equal d (uiop:pathname-parent-directory-pathname d)))))
 
 (defun gendl-commit ()
-  "Gendl's commit as the image records it -- GENDL_COMMIT, else a COMMIT
-file beside the image's Gendl -- as (values commit nil), else its build
-number as (values nil build)."
-  (let ((env (uiop:getenv "GENDL_COMMIT"))
+  "Gendl's commit as loaded: the HEAD of the checkout it was loaded from,
+where it was loaded from one (a dev room's mounted tree, whose commit the
+image's own record would misname); else as the image records it --
+GENDL_COMMIT, else a COMMIT file beside the image's Gendl -- as (values
+commit nil); else its build number as (values nil build)."
+  (let ((checkout (ignore-errors
+                   (let ((system (asdf:find-system :gendl nil)))
+                     (and system (git-head-commit (asdf:system-source-directory system))))))
+        (env (uiop:getenv "GENDL_COMMIT"))
         (file (ignore-errors (uiop:read-file-string "/opt/gendl/COMMIT"))))
-    (cond ((and (stringp env) (plusp (length env))) (values (string-trim '(#\Space #\Newline) env) nil))
+    (cond (checkout (values checkout nil))
+          ((and (stringp env) (plusp (length env))) (values (string-trim '(#\Space #\Newline) env) nil))
           ((and (stringp file) (plusp (length file))) (values (string-trim '(#\Space #\Newline #\Return) file) nil))
           (t (values nil (let ((v (find-symbol "*GENDL-VERSION*" :gendl)))
                            (and v (boundp v) (princ-to-string (symbol-value v)))))))))
 
+(defparameter *image-commits-files* '("/opt/gendl/COMMITS" "/opt/genworks-gdl/COMMITS")
+  "Where an image lists the repositories built into it, one line each:
+name commit branch origin.")
+
+(defun image-commits ()
+  "The repositories the image records beside Gendl (its COMMITS file):
+plists (:label :repository :commit), the repository only where its
+origin is a public https address.  Gendl itself, and the checkouts the
+lab lists of its own, are left to component-commits."
+  (let ((text (some #'(lambda (file) (ignore-errors (uiop:read-file-string file))) *image-commits-files*)))
+    (when (stringp text)
+      (loop for line in (uiop:split-string text :separator '(#\Newline))
+            for fields = (remove "" (uiop:split-string (string-trim '(#\Space #\Return #\Tab) line)
+                                                        :separator '(#\Space #\Tab))
+                                 :test #'string=)
+            for (name commit nil origin) = fields
+            when (and name commit
+                      (not (member name '("gendl" "demos" "monocle") :test #'string-equal)))
+              collect (list :label name :commit commit
+                            :repository (and (stringp origin) (eql 0 (search "https://" origin))
+                                             (not (find #\@ origin))
+                                             origin))))))
+
 (defun component-commits ()
   "Each component of a deployment, a plist (:label :repository :commit
-:build), as loaded."
-  (mapcar #'(lambda (entry)
-              (destructuring-bind (system label repository) entry
-                (if (eq system :gendl)
-                    (multiple-value-bind (commit build) (gendl-commit)
-                      (list :label label :repository repository :commit commit :build build))
-                    (list :label label :repository repository
-                          :commit (let ((dir (ignore-errors (asdf:system-source-directory system))))
-                                    (and dir (or (git-head-commit dir) (copied-commit dir))))))))
-          *component-repositories*))
+:build), as loaded: the lab's own list, then what the image records
+beside Gendl (the bundled libraries' tree)."
+  (append
+   (mapcar #'(lambda (entry)
+               (destructuring-bind (system label repository) entry
+                 (if (eq system :gendl)
+                     (multiple-value-bind (commit build) (gendl-commit)
+                       (list :label label :repository repository :commit commit :build build))
+                     (list :label label :repository repository
+                           :commit (let ((dir (ignore-errors (asdf:system-source-directory system))))
+                                     (and dir (or (git-head-commit dir) (copied-commit dir))))))))
+           *component-repositories*)
+   (image-commits)))
 
 (defvar *loaded-commits* nil
   "The components' commits as this image loaded them (component-commits,
@@ -1311,9 +1343,10 @@ its commit, the model file inline, and the model file as a download."
                           (:a :href (format nil "~a/source?download=model" (deployment-path name)) (esc (format nil "~a.lisp" name)))
                           (fmt " (SHA-256 ~a)" (or (watch-sha256-hex body) "not computed")))
                      (dolist (c *loaded-commits*)
-                       (htm (:li (esc (getf c :label)) ": "
-                                 (:a :href (getf c :repository) (esc (getf c :repository)))
-                                 (cond ((getf c :commit) (htm (fmt ", commit ~a" (getf c :commit))))
+                       (htm (:li (esc (getf c :label))
+                                 (when (getf c :repository)
+                                   (htm ": " (:a :href (getf c :repository) (esc (getf c :repository)))))
+                                 (cond ((getf c :commit) (htm ", commit " (esc (getf c :commit))))
                                        ((getf c :build) (htm (fmt ", build ~a (this image records no commit)" (getf c :build))))
                                        (t (htm ", version not recorded in this image")))))))
                     (:h2 :style "font-size: 1.1rem" "The model file")
