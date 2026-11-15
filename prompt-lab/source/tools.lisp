@@ -257,6 +257,11 @@ version that fails to compile is kept too."
                                        (ignore-errors (paren-report (file-model-body file))))))
                 t)))))
 
+(defvar *rewrite-advice* "Write the whole file again with write_model"
+  "What a refusal for unbalanced or unreadable text tells the model to do,
+bound by run-tool for the session at hand (rewrite-advice): a structure-only
+session has no write_model to send it to.")
+
 (defun paren-report (text)
   "Where TEXT's parentheses fail to balance, in words for the agent, or nil
 when they balance.  Strings, comments and character literals are skipped."
@@ -289,11 +294,16 @@ when they balance.  Strings, comments and character literals are skipped."
                         (decf depth)
                         (when (minusp depth)
                           (return-from paren-report
-                            (format nil "The parentheses do not balance: an extra ')' on line ~d closes more than was opened.  Write the whole file again with write_model." line))))))
+                            (format nil "The parentheses do not balance: an extra ')' on line ~d closes more than was opened.  ~a." line *rewrite-advice*))))))
                (incf i))
       (when (plusp depth)
-        (format nil "The parentheses do not balance: ~d '(' left open at the end of the file.  The top-level form starting on line ~d, ~s, is not closed.  Write the whole file again with write_model, closing each child form on its own last line, then ')' for its section and ')' for the define-object."
-                depth form-line form-head)))))
+        (format nil "The parentheses do not balance: ~d '(' left open at the end of the file.  The top-level form starting on line ~d, ~s, is not closed.  ~a.  Close each child form on its own last line, then ')' for its section and ')' for the define-object."
+                depth form-line form-head *rewrite-advice*)))))
+
+(defun rewrite-advice (session)
+  (if (structure-only? session)
+      "Send it again balanced: entry by entry with add_slot and set_slot, or one whole define-object with replace_form once two structural edits of it have failed"
+      "Write the whole file again with write_model"))
 
 (defun read-model (session)
   "The model's source as write-model takes it: the file after its header
@@ -500,6 +510,13 @@ lens and rasterised in process (raster.lisp): no Ghostscript."
 (defun input (name input) (cdr (assoc name input :test #'string-equal)))
 
 (defun run-tool (session name input)
+  "Run tool NAME with INPUT (an alist, keys as strings or keywords) on
+SESSION, its refusals advising what this session can do.  Values: content
+blocks, and true on failure."
+  (let ((*rewrite-advice* (rewrite-advice session)))
+    (%run-tool session name input)))
+
+(defun %run-tool (session name input)
   "Run tool NAME with INPUT (an alist, keys as strings or keywords) on
 SESSION.  Values: content blocks, and true on failure."
   (touch session)
@@ -873,8 +890,8 @@ does not read."
     (multiple-value-bind (forms complete?) (top-forms text)
       (declare (ignore forms))
       (cond ((not complete?)
-             (structural-refusal "The model file does not read to its end now, so it cannot be edited by structure.  ~a  Write it whole again with write_model."
-                                 (or (paren-report text) "")))
+             (structural-refusal "The model file does not read to its end now, so it cannot be edited by structure.  ~a"
+                                 (or (paren-report text) *rewrite-advice*)))
             (t (let ((found (definitions-named text object '("define-object"))))
                  (case (length found)
                    (0 (structural-refusal "There is no define-object named ~a in the model file.  replace_form with a whole (define-object ~a ...) adds one." object object))
@@ -925,7 +942,7 @@ add_slot takes them (the object defaults to NAME), all or nothing."
              (multiple-value-bind (forms complete?) (top-forms text)
                (declare (ignore forms))
                (cond ((not complete?)
-                      (structural-refusal "The model file does not read to its end now.  ~a" (or (paren-report text) "")))
+                      (structural-refusal "The model file does not read to its end now.  ~a" (or (paren-report text) *rewrite-advice*)))
                      ((definitions-named text name)
                       (structural-refusal "~a is already defined in the model file: add_slot adds to it and set_slot changes it." name))
                      (t (multiple-value-bind (new reason)
@@ -984,8 +1001,8 @@ defines NAME; with no such form, add SOURCE at the end of the file."
         (declare (ignore forms))
         (unless complete?
           (return-from replace-form-tool
-            (structural-refusal "The model file does not read to its end now.  ~a  Write it whole again with write_model."
-                                (or (paren-report text) ""))))
+            (structural-refusal "The model file does not read to its end now.  ~a"
+                                (or (paren-report text) *rewrite-advice*))))
         (let ((found (definitions-named text name)))
           (case (length found)
             (0 (write-model session (if (plusp (length (string-trim '(#\Space #\Newline) text)))
@@ -993,7 +1010,7 @@ defines NAME; with no such form, add SOURCE at the end of the file."
                                         source)))
             (1 (let ((span (first (first found))))
                  (write-model session (splice text (car span) (cdr span) source))))
-            (t (structural-refusal "The model file defines ~a ~d times; write it whole with write_model." name (length found)))))))))
+            (t (structural-refusal "The model file defines ~a ~d times.  ~a." name (length found) *rewrite-advice*))))))))
 
 (defun slot-entry-text (slot value)
   (format nil "(~a ~a)" slot (string-trim '(#\Space #\Tab #\Newline #\Return) value)))
@@ -1069,8 +1086,8 @@ Values: the new text, or nil and the reason it is refused."
              (multiple-value-bind (forms complete?) (top-forms text)
                (declare (ignore forms))
                (if (not complete?)
-                   (no "The model file does not read to its end now, so it cannot be edited by structure.  ~a  Write it whole again with write_model."
-                       (or (paren-report text) ""))
+                   (no "The model file does not read to its end now, so it cannot be edited by structure.  ~a"
+                       (or (paren-report text) *rewrite-advice*))
                    (let ((found (definitions-named text object '("define-object"))))
                      (case (length found)
                        (0 (no "There is no define-object named ~a in the model file.  new_object_def starts one." object))

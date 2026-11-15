@@ -775,6 +775,21 @@ With *stream-replies?* the reply is streamed (stream-messages-api)."
 
 (defun block-type (block) (gethash "type" block))
 
+(defparameter *cut-reply-text*
+  "(This reply was cut off at its length limit and dropped, nothing done.  Think less at a time and act in smaller steps.)"
+  "What stands in the conversation for a house model's reply cut off at
+max_tokens (drop-cut-reply!).")
+
+(defun drop-cut-reply! (session)
+  "Replace the conversation's last turn, an assistant reply cut off at its
+length limit, with *cut-reply-text*: its thinking and partial calls are of
+no use to the next request and cost their whole length in context."
+  (with-session-lock (session)
+    (let ((last (car (last (session-messages session)))))
+      (when (and (hash-table-p last) (equal (gethash "role" last) "assistant"))
+        (setf (gethash "content" last)
+              (list (h "type" "text" "text" *cut-reply-text*)))))))
+
 (defun close-dangling-tool-uses! (session reason)
   "When the conversation ends on an assistant turn that asked for tools,
 answer each of those calls with an error result saying REASON.  The API
@@ -982,6 +997,10 @@ the session busy (start-prompt!)."
                       ((equal stop "refusal")
                        (return (log-event session :stopped "The model declined this request.")))
                       ((equal stop "max_tokens")
+                       ;; a house model's cut reply goes back as one line, not its
+                       ;; thinking: kept verbatim it filled a 128K context in three
+                       ;; follow-ups (the staged arm, 2026-11-15)
+                       (when (house-model? session) (drop-cut-reply! session))
                        ;; a reply cut off may end inside a tool call
                        (close-dangling-tool-uses! session "the reply hit its length limit")
                        (return (log-event session :stopped "The reply hit its length limit.")))
