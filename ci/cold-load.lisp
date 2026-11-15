@@ -926,6 +926,8 @@ loaded) its page too."
                                     (error "new_object_def's entries were not written: ~a" text)))
                                 (unless (search "new_object_def" (pl :model-system-text s))
                                   (error "the structure-only rules do not name new_object_def"))
+                                (unless (search "ONE OR TWO add_slot CALLS" (pl :model-system-text s))
+                                  (error "the structure-only rules do not ask for the first version in batches"))
                                 ;; a new structure-only session starts with MODEL's skeleton
                                 (let ((s2 (pl :open-session! "10.9.8.3" nil)))
                                   (unwind-protect

@@ -356,7 +356,7 @@ Rules:
           ;; (tools.lisp), any other with edit_model
           (cond
             ((structure-only? session)
-             "Nothing is written whole here: there is no write_model.  Every define-object begins with new_object_def (MODEL's is already there) and grows with add_slot; set_slot and remove_slot change it, one entry at a time.  replace_form takes a defun, or a whole define-object once two structural edits of it have failed.  A reply holds about 30,000 tokens in all, thinking included; one that runs out is lost entirely, nothing written.")
+             "Nothing is written whole here: there is no write_model.  Every define-object begins with new_object_def (MODEL's is already there) and grows with add_slot; set_slot and remove_slot change it, one entry at a time.  replace_form takes a defun, or a whole define-object once two structural edits of it have failed.  BUILD MODEL'S WHOLE FIRST VERSION IN ONE OR TWO add_slot CALLS: every input, computed slot and child of that first version as ENTRIES of one batch (a helper object's with new_object_def's ENTRIES), not a few entries a call; then fix what the AUTO-VIEW and check_model show, a few entries at a time.  A reply holds about 30,000 tokens in all, thinking included; one that runs out is lost entirely, nothing written.")
             ((and (house-model? session) *house-structure?*)
              "Change a file that is already written with set_slot, add_slot, remove_slot or replace_form (one slot or one whole form at a time), not by writing it whole again; then view_model to see what you built.  A reply holds about 30,000 tokens in all, thinking included; one that runs out is lost entirely, nothing written.")
             (t
@@ -379,7 +379,7 @@ Rules:
           (or (and (house-model? session) (house-primer-text)) (primer-text) "")
           ;; building by structure alone: the primer's whole-file steps read otherwise
           (if (structure-only? session)
-              (format nil "~%~%IN THIS SESSION THERE IS NO write_model.  Where the primer says to write the file, build the same define-objects entry by entry: new_object_def for each object (MODEL's is already there), then add_slot for the inputs, computed slots, children and functions -- as many as you like in one call, as ENTRIES; one bad entry writes none, and the error names it.  The worked examples show what the entries look like, not a file to send whole.")
+              (format nil "~%~%IN THIS SESSION THERE IS NO write_model.  Where the primer says to write the file, build the same define-objects -- the whole first version in one or two batches -- new_object_def for each object (MODEL's is already there), then add_slot for the inputs, computed slots, children and functions -- as many as you like in one call, as ENTRIES; one bad entry writes none, and the error names it.  The worked examples show what the entries look like, not a file to send whole.")
               "")))
 
 (defun uploads-note ()
