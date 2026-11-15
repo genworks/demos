@@ -397,12 +397,22 @@ Rules:
 ;; One API call.
 ;;
 
+(defparameter *house-thinking-budget* nil
+  "Nil or an integer.  A house session asks its model to think at most this
+many tokens a reply, as thinking.budget_tokens.  The house server ignores
+output_config.effort (25 probes on subhadra, 2026-11-15: the same spread of
+thinking at low, medium and none, a third of replies running to the cap)
+but honors the budget.  Nil: no budget, as before.")
+
 (defun request-body (session &key stream?)
   (let ((tools (->json (tool-definitions session))))
     (encode
      (apply #'h
       (append
        (when stream? (list "stream" t))
+       ;; a house model's thinking, capped (*house-thinking-budget*)
+       (when (and *house-thinking-budget* (house-model? session))
+         (list "thinking" (h "type" "enabled" "budget_tokens" *house-thinking-budget*)))
        (list
         ;; the visitor's pick from the gate's menu, else *model*
         "model" (session-model session)

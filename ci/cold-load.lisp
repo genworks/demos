@@ -956,6 +956,15 @@ loaded) its page too."
                                   (progv (list (lab '#:*house-vision-models*)) (list (list "house-1"))
                                     (when (member "look_at_model" (names s) :test #'equal)
                                       (error "a house model that sees was offered a viewer too")))))
+                              ;; a house model's thinking budget goes into its request alone
+                              (when (search "budget_tokens" (pl :request-body s)) (error "a thinking budget was sent with none set"))
+                              (progv (list (lab '#:*house-thinking-budget*)) (list 4096)
+                                (unless (search "\"budget_tokens\":4096" (pl :request-body s))
+                                  (error "the house thinking budget was not sent: ~a" (subseq (pl :request-body s) 0 300)))
+                                (pl :set-session-model! s nil)
+                                (when (search "budget_tokens" (pl :request-body s))
+                                  (error "a thinking budget was sent for a model that is not the house's"))
+                                (pl :set-session-model! s "house-1"))
                               ;; the lab's own model keeps its tools
                               (pl :set-session-model! s nil)
                               (when (member "set_slot" (names s) :test #'equal) (error "a session on the lab's model got the house tools"))
