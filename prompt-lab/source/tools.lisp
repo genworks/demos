@@ -535,10 +535,19 @@ SESSION.  Values: content blocks, and true on failure."
          (write-project-file-tool session (input "path" input) (input "content" input)))
         ((string= name "check_profile") (check-profile-tool session))
         ;; structure and sight for a house model (below)
-        ((string= name "set_slot") (set-slot-tool session (input "object" input) (input "slot" input) (input "value" input)))
-        ((string= name "add_slot") (add-slot-tool session (input "object" input) (input "section" input)
-                                                  (input "slot" input) (input "value" input)))
-        ((string= name "remove_slot") (remove-slot-tool session (input "object" input) (input "slot" input)))
+        ((string= name "set_slot")
+         (multiple-value-call #'note-structural-call session (input "object" input)
+           (set-slot-tool session (input "object" input) (input "slot" input) (input "value" input))))
+        ((string= name "add_slot")
+         (multiple-value-call #'note-structural-call session (input "object" input)
+           (add-slot-tool session (input "object" input) (input "section" input)
+                          (input "slot" input) (input "value" input) (input "entries" input))))
+        ((string= name "remove_slot")
+         (multiple-value-call #'note-structural-call session (input "object" input)
+           (remove-slot-tool session (input "object" input) (input "slot" input))))
+        ((string= name "new_object_def")
+         (new-object-def-tool session (input "name" input) (input "mixins" input) (input "description" input)
+                              (input "entries" input)))
         ((string= name "replace_form") (replace-form-tool session (input "name" input) (input "source" input)))
         ((string= name "view_model") (view-model session))
         ((string= name "look_at_model") (look-at-model session))
@@ -564,8 +573,12 @@ text-only house model's render for it and describes it (look_at_model): a
 coder and a separate viewer.  Nil: no viewer.")
 
 (defparameter *house-structure?* t
-  "Boolean.  Whether a house session edits by structure and has view_model
-(set_slot, add_slot, remove_slot, replace_form; edit_model withdrawn).")
+  "T, nil or :only.  T: a house session edits by structure and has view_model
+(new_object_def, set_slot, add_slot, remove_slot, replace_form; edit_model
+withdrawn).  :only: the same with write_model withdrawn too -- MODEL starts
+as an empty skeleton, and a whole define-object is replaced only after two
+structural edits of it have failed.  Nil: write_model and edit_model, as for
+any model.")
 
 (defun tool-definitions (&optional session)
   "The tools, as the Messages API's tools array (a vector of alists);
@@ -597,6 +610,9 @@ and check_app only for a SESSION that builds a web app (kinds.lisp)."
       ;; raw-text edit goes, which its unbalanced patches came through
       (when (and (house-model? session) *house-structure?*)
         (setq tools (concatenate 'vector (without "edit_model" tools) (house-tool-definitions))))
+      ;; building by structure alone: no whole-file write either
+      (when (structure-only? session)
+        (setq tools (without "write_model" tools)))
       ;; a house model that cannot see may have a viewer look for it
       (when (and (house-model? session) *house-viewer-model* (render-offered?)
                  (not (member (session-model session) *house-vision-models* :test #'equal)))
@@ -868,6 +884,82 @@ does not read."
 (defun splice (text start end new)
   (concatenate 'string (subseq text 0 start) new (subseq text end)))
 
+(defun structure-only? (session)
+  "True when SESSION is a house session that builds by structure alone
+(*house-structure?* :only): no whole-file write, no text edit."
+  (and (house-model? session) (eq *house-structure?* :only)))
+
+(defun definer-name? (string)
+  "True for a plausible name to define: letters, digits and - _ * only."
+  (and (stringp string) (plusp (length string))
+       (every #'(lambda (c) (or (alphanumericp c) (find c "-_*"))) string)))
+
+(defun object-skeleton (name mixins &optional description)
+  "A define-object of NAME on MIXINS (a list of names) with every section
+empty: balanced by construction, filled by add_slot."
+  (format nil "(define-object ~a (~{~a~^ ~})~@[~%  :documentation (:description ~s)~]~%  :input-slots ()~%  :computed-slots ()~%  :objects ()~%  :functions ())"
+          name mixins description))
+
+(defun ensure-model-skeleton! (session)
+  "In a structure-only session whose model file is empty, write MODEL's
+skeleton, so the first edit is an add_slot and no header or define-object is
+ever written by hand."
+  (when (and (structure-only? session)
+             (zerop (length (string-trim '(#\Space #\Tab #\Newline #\Return) (model-body-text session)))))
+    (write-model session (object-skeleton "model" '("base-object")))))
+
+(defun new-object-def-tool (session name mixins description &optional entries)
+  "Add an empty define-object NAME on MIXINS to the model file, every
+section there to be filled by add_slot -- or filled at once from ENTRIES, as
+add_slot takes them (the object defaults to NAME), all or nothing."
+  (let ((mixins (remove "" (uiop:split-string (or mixins "") :separator '(#\Space #\, #\Tab #\Newline))
+                        :test #'string=))
+        (description (and (stringp description) (plusp (length (string-trim " " description)))
+                          (string-trim " " description))))
+    (cond ((not (definer-name? name))
+           (structural-refusal "Nothing written: NAME is one Lisp name, letters, digits and hyphens, e.g. \"shelf-bracket\"."))
+          ((notevery #'definer-name? mixins)
+           (structural-refusal "Nothing written: MIXINS are type names separated by spaces, e.g. \"base-object\" or \"box\"."))
+          (t
+           (let ((text (model-body-text session)))
+             (multiple-value-bind (forms complete?) (top-forms text)
+               (declare (ignore forms))
+               (cond ((not complete?)
+                      (structural-refusal "The model file does not read to its end now.  ~a" (or (paren-report text) "")))
+                     ((definitions-named text name)
+                      (structural-refusal "~a is already defined in the model file: add_slot adds to it and set_slot changes it." name))
+                     (t (multiple-value-bind (new reason)
+                            (add-entries (format nil "~@[~a~%~%~]~a"
+                                                 (let ((kept (string-right-trim '(#\Space #\Newline #\Tab #\Return) text)))
+                                                   (and (plusp (length kept)) kept))
+                                                 (object-skeleton name (or mixins '("base-object")) description))
+                                         (mapcar #'(lambda (e)
+                                                     (list (or (entry-field e "object") name)
+                                                           (entry-field e "section")
+                                                           (or (entry-field e "slot") (entry-field e "name"))
+                                                           (entry-field e "value")))
+                                                 (coerce (or entries '()) 'list)))
+                          (if reason
+                              (structural-refusal "~a  (~a was not started either.)" reason name)
+                              (write-model session new)))))))))))
+
+;; the escape hatch: a whole define-object may be replaced in a
+;; structure-only session once two structural edits of it have failed
+(defvar *structural-failures* (make-hash-table :test #'equal)
+  "(session-id object) -> how many structural edits of that object failed.")
+(defvar *structural-failures-lock* (bt2:make-lock :name "prompt-lab structural failures"))
+
+(defun structural-failures (session object)
+  (bt2:with-lock-held (*structural-failures-lock*)
+    (gethash (list (session-id session) (string-downcase (or object ""))) *structural-failures* 0)))
+
+(defun note-structural-call (session object blocks error?)
+  "Count a failed structural edit of OBJECT; values BLOCKS and ERROR? as given."
+  (when error?
+    (bt2:with-lock-held (*structural-failures-lock*)
+      (incf (gethash (list (session-id session) (string-downcase (or object ""))) *structural-failures* 0))))
+  (values blocks error?))
+
 (defun replace-form-tool (session name source)
   "Replace the top-level form defining NAME with SOURCE, one whole form that
 defines NAME; with no such form, add SOURCE at the end of the file."
@@ -879,6 +971,14 @@ defines NAME; with no such form, add SOURCE at the end of the file."
                  (string-equal (span-text source (second own)) name))
       (return-from replace-form-tool
         (structural-refusal "Nothing written: SOURCE must be one form that defines ~a -- (define-object ~a ...), (defun ~a ...) or the like." name name name)))
+    ;; building by structure: a define-object is made with new_object_def and
+    ;; filled with add_slot; whole, it is replaced only once two structural
+    ;; edits of it have failed (the escape hatch)
+    (when (and (structure-only? session)
+               (string-equal (span-text source (first own)) "define-object")
+               (< (structural-failures session name) 2))
+      (return-from replace-form-tool
+        (structural-refusal "Nothing written: here a define-object is not written whole.  Change ~a one entry at a time -- add_slot, set_slot, remove_slot -- or make a new object with new_object_def.  (A whole replacement of ~a is allowed once two structural edits of it have failed.)" name name)))
     (let ((text (model-body-text session)))
       (multiple-value-bind (forms complete?) (top-forms text)
         (declare (ignore forms))
@@ -899,7 +999,7 @@ defines NAME; with no such form, add SOURCE at the end of the file."
   (format nil "(~a ~a)" slot (string-trim '(#\Space #\Tab #\Newline #\Return) value)))
 
 (defparameter *child-recipe*
-  "A child is ONE entry of the objects section, named for itself: add_slot with object \"model\", section \"objects\", slot \"shelf\" and value \":type 'box :width (the width) :length 300 :height 18 :center (translate (the center) :up 100)\" adds it; set_slot with slot \"shelf\" and a new value changes it; remove_slot with slot \"shelf\" removes it.  One child per call, and VALUE starts at :type -- no parentheses around it, no list of children."
+  "A child is ONE entry of the objects section, named for itself: add_slot with object \"model\", section \"objects\", slot \"shelf\" and value \":type 'box :width (the width) :length 300 :height 18 :center (translate (the center) :up 100)\" adds it; set_slot with slot \"shelf\" and a new value changes it; remove_slot with slot \"shelf\" removes it.  One child per entry -- several children go as several ENTRIES of one add_slot -- and VALUE starts at :type: no parentheses around it, no list of children."
   "How a child object is added, changed and removed: said by every refusal
 that catches a section or a list of children where one child belongs.")
 
@@ -941,31 +1041,87 @@ child, a function -- with (SLOT VALUE)."
                  (structural-refusal "~a" (child-value-problem section value)))
                 (t (write-model session (splice text (car entry) (cdr entry) (slot-entry-text slot value)))))))))
 
-(defun add-slot-tool (session object section slot value)
-  "Add (SLOT VALUE) to SECTION of the define-object OBJECT, making the
-section when it has none."
+(defun entry-field (entry key)
+  "KEY of one ENTRY of a batch: a JSON object as parsed (a hash table) or an
+alist."
+  (cond ((hash-table-p entry) (gethash key entry))
+        ((consp entry) (cdr (assoc key entry :test #'string-equal)))))
+
+(defun add-entry (text object section slot value)
+  "TEXT with (SLOT VALUE) added to SECTION of the define-object OBJECT.
+Values: the new text, or nil and the reason it is refused."
   (let ((problem (fragment-problem value))
         (section (string-downcase (if (and (stringp section) (plusp (length section)) (char/= (char section 0) #\:))
                                       (concatenate 'string ":" section)
                                       (or section "")))))
-    (cond ((section-name? slot) (section-refusal slot))
-          (problem (structural-refusal "Nothing written: VALUE ~a" problem))
-          ((child-value-problem section value)
-           (structural-refusal "~a" (child-value-problem section value)))
-          ((not (member section *slot-sections* :test #'string=))
-           (structural-refusal "SECTION is one of ~{~a~^, ~}." (mapcar #'(lambda (s) (subseq s 1)) *slot-sections*)))
-          (t (with-object session object
-               #'(lambda (text span elements)
-                   (cond ((find-slot text elements slot)
-                          (structural-refusal "~a already has a slot named ~a: set_slot changes it.  A name is used once in a define-object." object slot))
-                         (t (let ((list-span (cdr (assoc section (object-sections text elements) :test #'string=)))
-                                  (entry (slot-entry-text slot value)))
-                              (write-model session
-                                           (if list-span
-                                               (let ((close (1- (cdr list-span))))
-                                                 (splice text close close (format nil "~%   ~a" entry)))
-                                               (let ((close (1- (cdr span))))
-                                                 (splice text close close (format nil "~%~%  ~a~%  (~a)" section entry))))))))))))))
+    (flet ((no (control &rest args) (values nil (apply #'format nil control args))))
+      (cond ((not (and (stringp slot) (plusp (length slot))))
+             (no "Nothing written: every entry needs a SLOT, its own name."))
+            ((section-name? slot)
+             (no "Nothing written: ~a is a section of the define-object, not a slot in it; these tools take ONE entry by its own name.  ~a"
+                 slot *child-recipe*))
+            ((not (stringp value)) (no "Nothing written: every entry needs a VALUE."))
+            (problem (no "Nothing written: VALUE ~a" problem))
+            ((child-value-problem section value) (no "~a" (child-value-problem section value)))
+            ((not (member section *slot-sections* :test #'string=))
+             (no "SECTION is one of ~{~a~^, ~}." (mapcar #'(lambda (s) (subseq s 1)) *slot-sections*)))
+            (t
+             (multiple-value-bind (forms complete?) (top-forms text)
+               (declare (ignore forms))
+               (if (not complete?)
+                   (no "The model file does not read to its end now, so it cannot be edited by structure.  ~a  Write it whole again with write_model."
+                       (or (paren-report text) ""))
+                   (let ((found (definitions-named text object '("define-object"))))
+                     (case (length found)
+                       (0 (no "There is no define-object named ~a in the model file.  new_object_def starts one." object))
+                       (1 (destructuring-bind (span elements) (first found)
+                            (if (find-slot text elements slot)
+                                (no "~a already has a slot named ~a: set_slot changes it.  A name is used once in a define-object." object slot)
+                                (let ((list-span (cdr (assoc section (object-sections text elements) :test #'string=)))
+                                      (entry (slot-entry-text slot value)))
+                                  (values (if list-span
+                                              (let ((close (1- (cdr list-span))))
+                                                (splice text close close (format nil "~%   ~a" entry)))
+                                              (let ((close (1- (cdr span))))
+                                                (splice text close close (format nil "~%~%  ~a~%  (~a)" section entry))))
+                                          nil)))))
+                       (t (no "The model file defines ~a ~d times; keep one, with replace_form." object (length found))))))))))))
+
+(defun add-entries (text entries)
+  "TEXT with every entry of ENTRIES -- lists (object section slot value) --
+added in turn.  Values: the new text, or nil and the reason the first
+refused entry was refused, naming it when there are several."
+  (let ((count (length entries)))
+    (loop for (object section slot value) in entries
+          for i from 1
+          do (multiple-value-bind (next reason) (add-entry text object section slot value)
+               (if reason
+                   (return-from add-entries
+                     (values nil (if (= count 1)
+                                     reason
+                                     (format nil "Nothing written -- entry ~d of ~d (slot ~s of ~a) was refused, so none of the ~d was: ~a"
+                                             i count slot object count reason))))
+                   (setq text next))))
+    (values text nil)))
+
+(defun add-slot-tool (session object section slot value &optional entries)
+  "Add (SLOT VALUE) to SECTION of the define-object OBJECT, making the
+section when it has none -- or, given ENTRIES (a list of objects with
+section, slot or name, value and optionally object), every one of them in
+one write.  All or nothing: each entry is checked against the file as the
+entries before it leave it, and one refused entry writes none."
+  (let ((entries (if entries
+                     (mapcar #'(lambda (e)
+                                 (list (or (entry-field e "object") object)
+                                       (entry-field e "section")
+                                       (or (entry-field e "slot") (entry-field e "name"))
+                                       (entry-field e "value")))
+                             (coerce entries 'list))
+                     (list (list object section slot value)))))
+    (multiple-value-bind (text refusal) (add-entries (model-body-text session) entries)
+      (if refusal
+          (structural-refusal "~a" refusal)
+          (write-model session text)))))
 
 (defun remove-slot-tool (session object slot)
   "Remove SLOT from the define-object OBJECT."
@@ -1052,7 +1208,7 @@ symmetry -- the account appended to an edit by *house-auto-view*."
                                            (> (- (lo box 2) floor-z) 0.5))
                                   (push name floating))
                                 (unless brief?
-                                 (say "- ~a (~(~a~)): ~,1f x ~,1f x ~,1f, X ~,1f..~,1f Y ~,1f..~,1f Z ~,1f..~,1f~@[, axis ~a~]~:[~;, on the floor~]~@[; touches ~{~a~^, ~}~]~@[; OVERLAPS ~{~a~^, ~}~]~:[~;; FLOATS: touches nothing, off the floor~]"
+                                 (say "- ~a (~(~a~)): ~,1f x ~,1f x ~,1f, X ~,1f..~,1f Y ~,1f..~,1f Z ~,1f..~,1f~@[, axis ~a~]~:[~;, on the floor~]~@[; touches ~{~a~^, ~}~]~@[; OVERLAPS ~{~a~^, ~}~]~:[~;; LOOSE: touches no other part and not the floor~]"
                                      name (type-of leaf)
                                      (- (hi box 0) (lo box 0)) (- (hi box 1) (lo box 1)) (- (hi box 2) (lo box 2))
                                      (lo box 0) (hi box 0) (lo box 1) (hi box 1) (lo box 2) (hi box 2)
@@ -1070,11 +1226,11 @@ symmetry -- the account appended to an edit by *house-auto-view*."
                      (if (or broken floating pairs)
                          (progn
                            (when broken (say "Geometry does not compute: ~a." (some-of (reverse broken))))
-                           (when floating (say "FLOATS (touches nothing, off the floor): ~a." (some-of (reverse floating))))
+                           (when floating (say "LOOSE (touches no other part and not the floor; joined to nothing): ~a." (some-of (reverse floating))))
                            (when pairs (say "OVERLAPS: ~a."
                                             (some-of (mapcar #'(lambda (p) (format nil "~a with ~a" (car p) (cdr p)))
                                                              (reverse pairs))))))
-                         (say "Nothing floats, overlaps or fails to compute."))))
+                         (say "Nothing is loose, overlaps or fails to compute."))))
                  ;; symmetry: a part with a twin of its type and size, mirrored
                  ;; across the envelope's middle
                  (when env
@@ -1113,7 +1269,7 @@ the model does not build: the edit's own result says why.  Nil: the model
 asks for a view when it chooses, as before.")
 
 (defparameter *auto-view-tools*
-  '("write_model" "edit_model" "set_slot" "add_slot" "remove_slot" "replace_form")
+  '("write_model" "edit_model" "set_slot" "add_slot" "remove_slot" "replace_form" "new_object_def")
   "The edits after which *house-auto-view* shows the model.")
 
 (defparameter *auto-view-mark* "AUTO-VIEW, the model as built now:"
@@ -1136,6 +1292,16 @@ does not build."
       (unless (or error? (null blocks))
         (cons (text-result "~a" *auto-view-mark*) blocks)))))
 
+(defun entries-schema ()
+  "The schema of a batch of entries for add_slot and new_object_def."
+  `(("type" . "array")
+    ("description" . "Entries to add in one write, all or nothing; each names its section, slot and value (and object, when not the call's).")
+    ("items" . ,(schema `(("object" . (("type" . "string")))
+                           ("section" . (("type" . "string") ("description" . "input-slots, computed-slots, objects, hidden-objects or functions.")))
+                           ("slot" . (("type" . "string") ("description" . "The entry's own name.")))
+                           ("value" . (("type" . "string") ("description" . "What follows the name inside the entry, as for set_slot."))))
+                         '("section" "slot" "value")))))
+
 (defun house-tool-definitions ()
   "The structural edit tools and view_model, for a house session."
   (remove-if
@@ -1148,23 +1314,31 @@ does not build."
                                   ("value" . (("type" . "string") ("description" . "What follows the name inside the entry."))))
                                 '("object" "slot" "value"))))
    `(("name" . "add_slot")
-     ("description" . "Add ONE entry to a section of a define-object -- input-slots, computed-slots, objects, hidden-objects or functions -- making the section when it has none. You give the name and VALUE (as for set_slot); the tool writes the parentheses. A name already used in the object is refused. A CHILD OBJECT is one call per child: section \"objects\", slot the child's own name, value its type and inputs, e.g. {\"object\": \"model\", \"section\": \"objects\", \"slot\": \"shelf\", \"value\": \":type 'box :width (the width) :length 300 :height 18 :center (translate (the center) :up 100)\"} -- never a list of children, never the child in parentheses.")
+     ("description" . "ENTRIES adds many at once -- a list of {section, slot, value} (and object, when it is another define-object), checked first and written together, all or nothing: one refused entry writes none and the error names it.  Or add ONE entry to a section of a define-object -- input-slots, computed-slots, objects, hidden-objects or functions -- making the section when it has none. You give the name and VALUE (as for set_slot); the tool writes the parentheses. A name already used in the object is refused. A CHILD OBJECT is one call per child: section \"objects\", slot the child's own name, value its type and inputs, e.g. {\"object\": \"model\", \"section\": \"objects\", \"slot\": \"shelf\", \"value\": \":type 'box :width (the width) :length 300 :height 18 :center (translate (the center) :up 100)\"} -- never a list of children, never the child in parentheses.")
      ("input_schema" . ,(schema `(("object" . (("type" . "string")))
                                   ("section" . (("type" . "string") ("description" . "input-slots, computed-slots, objects, hidden-objects or functions.")))
                                   ("slot" . (("type" . "string")))
-                                  ("value" . (("type" . "string"))))
-                                '("object" "section" "slot" "value"))))
+                                  ("value" . (("type" . "string")))
+                                  ("entries" . ,(entries-schema)))
+                                '("object"))))
+   `(("name" . "new_object_def")
+     ("description" . "Start a new define-object: the tool writes (define-object NAME (MIXINS) :input-slots () :computed-slots () :objects () :functions ()) at the end of the file, balanced, and compiles it; then fill it with add_slot -- or give ENTRIES here, as add_slot takes them, to fill it in the same call, all or nothing. MIXINS are type names separated by spaces, base-object when not given. A name already defined is refused: add_slot and set_slot change that one.")
+     ("input_schema" . ,(schema `(("name" . (("type" . "string") ("description" . "The new object's name, e.g. shelf-bracket.")))
+                                  ("mixins" . (("type" . "string") ("description" . "Type names it builds on, separated by spaces; base-object when empty.")))
+                                  ("description" . (("type" . "string") ("description" . "Optional: one sentence on what it is.")))
+                                  ("entries" . ,(entries-schema)))
+                                '("name"))))
    `(("name" . "remove_slot")
      ("description" . "Remove ONE entry -- input, computed slot, child or function -- from a define-object, by name.")
      ("input_schema" . ,(schema `(("object" . (("type" . "string"))) ("slot" . (("type" . "string"))))
                                 '("object" "slot"))))
    `(("name" . "replace_form")
-     ("description" . "Replace a whole top-level form -- (define-object NAME ...), (defun NAME ...) -- by its NAME with SOURCE, one form that defines NAME; with no such form, SOURCE is added to the file. SOURCE must balance and is checked before anything is written. For a change inside a define-object, set_slot is smaller and safer.")
+     ("description" . "Replace a whole top-level form -- (define-object NAME ...), (defun NAME ...) -- by its NAME with SOURCE, one form that defines NAME; with no such form, SOURCE is added to the file. SOURCE must balance and is checked before anything is written. For a change inside a define-object, set_slot is smaller and safer; where whole-file writing is withdrawn, a whole define-object is replaced only after two structural edits of it have failed.")
      ("input_schema" . ,(schema `(("name" . (("type" . "string")))
                                   ("source" . (("type" . "string") ("description" . "One whole form defining NAME."))))
                                 '("name" "source"))))
    `(("name" . "view_model")
-     ("description" . "See the built model, in words: MODEL's envelope; every part's type, size and place; what touches and what OVERLAPS what; which parts FLOAT (touch nothing, off the floor); cylinders' axes; left-right and front-back symmetry. Use it after check_model to judge whether the parts are where the request wants them, then fix what it shows.")
+     ("description" . "See the built model, in words: MODEL's envelope; every part's type, size and place; what touches and what OVERLAPS what; which parts are LOOSE (touch no other part and not the floor: joined to nothing); cylinders' axes; left-right and front-back symmetry. Use it after check_model to judge whether the parts are where the request wants them, then fix what it shows.")
      ("input_schema" . ,(schema nil))))))
 
 (defparameter *look-question*

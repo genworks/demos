@@ -139,7 +139,7 @@ only what a person would change; derived values go in
 3. ALWAYS check_model with expected_size after every change that
    compiles.  Read the leaf count, the overall size and any pile warning.
 4. Then view_model: it says, in words, where every part is, what touches
-   and what OVERLAPS what, and which parts FLOAT.  Compare it with the
+   and what OVERLAPS what, and which parts are LOOSE (joined to nothing).  Compare it with the
    request: legs under the top, a handle on the door, wheels touching the
    ground.
 5. Fix what you see ONE ENTRY AT A TIME, by name: set_slot changes one
@@ -148,7 +148,7 @@ only what a person would change; derived values go in
    one; remove_slot removes one; replace_form replaces a whole
    define-object or defun.  They cannot unbalance the file.
    A CHILD OBJECT is one entry of `:objects`, named for itself, so it
-   is added, changed and removed by ITS name, one child per call:
+   is added, changed and removed by ITS name, one child per entry:
 
    ```
    add_slot     object "model"  section "objects"  slot "shelf"
@@ -160,6 +160,21 @@ only what a person would change; derived values go in
 
    SLOT is never `objects` (that is the section), and VALUE starts at
    `:type`: no parentheses around the child, no list of children.
+   Several entries -- inputs, children, functions, in any sections --
+   go in ONE add_slot as ENTRIES, checked first and written together;
+   one bad entry writes none, and the error names it:
+
+   ```
+   add_slot  object "model"
+             entries [{section "input-slots" slot "width"  value "600"},
+                      {section "objects"     slot "top"
+                       value ":type 'box :width (the width) :length 400 :height 20"},
+                      {section "objects"     slot "leg"
+                       value ":type 'box :width 40 :length 40 :height 700"}]
+   ```
+
+   new_object_def takes ENTRIES the same way, so a helper object can be
+   started and filled in one call.
 6. When the numbers match and view_model shows the parts where they
    belong, stop and reply.  A simple model that is right beats an
    elaborate one that does not compile.
