@@ -957,7 +957,10 @@ loaded) its page too."
                                     (when (member "look_at_model" (names s) :test #'equal)
                                       (error "a house model that sees was offered a viewer too")))))
                               ;; a house model's thinking budget goes into its request alone
-                              (when (search "budget_tokens" (pl :request-body s)) (error "a thinking budget was sent with none set"))
+                              (unless (search "\"budget_tokens\":4096" (pl :request-body s))
+                                (error "a house session does not ask the 4096 default budget"))
+                              (progv (list (lab '#:*house-thinking-budget*)) (list nil)
+                                (when (search "budget_tokens" (pl :request-body s)) (error "a thinking budget was sent with none set")))
                               (progv (list (lab '#:*house-thinking-budget*)) (list 4096)
                                 (unless (search "\"budget_tokens\":4096" (pl :request-body s))
                                   (error "the house thinking budget was not sent: ~a" (subseq (pl :request-body s) 0 300)))

@@ -397,12 +397,15 @@ Rules:
 ;; One API call.
 ;;
 
-(defparameter *house-thinking-budget* nil
+(defparameter *house-thinking-budget* 4096
   "Nil or an integer.  A house session asks its model to think at most this
 many tokens a reply, as thinking.budget_tokens.  The house server ignores
 output_config.effort (25 probes on subhadra, 2026-11-15: the same spread of
 thinking at low, medium and none, a third of replies running to the cap)
-but honors the budget.  Nil: no budget, as before.")
+but honors the budget.  4096 by Ruling 143 (2026-11-16), after four staged
+arms: no reply lost to the length limit and about a third less energy, the
+same share of prompts finished, some depth lost on the hardest geometry.
+Nil: no budget.")
 
 (defun request-body (session &key stream?)
   (let ((tools (->json (tool-definitions session))))
