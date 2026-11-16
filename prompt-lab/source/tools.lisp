@@ -450,13 +450,18 @@ says nothing of the model either way."
                        (slots (ignore-errors
                                (the-object model (message-list :category :computed-slots
                                                                :message-type :local)))))
-                  (list :broken (loop for leaf in leaves
-                                      unless (or (not (geometric? leaf)) (leaf-box leaf))
-                                        collect (leaf-name leaf))
-                        :failing (loop for key in slots
-                                       unless (ignore-errors (the-object model (evaluate key)) t)
-                                         collect (string-downcase (symbol-name key)))
-                        :empty (empty-model? model leaves slots))))
+                  ;; each failing slot with why it fails, for the :findings rail
+                  (let ((why (loop for key in slots
+                                   for reason = (handler-case (progn (the-object model (evaluate key)) nil)
+                                                  (error (condition)
+                                                    (or (ignore-errors (condition-text condition)) "an error")))
+                                   when reason collect (cons (string-downcase (symbol-name key)) reason))))
+                    (list :broken (loop for leaf in leaves
+                                        unless (or (not (geometric? leaf)) (leaf-box leaf))
+                                          collect (leaf-name leaf))
+                          :failing (mapcar #'car why)
+                          :why why
+                          :empty (empty-model? model leaves slots)))))
             ;; the check's own limit, not the model's fault: a sound model
             ;; with one slow slot was reported as one that does not build
             (bt2:timeout ()
@@ -632,12 +637,65 @@ lens and rasterised in process (raster.lisp): no Ghostscript."
 
 (defun input (name input) (cdr (assoc name input :test #'string-equal)))
 
+;;
+;; RAILS FOR A HOUSE MODEL (2026-11-16).  A count of 609 tool errors in the
+;; structural edits of thirteen trial arms found most of them of four kinds a
+;; tool can take care of itself, each a round spent for nothing: a value
+;; whose only fault is its closing count (187), a name that is already there
+;; (82), a common Gendl mistake the error text does not explain, and a build
+;; that ended 'clean' with slots that do not compute.  Each rail is off
+;; unless *house-rails* names it, and only a house session rides them:
+;;
+;;   :paren-repair  a VALUE or SOURCE left open, or closed too often, at its
+;;                  END is balanced by the tool and used; the result says so
+;;   :upsert        add_slot on a slot that is there changes it; new_object_def
+;;                  on an object that is there leaves it; the result says so
+;;   :hints         a tool error gains a HINT for the mistake behind it
+;;   :findings      every edit that compiles is answered with what the
+;;                  completion check finds now
+;;
+
+(defparameter *rail-names* '(:paren-repair :upsert :hints :findings)
+  "Every rail *house-rails* can name.")
+
+(defparameter *house-rails* nil
+  "Nil, T or a list of rails (*rail-names*) a house session rides; T is all
+of them.  Nil: the tools as they were.")
+
+(defvar *rails* nil
+  "The rails in force for the tool call being run; run-tool binds it.")
+
+(defvar *rail-notes* nil
+  "What the rails did during the tool call being run, newest first: texts
+run-tool appends to the call's result.")
+
+(defun house-rails ()
+  "The rails *house-rails* names, a list."
+  (cond ((eq *house-rails* t) *rail-names*)
+        ((listp *house-rails*) *house-rails*)))
+
+(defun session-rails (session)
+  "The rails SESSION rides: *house-rails* for a house session, else none."
+  (and (house-model? session) (house-rails)))
+
+(defun rail? (rail) (and (member rail *rails*) t))
+
+(defun rail-note (control &rest args)
+  (push (apply #'format nil control args) *rail-notes*))
+
 (defun run-tool (session name input)
   "Run tool NAME with INPUT (an alist, keys as strings or keywords) on
 SESSION, its refusals advising what this session can do.  Values: content
-blocks, and true on failure."
-  (let ((*rewrite-advice* (rewrite-advice session)))
-    (%run-tool session name input)))
+blocks, and true on failure.  For a house session on rails the result ends
+with what the rails did (*rail-notes*) and, for a failure, any hints."
+  (let ((*rewrite-advice* (rewrite-advice session))
+        (*rails* (session-rails session))
+        (*rail-notes* nil))
+    (multiple-value-bind (blocks error?) (%run-tool session name input)
+      (values (append blocks
+                      (mapcar #'(lambda (note) (text-result "~a" note)) (reverse *rail-notes*))
+                      (and error? (rail? :hints) (ignore-errors (hint-blocks session blocks))))
+              error?))))
 
 (defun %run-tool (session name input)
   "Run tool NAME with INPUT (an alist, keys as strings or keywords) on
@@ -961,6 +1019,270 @@ written as it is, or nil.  ONE-FORM? asks for exactly one form."
                    ((and one-form? (/= (length forms) 1))
                     (format nil "It holds ~d forms; give exactly one." (length forms))))))))
 
+;;
+;; The :paren-repair rail.
+;;
+
+(defparameter *paren-repair-most* 8
+  "Integer. The most parentheses the :paren-repair rail adds to or drops
+from the end of a fragment; a fragment further out than that is refused as
+before.")
+
+(defun paren-balance (text)
+  "How TEXT's parentheses stand: the depth it ends at, the lowest depth it
+reaches (negative when a ')' closes more than was opened), and true when it
+ends inside a string.  Strings, comments and character literals are skipped,
+as paren-report skips them."
+  (let ((depth 0) (low 0) (i 0) (n (length text)) (in-string? nil))
+    (loop while (< i n)
+          do (let ((c (char text i)))
+               (cond ((char= c #\;) (setq i (or (position #\Newline text :start i) n)))
+                     ((char= c #\")
+                      (incf i)
+                      (loop while (and (< i n) (char/= (char text i) #\"))
+                            do (when (char= (char text i) #\\) (incf i))
+                               (incf i))
+                      (when (>= i n) (setq in-string? t)))
+                     ((and (char= c #\#) (< (1+ i) n) (char= (char text (1+ i)) #\\)) (incf i 2))
+                     ((and (char= c #\#) (< (1+ i) n) (char= (char text (1+ i)) #\|))
+                      (setq i (1+ (or (search "|#" text :start2 (+ i 2)) n))))
+                     ((char= c #\() (incf depth))
+                     ((char= c #\)) (decf depth) (setq low (min low depth)))))
+             (incf i))
+    (values depth low in-string?)))
+
+(defun balanced-fragment (text)
+  "TEXT with its closing count put right, when that is its only fault and it
+is at the END: left open, the missing ')' are added; closed too often, the
+extra ')' are dropped.  Values: the mended text and what was done, in words;
+nil when TEXT balances already or cannot be mended this way (a ')' too many
+in its middle, a string left open, more than *paren-repair-most* out)."
+  (when (and (stringp text) (paren-report text))
+    (multiple-value-bind (end low in-string?) (paren-balance text)
+      (let ((trimmed (string-right-trim '(#\Space #\Tab #\Newline #\Return) text)))
+        (flet ((good? (candidate)
+                 (and (null (paren-report candidate)) (nth-value 1 (top-forms candidate)))))
+          (cond (in-string? nil)
+                ((and (plusp end) (>= low 0) (<= end *paren-repair-most*))
+                 (let ((candidate (concatenate 'string trimmed (make-string end :initial-element #\)))))
+                   (and (good? candidate)
+                        (values candidate
+                                (format nil "it left ~d '(' open, so ~d ')' ~:[was~;were~] added at its end"
+                                        end end (> end 1))))))
+                ((minusp low)
+                 (loop for drop from 1 to *paren-repair-most*
+                       for cut = (- (length trimmed) drop)
+                       while (and (>= cut 0) (char= (char trimmed cut) #\)))
+                       do (let ((candidate (subseq trimmed 0 cut)))
+                            (when (good? candidate)
+                              (return (values candidate
+                                              (format nil "it closed ~d ')' more than it opened, so ~:*~d ~:[was~;were~] dropped from its end"
+                                                      drop (> drop 1))))))))))))))
+
+(defun mended (fragment what)
+  "FRAGMENT as a structural tool will take it: under the :paren-repair rail,
+with a wrong closing count at its end put right and a note of it kept for
+the result; else as given.  WHAT names it in the note (\"VALUE of width\")."
+  (if (and (rail? :paren-repair) (stringp fragment))
+      (multiple-value-bind (fixed how) (balanced-fragment fragment)
+        (cond (fixed
+               (rail-note "REPAIRED: ~a did not balance: ~a.  It was taken as ending ~s.  If a parenthesis belonged somewhere else, send it again."
+                          what how (subseq fixed (max 0 (- (length fixed) 50))))
+               fixed)
+              (t fragment)))
+      fragment))
+
+;;
+;; The :hints rail: what the common mistakes behind a tool error are, said
+;; with the error.  Each test reads the error's text; nothing is guessed
+;; from the request.
+;;
+
+(defun edit-distance (a b)
+  "How many single-character changes turn string A into B."
+  (let ((row (make-array (1+ (length b)))))
+    (dotimes (j (1+ (length b))) (setf (aref row j) j))
+    (dotimes (i (length a))
+      (let ((diagonal (aref row 0)))
+        (setf (aref row 0) (1+ i))
+        (dotimes (j (length b))
+          (let ((above (aref row (1+ j))))
+            (setf (aref row (1+ j))
+                  (min (1+ above) (1+ (aref row j))
+                       (+ diagonal (if (char= (char a i) (char b j)) 0 1))))
+            (setq diagonal above)))))
+    (aref row (length b))))
+
+(defun nearest-names (name candidates &key (most 3))
+  "The CANDIDATES (strings) nearest NAME, at most MOST, the nearest first:
+within a third of NAME's length in changes, or one holding the other."
+  (let* ((name (string-downcase name))
+         (limit (max 2 (floor (length name) 3)))
+         (scored (loop for candidate in (remove-duplicates candidates :test #'string=)
+                       for distance = (if (and (>= (min (length name) (length candidate)) 4)
+                                               (or (search name candidate) (search candidate name)))
+                                          1
+                                          (edit-distance name candidate))
+                       when (and (<= distance limit) (string/= candidate name))
+                         collect (cons distance candidate))))
+    (mapcar #'cdr (subseq (sort scored #'< :key #'car) 0 (min most (length scored))))))
+
+(defun file-slot-names (text)
+  "The names of every entry -- input, computed slot, child, function -- of
+every define-object in TEXT, lower case."
+  (declare (special *slot-sections*))   ; defined with the structural tools, below
+  (loop for span in (top-forms text)
+        for elements = (and (char= (char text (car span)) #\() (form-elements text (car span)))
+        when (and (>= (length elements) 2)
+                  (string-equal (span-text text (first elements)) "define-object"))
+          append (loop for (section . list-span) in (object-sections text elements)
+                       when (member section *slot-sections* :test #'string=)
+                         append (loop for entry in (form-elements text (car list-span))
+                                      for name = (if (char= (char text (car entry)) #\()
+                                                     (slot-entry-name text entry)
+                                                     (and (char/= (char text (car entry)) #\")
+                                                          (string-downcase (span-text text entry))))
+                                      when name collect name))))
+
+(defvar *known-function-names* nil
+  "The functions Gendl and its geometry export, lower case, once asked for.")
+
+(defun known-function-names ()
+  (or *known-function-names*
+      (setq *known-function-names*
+            (let ((names nil))
+              (dolist (package '(:gendl :geom-base) names)
+                (let ((found (find-package package)))
+                  (when found
+                    (do-external-symbols (symbol found)
+                      (when (fboundp symbol) (push (string-downcase (symbol-name symbol)) names))))))))))
+
+(defparameter *function-misnomers*
+  '(("radians" . "degrees-to-radians") ("deg->rad" . "degrees-to-radians") ("deg-to-rad" . "degrees-to-radians")
+    ("degrees->radians" . "degrees-to-radians") ("to-radians" . "degrees-to-radians") ("deg2rad" . "degrees-to-radians")
+    ("degrees" . "radians-to-degrees") ("rad->deg" . "radians-to-degrees") ("rad-to-deg" . "radians-to-degrees")
+    ("radians->degrees" . "radians-to-degrees") ("rad2deg" . "radians-to-degrees")
+    ("vector-length" . "length-vector") ("normalize-vector" . "unitize-vector") ("normalize" . "unitize-vector")
+    ("cross-product" . "cross-vectors") ("dot-product" . "dot-vectors") ("distance" . "3d-distance")
+    ("vector-add" . "add-vectors") ("vector-subtract" . "subtract-vectors") ("scale-vector" . "scalar*vector"))
+  "Names a model reaches for that Gendl spells otherwise: (wrong . right).")
+
+(defun word-after (text marker)
+  "The run of non-blank characters after MARKER in TEXT, trimmed of the
+punctuation an error message puts around a name; nil without MARKER."
+  (let ((at (search marker text)))
+    (when at
+      (let* ((blank '(#\Space #\Newline #\Tab #\Return))
+             (start (or (position-if-not #'(lambda (c) (member c blank)) text :start (+ at (length marker)))
+                        (length text)))
+             (end (or (position-if #'(lambda (c) (member c blank)) text :start start)
+                      (length text)))
+             (word (string-trim ".,;:()'\"" (subseq text start end))))
+        (and (plusp (length word)) word)))))
+
+(defun error-hints (session text)
+  "Hints for the mistake behind a tool error whose words are TEXT, a list of
+strings (at most two): the common Gendl slips, each named by what the error
+itself says."
+  (let ((hints nil)
+        (names (ignore-errors (file-slot-names (model-body-text session)))))
+    (flet ((hint (control &rest args) (push (apply #'format nil control args) hints))
+           (near (name) (nearest-names name names)))
+      (cond
+        ((search "Unbound variable: SELF" text)
+         (hint "There is no SELF outside a define-object, so (the ...) does not work in evaluate.  Read a built slot with (the-object (make-object 'model) slot-name), a child's with (the-object (make-object 'model) child-name slot-name)."))
+        ((search "Unbound variable: " text)
+         (let ((name (string-downcase (or (word-after text "Unbound variable: ") ""))))
+           (hint "~a is read bare.  A slot of this object is (the ~a), a child's slot (the child-name ~a); only a function's arguments and let variables are bare.~:[~;  ~a is a slot in the file.~]"
+                 name name name (member name names :test #'string=) name))))
+      (cond
+        ((search "reserved word" text)
+         (let ((name (word-after text "to nil..")))
+           (hint "~:[That name~;~:*~a~] is one of Gendl's own names for every object, so it cannot be a slot or a child's input here.  Give yours another name (row-index, part-type, ...).  An element of a :sequence already has its number: (the-child index) among the child's inputs, (the index) inside its own define-object."
+                 (and name (string-downcase name)))))
+        ((search "translate needs direction/offset pairs" text)
+         (hint "translate takes an origin, then PAIRS of a direction keyword (:up :down :left :right :front :rear) and one number: (translate (the center) :right 10 :up 5).  A signed or computed offset is ONE number after ONE keyword: :right (* sign distance)."))
+        ((and (search "is not of the expected type" text) (search "The value \"" text))
+         (hint "VALUE reached the file wrapped in its own double quotes, so the entry holds one string instead of code.  Send the same VALUE again with no quotes around the whole of it."))
+        ((and (search "is not of the expected type" text)
+              (some #'(lambda (type) (search type text)) '("SIMPLE-VECTOR" "ARRAY" "VECTOR")))
+         (cond ((search "The value NIL" text)
+                (hint "NIL reached a place that wants a point or a vector: the slot it came from has no value.  Check that slot first."))
+               ((search "The value #<" text)
+                (hint "An object was given where a point belongs: ask it for one, (the child-name center) or a vertex."))
+               (t (hint "A point or a vector is not a list.  Make one with (make-point x y z) or (make-vector x y z); a direction of this object is (the (face-normal-vector :top)), likewise :bottom :left :right :front :rear."))))
+        ((and (search "is not of the expected type" text) (search "The value NIL" text))
+         (hint "NIL reached arithmetic: a slot it reads has no value.  Check that every slot named there exists in THIS object as (the name), and that each input has a default.")))
+      (cond
+        ((search "STANDARD-SEQUENCE" text)
+         (hint "A child with :sequence is many parts, not one: ask one element, (the (child-name 0) ...), or every one with (list-elements (the child-name))."))
+        ((or (search "has no slot named " text) (search "could not handle the :" text))
+         (let* ((name (string-downcase (or (word-after text "has no slot named ")
+                                           (word-after text "could not handle the :") "")))
+                (near (near name)))
+           (hint "Nothing here is named ~a.~@[  The nearest names in the file: ~{~a~^, ~}.~]  read_model shows every name as it is written."
+                 name near))))
+      (cond
+        ((search "Undefined function (SETF" text)
+         (hint "A slot is not set with setf.  Change it in the file with set_slot; in evaluate, (the-object object (set-slot! :name value))."))
+        ((search "Undefined function " text)
+         (let* ((raw (or (word-after text "Undefined function ") ""))
+                (name (string-downcase (subseq raw (let ((colon (position #\: raw :from-end t))) (if colon (1+ colon) 0)))))
+                (right (cdr (assoc name *function-misnomers* :test #'string=))))
+           (cond ((member name names :test #'string=)
+                  (hint "~a is a slot, not a function: read it as (the ~a), with no parentheses of its own.  A function of the object is called as (the (~a argument))." name name name))
+                 (right (hint "There is no ~a in Gendl: the function is ~a." name right))
+                 (t (let ((near (nearest-names name (known-function-names))))
+                      (hint "There is no function ~a.~@[  Near it in Gendl: ~{~a~^, ~}.~]  search_docs finds the real name." name near)))))))
+      (when (search "Stack overflow" text)
+        (hint "Something reads itself: a slot whose value reads that same slot (straight or through another), or a function that calls itself without an end.  Follow what the newest slot reads."))
+      (when (search "There is no package named" text)
+        (hint "A colon inside a name makes Lisp look for a package.  Write names with no ':' in the middle; a keyword starts with one colon and stands alone."))
+      (subseq (nreverse hints) 0 (min 2 (length hints))))))
+
+(defun hint-blocks (session blocks)
+  "The hints for a failed tool call whose result is BLOCKS, as content
+blocks; nil when the error is none the table knows."
+  (let ((text (format nil "~{~a~^ ~}"
+                      (loop for block in blocks
+                            for words = (and (consp block) (cdr (assoc "text" block :test #'string=)))
+                            when (stringp words) collect words))))
+    (mapcar #'(lambda (hint) (text-result "HINT: ~a" hint))
+            (error-hints session text))))
+
+;;
+;; The :findings rail: an edit that compiles is answered with what the
+;; completion check finds now, so a slot that does not compute is seen the
+;; round it is written and not at the end.
+;;
+
+(defparameter *edit-findings-mark* "CHECK, what the lab's completion check finds now:"
+  "The words that open the findings appended to an edit, which the eval's
+tally looks for.")
+
+(defun edit-findings-text (session)
+  "What the completion check finds in SESSION's model now, in a few lines;
+nil when there is nothing to judge or the check ran out of time."
+  (let ((findings (let ((*completion-check?* t)) (completion-findings session))))
+    (flet ((clipped (text most) (if (> (length text) most) (concatenate 'string (subseq text 0 most) "...") text)))
+      (cond ((or (null findings) (getf findings :unjudged)) nil)
+            ((getf findings :error) (format nil "MODEL does not build: ~a" (clipped (getf findings :error) 300)))
+            ((getf findings :empty) "MODEL has nothing in it yet: no part and no computed slot.")
+            ((not (or (getf findings :failing) (getf findings :broken)))
+             "nothing wrong: every part and every computed slot of MODEL computes.")
+            (t (let ((why (getf findings :why))
+                     (broken (getf findings :broken)))
+                 (with-output-to-string (out)
+                   (when why
+                     (format out "~%Computed slots of MODEL that do not compute:")
+                     (loop for (name . reason) in (subseq why 0 (min 6 (length why)))
+                           do (format out "~%- ~a: ~a" name (clipped (substitute #\Space #\Newline reason) 160)))
+                     (when (> (length why) 6) (format out "~%- and ~d more" (- (length why) 6))))
+                   (when broken
+                     (format out "~%Parts whose geometry does not compute: ~{~a~^, ~}~@[ and ~d more~]"
+                             (subseq broken 0 (min 8 (length broken)))
+                             (and (> (length broken) 8) (- (length broken) 8)))))))))))
+
 (defparameter *definer-names* '("define-object" "defun" "defparameter" "defvar" "defmacro" "defmethod" "defgeneric")
   "The heads of the top-level forms replace_form finds by name.")
 
@@ -1061,11 +1383,29 @@ add_slot takes them (the object defaults to NAME), all or nothing."
           ((notevery #'definer-name? mixins)
            (structural-refusal "Nothing written: MIXINS are type names separated by spaces, e.g. \"base-object\" or \"box\"."))
           (t
-           (let ((text (model-body-text session)))
+           (let ((text (model-body-text session))
+                 (entries (mapcar #'(lambda (e)
+                                      (list (or (entry-field e "object") name)
+                                            (entry-field e "section")
+                                            (or (entry-field e "slot") (entry-field e "name"))
+                                            (entry-field e "value")))
+                                  (coerce (or entries '()) 'list))))
              (multiple-value-bind (forms complete?) (top-forms text)
                (declare (ignore forms))
                (cond ((not complete?)
                       (structural-refusal "The model file does not read to its end now.  ~a" (or (paren-report text) *rewrite-advice*)))
+                     ;; the :upsert rail: an object that is there stands, and
+                     ;; its ENTRIES, if any, are added to it
+                     ((and (rail? :upsert) (definitions-named text name '("define-object")))
+                      (rail-note "ALREADY THERE: ~a is defined already, so no new define-object was started~:[~;; its ENTRIES were added to the one that stands~]."
+                                 name entries)
+                      (if entries
+                          (multiple-value-bind (new reason) (add-entries text entries)
+                            (if reason
+                                (structural-refusal "~a" reason)
+                                (write-model session new)))
+                          (values (list (text-result "~a stands as it was; nothing written.  add_slot adds to it, set_slot changes it." name))
+                                  nil)))
                      ((definitions-named text name)
                       (structural-refusal "~a is already defined in the model file: add_slot adds to it and set_slot changes it." name))
                      (t (multiple-value-bind (new reason)
@@ -1073,12 +1413,7 @@ add_slot takes them (the object defaults to NAME), all or nothing."
                                                  (let ((kept (string-right-trim '(#\Space #\Newline #\Tab #\Return) text)))
                                                    (and (plusp (length kept)) kept))
                                                  (object-skeleton name (or mixins '("base-object")) description))
-                                         (mapcar #'(lambda (e)
-                                                     (list (or (entry-field e "object") name)
-                                                           (entry-field e "section")
-                                                           (or (entry-field e "slot") (entry-field e "name"))
-                                                           (entry-field e "value")))
-                                                 (coerce (or entries '()) 'list)))
+                                         entries)
                           (if reason
                               (structural-refusal "~a  (~a was not started either.)" reason name)
                               (write-model session new)))))))))))
@@ -1103,6 +1438,8 @@ add_slot takes them (the object defaults to NAME), all or nothing."
 (defun replace-form-tool (session name source)
   "Replace the top-level form defining NAME with SOURCE, one whole form that
 defines NAME; with no such form, add SOURCE at the end of the file."
+  ;; a closing count wrong at the end is put right (the :paren-repair rail)
+  (setq source (mended source "SOURCE"))
   (let ((problem (fragment-problem source :one-form? t)))
     (when problem (return-from replace-form-tool (structural-refusal "Nothing written: ~a" problem))))
   (let* ((source (string-trim '(#\Space #\Tab #\Newline #\Return) source))
@@ -1169,6 +1506,8 @@ own parentheses; else nil."
 child, a function -- with (SLOT VALUE)."
   (when (section-name? slot)
     (return-from set-slot-tool (section-refusal slot)))
+  ;; a closing count wrong at the end is put right (the :paren-repair rail)
+  (setq value (mended value (format nil "VALUE of ~a" slot)))
   (let ((problem (fragment-problem value)))
     (when problem (return-from set-slot-tool (structural-refusal "Nothing written: VALUE ~a" problem))))
   (with-object session object
@@ -1189,7 +1528,11 @@ alist."
 
 (defun add-entry (text object section slot value)
   "TEXT with (SLOT VALUE) added to SECTION of the define-object OBJECT.
-Values: the new text, or nil and the reason it is refused."
+Values: the new text, or nil and the reason it is refused.  On the :upsert
+rail a SLOT that is there already is changed instead -- where it stands, or
+moved to SECTION when it stood in another -- and the result says so."
+  ;; a closing count wrong at the end is put right (the :paren-repair rail)
+  (setq value (mended value (format nil "VALUE of ~a" slot)))
   (let ((problem (fragment-problem value))
         (section (string-downcase (if (and (stringp section) (plusp (length section)) (char/= (char section 0) #\:))
                                       (concatenate 'string ":" section)
@@ -1215,16 +1558,29 @@ Values: the new text, or nil and the reason it is refused."
                      (case (length found)
                        (0 (no "There is no define-object named ~a in the model file.  new_object_def starts one." object))
                        (1 (destructuring-bind (span elements) (first found)
-                            (if (find-slot text elements slot)
-                                (no "~a already has a slot named ~a: set_slot changes it.  A name is used once in a define-object." object slot)
-                                (let ((list-span (cdr (assoc section (object-sections text elements) :test #'string=)))
-                                      (entry (slot-entry-text slot value)))
-                                  (values (if list-span
-                                              (let ((close (1- (cdr list-span))))
-                                                (splice text close close (format nil "~%   ~a" entry)))
-                                              (let ((close (1- (cdr span))))
-                                                (splice text close close (format nil "~%~%  ~a~%  (~a)" section entry))))
-                                          nil)))))
+                            (multiple-value-bind (old-section old-entry) (find-slot text elements slot)
+                              (cond
+                                ((and old-section (not (rail? :upsert)))
+                                 (no "~a already has a slot named ~a: set_slot changes it.  A name is used once in a define-object." object slot))
+                                ;; the :upsert rail: changed where it stands ...
+                                ((and old-section (string= old-section section))
+                                 (rail-note "CHANGED, NOT ADDED: ~a already had a slot named ~a, so add_slot changed it in place, as set_slot does."
+                                            object slot)
+                                 (values (splice text (car old-entry) (cdr old-entry) (slot-entry-text slot value)) nil))
+                                ;; ... or taken out of the section it stood in and added where asked
+                                (old-section
+                                 (rail-note "CHANGED, NOT ADDED: ~a already had a slot named ~a under ~a; it was moved to ~a with the new value.  A name is used once in a define-object."
+                                            object slot (subseq old-section 1) (subseq section 1))
+                                 (add-entry (without-entry text old-entry) object section slot value))
+                                (t
+                                 (let ((list-span (cdr (assoc section (object-sections text elements) :test #'string=)))
+                                       (entry (slot-entry-text slot value)))
+                                   (values (if list-span
+                                               (let ((close (1- (cdr list-span))))
+                                                 (splice text close close (format nil "~%   ~a" entry)))
+                                               (let ((close (1- (cdr span))))
+                                                 (splice text close close (format nil "~%~%  ~a~%  (~a)" section entry))))
+                                           nil)))))))
                        (t (no "The model file defines ~a ~d times; keep one, with replace_form." object (length found))))))))))))
 
 (defun add-entries (text entries)
@@ -1273,11 +1629,15 @@ entries before it leave it, and one refused entry writes none."
         (multiple-value-bind (section entry) (find-slot text elements slot)
           (if (null section)
               (structural-refusal "~a has no slot named ~a." object slot)
-              ;; the entry and the blank before it
-              (let ((start (or (position-if-not #'(lambda (c) (member c '(#\Space #\Tab #\Newline #\Return)))
-                                                text :end (car entry) :from-end t)
-                               (car entry))))
-                (write-model session (splice text (1+ start) (cdr entry) ""))))))))
+              (write-model session (without-entry text entry)))))))
+
+(defun without-entry (text entry)
+  "TEXT without the section entry whose span is ENTRY, and without the blank
+before it."
+  (let ((start (or (position-if-not #'(lambda (c) (member c '(#\Space #\Tab #\Newline #\Return)))
+                                    text :end (car entry) :from-end t)
+                   (car entry))))
+    (splice text (1+ start) (cdr entry) "")))
 
 (defun leaf-name (leaf)
   (let ((path (ignore-errors (the-object leaf root-path))))
@@ -1432,6 +1792,14 @@ does not build."
       (unless (or error? (null blocks))
         (cons (text-result "~a" *auto-view-mark*) blocks)))))
 
+(defun edit-findings-blocks (session name)
+  "The completion check's findings to append to the result of tool NAME, an
+edit that compiled, for a SESSION on the :findings rail; else nil."
+  (when (and (member :findings (session-rails session))
+             (member name *auto-view-tools* :test #'string=))
+    (let ((text (ignore-errors (edit-findings-text session))))
+      (and text (list (text-result "~a ~a" *edit-findings-mark* text))))))
+
 (defun entries-schema ()
   "The schema of a batch of entries for add_slot and new_object_def."
   `(("type" . "array")
@@ -1454,7 +1822,12 @@ does not build."
                                   ("value" . (("type" . "string") ("description" . "What follows the name inside the entry."))))
                                 '("object" "slot" "value"))))
    `(("name" . "add_slot")
-     ("description" . "ENTRIES adds many at once -- a list of {section, slot, value} (and object, when it is another define-object), checked first and written together, all or nothing: one refused entry writes none and the error names it.  Or add ONE entry to a section of a define-object -- input-slots, computed-slots, objects, hidden-objects or functions -- making the section when it has none. You give the name and VALUE (as for set_slot); the tool writes the parentheses. A name already used in the object is refused. A CHILD OBJECT is one call per child: section \"objects\", slot the child's own name, value its type and inputs, e.g. {\"object\": \"model\", \"section\": \"objects\", \"slot\": \"shelf\", \"value\": \":type 'box :width (the width) :length 300 :height 18 :center (translate (the center) :up 100)\"} -- never a list of children, never the child in parentheses.")
+     ("description" . ,(concatenate 'string "ENTRIES adds many at once -- a list of {section, slot, value} (and object, when it is another define-object), checked first and written together, all or nothing: one refused entry writes none and the error names it.  Or add ONE entry to a section of a define-object -- input-slots, computed-slots, objects, hidden-objects or functions -- making the section when it has none. You give the name and VALUE (as for set_slot); the tool writes the parentheses. "
+                                    ;; what a name already there meets depends on the :upsert rail
+                                    (if (member :upsert (house-rails))
+                                        "A name already used in the object is changed, as set_slot would, and the result says so."
+                                        "A name already used in the object is refused.")
+                                    " A CHILD OBJECT is one call per child: section \"objects\", slot the child's own name, value its type and inputs, e.g. {\"object\": \"model\", \"section\": \"objects\", \"slot\": \"shelf\", \"value\": \":type 'box :width (the width) :length 300 :height 18 :center (translate (the center) :up 100)\"} -- never a list of children, never the child in parentheses."))
      ("input_schema" . ,(schema `(("object" . (("type" . "string")))
                                   ("section" . (("type" . "string") ("description" . "input-slots, computed-slots, objects, hidden-objects or functions.")))
                                   ("slot" . (("type" . "string")))
@@ -1462,7 +1835,10 @@ does not build."
                                   ("entries" . ,(entries-schema)))
                                 '("object"))))
    `(("name" . "new_object_def")
-     ("description" . "Start a new define-object: the tool writes (define-object NAME (MIXINS) :input-slots () :computed-slots () :objects () :functions ()) at the end of the file, balanced, and compiles it; then fill it with add_slot -- or give ENTRIES here, as add_slot takes them, to fill it in the same call, all or nothing. MIXINS are type names separated by spaces, base-object when not given. A name already defined is refused: add_slot and set_slot change that one.")
+     ("description" . ,(concatenate 'string "Start a new define-object: the tool writes (define-object NAME (MIXINS) :input-slots () :computed-slots () :objects () :functions ()) at the end of the file, balanced, and compiles it; then fill it with add_slot -- or give ENTRIES here, as add_slot takes them, to fill it in the same call, all or nothing. MIXINS are type names separated by spaces, base-object when not given. "
+                                    (if (member :upsert (house-rails))
+                                        "A name already defined is left as it stands (its ENTRIES, if any, are added to it), and the result says so."
+                                        "A name already defined is refused: add_slot and set_slot change that one.")))
      ("input_schema" . ,(schema `(("name" . (("type" . "string") ("description" . "The new object's name, e.g. shelf-bracket.")))
                                   ("mixins" . (("type" . "string") ("description" . "Type names it builds on, separated by spaces; base-object when empty.")))
                                   ("description" . (("type" . "string") ("description" . "Optional: one sentence on what it is.")))
