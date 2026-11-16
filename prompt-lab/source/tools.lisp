@@ -369,6 +369,41 @@ Wrap several forms in progn, or put definitions in the model with write_model.")
 (defun leaf-box (leaf)
   (ignore-errors (the-object leaf bounding-box)))
 
+(defparameter *completion-check?* t
+  "Boolean.  Whether a reply that ends a prompt is checked before it counts
+as done (Ruling 144, 2026-11-16): MODEL builds, every part computes, and
+every computed slot of MODEL computes.  A reply that fails it is logged as
+not done, with what the check found.  Nil: the agent's word, as before.")
+
+(defun completion-problems (session)
+  "What keeps SESSION's model from being done, as short texts; nil when it
+is complete by the check (*completion-check?*): MODEL builds, every part
+computes, every computed slot of MODEL computes.  Nil too when nothing was
+built -- no MODEL defined -- or the session builds an app or a project, which
+this check does not judge.  It cannot read which results a request names:
+it checks that the results MODEL declares compute."
+  (when (and *completion-check?*
+             (eq (session-kind session) :model)
+             (model-defined? session))
+    (handler-case
+        (with-time-limit (*eval-seconds* "completion check")
+          (let* ((model (make-model session))
+                 (broken (loop for leaf in (the-object model leaves)
+                               unless (leaf-box leaf) collect (leaf-name leaf)))
+                 (failing (loop for key in (ignore-errors
+                                            (the-object model (message-list :category :computed-slots
+                                                                            :message-type :local)))
+                                unless (ignore-errors (the-object model (evaluate key)) t)
+                                  collect (string-downcase (symbol-name key)))))
+            (flet ((some-of (names)
+                     (format nil "~{~a~^, ~}~@[ and ~d more~]"
+                             (subseq names 0 (min 8 (length names)))
+                             (when (> (length names) 8) (- (length names) 8)))))
+              (append (when broken (list (format nil "parts whose geometry does not compute: ~a" (some-of broken))))
+                      (when failing (list (format nil "results of MODEL that do not compute: ~a" (some-of failing))))))))
+      (serious-condition (condition)
+        (list (format nil "MODEL does not build: ~a" (condition-text condition)))))))
+
 (defun leaf-center (leaf)
   "The midpoint of LEAF's bounding box -- not its center: leaves made by
 projection or profile (a gear's teeth) inherit their parent's center,

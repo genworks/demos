@@ -1021,6 +1021,52 @@ loaded) its page too."
                          (pl :funnel-count! "builds-done" -1)
                          (ignore-errors (pl :delete-session s))
                          (pl :funnel-count! "sessions" -1))))))
+          ;; THE COMPLETION CHECK (Ruling 144): a reply that ends a prompt counts
+          ;; as done only when MODEL builds, every part computes and every
+          ;; computed slot of MODEL computes; otherwise it is logged not done
+          (smoke "prompt-lab the completion check: a broken model's 'done' is not done"
+                 (lambda ()
+                   (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
+                     (let* ((sse (lab '#:post-sse))
+                            (saved (fdefinition sse))
+                            (s (pl :open-session! "10.9.8.4" nil)))
+                       (flet ((last-kind () (second (car (last (pl :session-log s)))))
+                              (last-text () (third (car (last (pl :session-log s))))))
+                         (unwind-protect
+                              (progv (list (lab '#:*stream-replies?*)) (list t)
+                                (setf (fdefinition sse)
+                                      (lambda (url body &key headers seconds on-event)
+                                        (declare (ignore url body headers seconds))
+                                        (flet ((event (name json) (funcall on-event name json)))
+                                          (event "message_start" "{\"message\": {\"role\": \"assistant\", \"content\": [], \"usage\": {\"input_tokens\": 10}}}")
+                                          (event "content_block_start" "{\"index\": 0, \"content_block\": {\"type\": \"text\", \"text\": \"\"}}")
+                                          (event "content_block_delta" "{\"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"All done.\"}}")
+                                          (event "content_block_stop" "{\"index\": 0}")
+                                          (event "message_delta" "{\"delta\": {\"stop_reason\": \"end_turn\"}, \"usage\": {\"output_tokens\": 3}}"))
+                                        (values 200 nil nil)))
+                                ;; a part that does not compute, and a result that does not
+                                (pl :write-model s "(define-object model (base-object)
+  :computed-slots ((ratio (/ 1 0)))
+  :objects ((plate :type 'box :width 100 :length 50 :height 10)
+            (bracket :type 'box :width (the nosuch) :length 5 :height 5)))")
+                                (pl :run-prompt s "a plate and a bracket")
+                                (unless (and (eq (last-kind) :stopped) (search "Not done" (last-text))
+                                             (search "bracket" (last-text)) (search "ratio" (last-text)))
+                                  (error "a broken model's 'done' was not caught: ~s ~a" (last-kind) (last-text)))
+                                ;; mended, the same reply is done
+                                (pl :write-model s "(define-object model (base-object)
+  :computed-slots ((ratio (/ 1 2)))
+  :objects ((plate :type 'box :width 100 :length 50 :height 10)))")
+                                (pl :run-prompt s "mend it")
+                                (unless (eq (last-kind) :done)
+                                  (error "a complete model's 'done' was refused: ~s ~a" (last-kind) (last-text)))
+                                t)
+                           (setf (fdefinition sse) saved)
+                           (pl :funnel-count! "prompts" -2)
+                           (pl :funnel-count! "builds-stopped" -1)
+                           (pl :funnel-count! "builds-done" -1)
+                           (ignore-errors (pl :delete-session s))
+                           (pl :funnel-count! "sessions" -1)))))))
           ;; a house model's reply cut off at max_tokens goes back into the
           ;; conversation as one line, not its thinking (the staged arm of
           ;; 2026-11-15 filled a 128K context with three of them)

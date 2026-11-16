@@ -1000,10 +1000,19 @@ the session busy (start-prompt!)."
                                (append (session-messages session)
                                        (list (h "role" "user" "content" results))))))
                       ((equal stop "end_turn")
-                       (return (log-event session :done "~{~a~^~%~}"
-                                          (loop for block in content
-                                                when (equal (block-type block) "text")
-                                                  collect (gethash "text" block)))))
+                       ;; the agent's word is checked before it counts as done
+                       ;; (completion-problems, tools.lisp; Ruling 144)
+                       (let ((reply (format nil "~{~a~^~%~}"
+                                            (loop for block in content
+                                                  when (equal (block-type block) "text")
+                                                    collect (gethash "text" block))))
+                             (problems (completion-problems session)))
+                         (if problems
+                             (progn
+                               (when (plusp (length reply)) (log-event session :text "~a" reply))
+                               (return (log-event session :stopped "Not done: the lab's check of the model found ~{~a~^; ~}."
+                                                  problems)))
+                             (return (log-event session :done "~a" reply)))))
                       ((equal stop "refusal")
                        (return (log-event session :stopped "The model declined this request.")))
                       ((equal stop "max_tokens")

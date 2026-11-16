@@ -336,8 +336,14 @@ key accepted the same versions before."
              (respond-json req ent (h "ok" t)))
             ((equal event "done")
              (let ((reply (if (plusp (length (said))) (said) "(The agent finished without a reply.)"))
-                   (usage (gethash "usage" json)))
-               (log-event session :done "~a" reply)
+                   (usage (gethash "usage" json))
+                   ;; the agent's word is checked, as the lab's own loop checks it
+                   ;; (completion-problems, tools.lisp; Ruling 144)
+                   (problems (completion-problems session)))
+               (if problems
+                   (progn (log-event session :text "~a" reply)
+                          (log-event session :stopped "Not done: the lab's check of the model found ~{~a~^; ~}." problems))
+                   (log-event session :done "~a" reply))
                ;; the reply joins the conversation, so the lab's own loop
                ;; can take the session up where this agent left it
                (setf (session-messages session)
