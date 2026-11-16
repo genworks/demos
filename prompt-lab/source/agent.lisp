@@ -893,7 +893,15 @@ session builds from this prompt on (kinds.lisp)."
      :name (format nil "prompt-lab ~a" (session-id session)))
     t))
 
-(defun run-one-prompt (session prompt &key claimed? keep-busy?)
+(defparameter *round-cap-stop* "Stopped after ~a rounds of tool calls."
+  "What the log says when a prompt ends at its round cap (a format control
+taking the cap).  run-prompt's stages go on after it.")
+
+(defparameter *length-limit-stop* "The reply hit its length limit."
+  "What the log says when a reply is cut at max_tokens.  run-prompt's stages
+go on after it.")
+
+(defun run-one-prompt (session prompt &key claimed? keep-busy? (log-as :prompt))
   "Work on one visitor PROMPT to the end: call the API, run the tools it
 asks for, repeat until it finishes or a cap is reached.  Returns the
 agent's closing text (or a reason it stopped).  Everything is logged on
@@ -904,7 +912,9 @@ for a caller with more to send (run-prompt's stages)."
     (return-from run-one-prompt "Still working on the previous request."))
   (unwind-protect
        (progn
-         (log-event session :prompt "~a" prompt)
+         ;; a stage of a staged request logs as :stage: the request itself is
+         ;; the one :prompt, so every count of prompts reads one (run-prompt)
+         (log-event session log-as "~a" prompt)
          ;; a session saved with a dangling tool call (before this was
          ;; guarded) is mended before the prompt goes on
          (close-dangling-tool-uses! session "the previous request ended before this tool ran")
@@ -965,7 +975,7 @@ for a caller with more to send (run-prompt's stages)."
                       ((equal stop "tool_use")
                        (when (> round (max-rounds session))
                          (close-dangling-tool-uses! session "the round cap was reached")
-                         (return (log-event session :stopped "Stopped after ~a rounds of tool calls."
+                         (return (log-event session :stopped *round-cap-stop*
                                             (max-rounds session))))
                        (let ((results
                                (loop for block in content
@@ -1026,7 +1036,7 @@ for a caller with more to send (run-prompt's stages)."
                        (when (house-model? session) (drop-cut-reply! session))
                        ;; a reply cut off may end inside a tool call
                        (close-dangling-tool-uses! session "the reply hit its length limit")
-                       (return (log-event session :stopped "The reply hit its length limit.")))
+                       (return (log-event session :stopped *length-limit-stop*)))
                       (t (close-dangling-tool-uses! session (format nil "the reply stopped (~a)" stop))
                          (return (log-event session :stopped "Stopped: ~a" stop)))))))))
     (unless keep-busy? (setf (session-busy? session) nil))
@@ -1056,20 +1066,42 @@ to build a model is sent as the stages of *auto-stage-texts*.")
   "The stages, as format controls; a ~a takes the request itself.")
 
 (defun auto-stages (session prompt)
-  "PROMPT as its stages when *auto-stage* applies to it in SESSION, else nil."
+  "PROMPT as its stages when *auto-stage* applies to it in SESSION, else nil.
+For house models only: staging was tried on them alone, and on a paid
+model one request would cost four loops of rounds."
   (when (and *auto-stage* (stringp prompt)
              (>= (length prompt) *auto-stage-length*)
-             (eq (session-kind session) :model))
+             (eq (session-kind session) :model)
+             (house-model? session))
     (mapcar #'(lambda (control)
                 (if (search "~a" control) (format nil control prompt) control))
             *auto-stage-texts*)))
 
+(defun stage-may-go-on? (session)
+  "Whether the stage SESSION just ended leaves the next one worth sending:
+it ended done, or at its round cap, or with a reply cut at its length limit
+-- the model was working.  Anything else is a refusal or a failure (the
+model declined, the gate refused, the API failed), and sending more stages
+into it would spend calls on a request already turned away."
+  (let ((end (find-if #'(lambda (entry) (member (second entry) '(:done :stopped)))
+                      (session-log session) :from-end t)))
+    (and end
+         (or (eq (second end) :done)
+             (let ((text (third end))
+                   (cap (subseq *round-cap-stop* 0 (search "~" *round-cap-stop*))))
+               (and (stringp text)
+                    (or (eql 0 (search cap text))
+                        (string= text *length-limit-stop*))))))))
+
 (defun run-prompt (session prompt &key claimed?)
   "Work on one visitor PROMPT to the end, as run-one-prompt does -- or, a
 long request with *auto-stage* on, as its stages, one after another under
-one claim of the session.  The completion check (Ruling 144) judges only
-the last stage: an earlier one is not meant to be complete.  Returns what
-the last prompt returned."
+one claim of the session.  The request is logged once as the :prompt and
+each stage as a :stage, so one request counts as one prompt wherever
+prompts are counted (the per-session cap, the funnel, the listings).  The
+stages stop after one that was refused or failed (stage-may-go-on?).  The
+completion check (Ruling 144) judges only the last stage: an earlier one is
+not meant to be complete.  Returns what the last prompt returned."
   (let ((stages (auto-stages session prompt)))
     (if (null stages)
         (run-one-prompt session prompt :claimed? claimed?)
@@ -1079,9 +1111,15 @@ the last prompt returned."
           (let ((result nil))
             (unwind-protect
                  (progn
+                   (log-event session :prompt "~a" prompt)
                    (log-event session :note "This request is long, so the lab builds it in ~d stages." (length stages))
                    (loop for (stage . more) on stages
                          do (setq result (let ((*completion-check?* (and *completion-check?* (null more) t)))
-                                           (run-one-prompt session stage :claimed? t :keep-busy? (and more t))))))
+                                           (run-one-prompt session stage :claimed? t :keep-busy? (and more t)
+                                                                         :log-as :stage)))
+                            ;; a stage refused or failed: the rest are not sent
+                            (when (and more (not (stage-may-go-on? session)))
+                              (log-event session :note "The stages stopped there: the request was refused or the call failed.")
+                              (return))))
               (setf (session-busy? session) nil))
             result)))))
