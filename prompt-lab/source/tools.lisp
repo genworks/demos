@@ -400,7 +400,7 @@ it checks that the results MODEL declares compute."
                              (subseq names 0 (min 8 (length names)))
                              (when (> (length names) 8) (- (length names) 8)))))
               (append (when broken (list (format nil "parts whose geometry does not compute: ~a" (some-of broken))))
-                      (when failing (list (format nil "results of MODEL that do not compute: ~a" (some-of failing))))))))
+                      (when failing (list (format nil "computed slots of MODEL that do not compute -- results and helpers alike, since a broken helper is a broken model: ~a" (some-of failing))))))))
       (serious-condition (condition)
         (list (format nil "MODEL does not build: ~a" (condition-text condition)))))))
 
