@@ -893,14 +893,15 @@ session builds from this prompt on (kinds.lisp)."
      :name (format nil "prompt-lab ~a" (session-id session)))
     t))
 
-(defun run-prompt (session prompt &key claimed?)
+(defun run-one-prompt (session prompt &key claimed? keep-busy?)
   "Work on one visitor PROMPT to the end: call the API, run the tools it
 asks for, repeat until it finishes or a cap is reached.  Returns the
 agent's closing text (or a reason it stopped).  Everything is logged on
 the session for the page.  CLAIMED? true means the caller already marked
-the session busy (start-prompt!)."
+the session busy (start-prompt!); KEEP-BUSY? leaves it marked when done,
+for a caller with more to send (run-prompt's stages)."
   (unless (or claimed? (claim! session))
-    (return-from run-prompt "Still working on the previous request."))
+    (return-from run-one-prompt "Still working on the previous request."))
   (unwind-protect
        (progn
          (log-event session :prompt "~a" prompt)
@@ -1028,5 +1029,59 @@ the session busy (start-prompt!)."
                        (return (log-event session :stopped "The reply hit its length limit.")))
                       (t (close-dangling-tool-uses! session (format nil "the reply stopped (~a)" stop))
                          (return (log-event session :stopped "Stopped: ~a" stop)))))))))
-    (setf (session-busy? session) nil)
+    (unless keep-busy? (setf (session-busy? session) nil))
     (save-session! session)))
+
+;;
+;; AUTOMATIC STAGING (Ruling 153, 2026-11-16).  A long request to build a
+;; model is sent to the agent as four stages, one after another in the
+;; same session, by a fixed rule: no model writes the stages.  The eval
+;; found a house model finishing long prompts it never finished whole when
+;; they were given in stages (written by hand then); this is the rule's
+;; version.  Off by default; the eval turns it on.
+;;
+
+(defparameter *auto-stage* nil
+  "Boolean.  Whether a long request (*auto-stage-length* characters or more)
+to build a model is sent as the stages of *auto-stage-texts*.")
+
+(defparameter *auto-stage-length* 600
+  "Integer.  The length in characters from which a request is staged.")
+
+(defparameter *auto-stage-texts*
+  '("~a~%~%Build this in stages.  Stage 1 of 4: MODEL's inputs, with input-controls, and the parts that do not move.  Nothing else yet."
+    "Stage 2 of 4: add the remaining parts the request names."
+    "Stage 3 of 4: make the STATE inputs move the parts as the request says; if it has none, check the geometry against the request."
+    "Stage 4 of 4, the last.  Add every result the request names, as a computed slot of MODEL with a doc string giving its unit; check the model against all of the request; fix what is missing or wrong; and reply to the visitor.  The whole request, as first written:~%~%~a")
+  "The stages, as format controls; a ~a takes the request itself.")
+
+(defun auto-stages (session prompt)
+  "PROMPT as its stages when *auto-stage* applies to it in SESSION, else nil."
+  (when (and *auto-stage* (stringp prompt)
+             (>= (length prompt) *auto-stage-length*)
+             (eq (session-kind session) :model))
+    (mapcar #'(lambda (control)
+                (if (search "~a" control) (format nil control prompt) control))
+            *auto-stage-texts*)))
+
+(defun run-prompt (session prompt &key claimed?)
+  "Work on one visitor PROMPT to the end, as run-one-prompt does -- or, a
+long request with *auto-stage* on, as its stages, one after another under
+one claim of the session.  The completion check (Ruling 144) judges only
+the last stage: an earlier one is not meant to be complete.  Returns what
+the last prompt returned."
+  (let ((stages (auto-stages session prompt)))
+    (if (null stages)
+        (run-one-prompt session prompt :claimed? claimed?)
+        (progn
+          (unless (or claimed? (claim! session))
+            (return-from run-prompt "Still working on the previous request."))
+          (let ((result nil))
+            (unwind-protect
+                 (progn
+                   (log-event session :note "This request is long, so the lab builds it in ~d stages." (length stages))
+                   (loop for (stage . more) on stages
+                         do (setq result (let ((*completion-check?* (and *completion-check?* (null more) t)))
+                                           (run-one-prompt session stage :claimed? t :keep-busy? (and more t))))))
+              (setf (session-busy? session) nil))
+            result)))))
