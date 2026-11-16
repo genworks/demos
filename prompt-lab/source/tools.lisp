@@ -353,20 +353,38 @@ Wrap several forms in progn, or put definitions in the model with write_model.")
       ;; a run costs credits by the volume of what runs (meter.lisp)
       (multiple-value-bind (ok? reason) (meter! session :run (form-volume form))
         (unless ok? (return-from evaluate-expression (meter-refusal reason))))
-      (let (result)
-        (handler-case
-            (let ((output (with-output-to-string (*standard-output*)
-                            (with-time-limit (*eval-seconds* "evaluation")
-                              (setq result (eval form))))))
-              (values (list (let ((*print-length* 50) (*print-level* 6))
-                              (text-result "~s~@[~%Output:~%~a~]"
-                                          result (when (plusp (length output)) output))))
-                      nil))
-          ;; serious-condition, not error: a model that recurses into
-          ;; itself overflows the stack, a storage-condition, which took
-          ;; the whole Lisp down when only errors were caught (2026-11-14)
-          (serious-condition (condition)
-            (values (list (text-result "Error: ~a" condition)) t)))))))
+      (flet ((try (form)
+               ;; values: content blocks, an error flag, and the condition
+               (let (result)
+                 (handler-case
+                     (let ((output (with-output-to-string (*standard-output*)
+                                     (with-time-limit (*eval-seconds* "evaluation")
+                                       (setq result (eval form))))))
+                       (values (list (let ((*print-length* 50) (*print-level* 6))
+                                       (text-result "~s~@[~%Output:~%~a~]"
+                                                   result (when (plusp (length output)) output))))
+                               nil))
+                   ;; serious-condition, not error: a model that recurses into
+                   ;; itself overflows the stack, a storage-condition, which took
+                   ;; the whole Lisp down when only errors were caught (2026-11-14)
+                   (serious-condition (condition)
+                     (values (list (text-result "Error: ~a" condition)) t condition))))))
+        (multiple-value-bind (blocks error? condition) (try form)
+          ;; the :evaluate-self rail: (the ...) outside an object fails for
+          ;; want of SELF -- the commonest evaluate error of a house model.
+          ;; It is run again with SELF a fresh MODEL, and the result says so.
+          (if (and error? (rail? :evaluate-self)
+                   (typep condition 'unbound-variable)
+                   (string-equal (symbol-name (cell-error-name condition)) "SELF")
+                   (model-defined? session))
+              (let ((model (ignore-errors (make-model session))))
+                (cond (model
+                       (rail-note "NO SELF HERE: evaluate runs outside any object, so the expression was run again with SELF a fresh MODEL: (the x) read MODEL's x.")
+                       (multiple-value-bind (blocks error?)
+                           (try `(let ((self ,model)) (declare (ignorable self)) ,form))
+                         (values blocks error?)))
+                      (t (values blocks error?))))
+              (values blocks error?)))))))
 
 
 ;;
@@ -419,8 +437,13 @@ base-object in it (a holder of numbers) has no bounding box and is no
   "Whether MODEL builds nothing yet: no child, no computed slot of its own
 and no size -- the skeleton a structure-only session starts from, or a
 define-object left bare.  LEAVES and SLOTS are MODEL's, already asked."
-  (and (null slots)
-       (null (rest leaves))
+  (and (null slots) (partless-model? model leaves)))
+
+(defun partless-model? (model leaves)
+  "Whether MODEL has nothing to draw: no child, and no size of its own (a
+MODEL that is itself a box, with no children, has a part).  A geometry
+request answered with numbers alone is not done."
+  (and (null (rest leaves))
        (or (null leaves) (eq (first leaves) model))
        (let ((box (leaf-box model)))
          (or (null box)
@@ -461,7 +484,9 @@ says nothing of the model either way."
                                           collect (leaf-name leaf))
                           :failing (mapcar #'car why)
                           :why why
-                          :empty (empty-model? model leaves slots)))))
+                          :empty (empty-model? model leaves slots)
+                          ;; slots, perhaps, but nothing to draw
+                          :no-parts (partless-model? model leaves)))))
             ;; the check's own limit, not the model's fault: a sound model
             ;; with one slow slot was reported as one that does not build
             (bt2:timeout ()
@@ -490,8 +515,11 @@ compute."
                      (when (> (length names) 8) (- (length names) 8)))))
       (append (when (getf findings :error)
                 (list (format nil "MODEL does not build: ~a" (getf findings :error))))
-              (when (getf findings :empty)
-                (list "MODEL is empty: nothing has been built yet"))
+              (cond ((getf findings :empty)
+                     (list "MODEL is empty: nothing has been built yet"))
+                    ;; a geometry request answered with numbers alone
+                    ((getf findings :no-parts)
+                     (list "MODEL has no parts: there is nothing to draw yet (its slots are not parts)")))
               (when (getf findings :broken)
                 (list (format nil "parts whose geometry does not compute: ~a" (some-of (getf findings :broken)))))
               (when (getf findings :failing)
@@ -643,8 +671,8 @@ lens and rasterised in process (raster.lisp): no Ghostscript."
 ;; tool can take care of itself, each a round spent for nothing: a value
 ;; whose only fault is its closing count (187), a name that is already there
 ;; (82), a common Gendl mistake the error text does not explain, and a build
-;; that ended 'clean' with slots that do not compute.  Each rail is off
-;; unless *house-rails* names it, and only a house session rides them:
+;; that ended 'clean' with slots that do not compute.  Only a house session
+;; rides them, and only those *house-rails* names (T, the default: all):
 ;;
 ;;   :paren-repair  a VALUE or SOURCE left open, or closed too often, at its
 ;;                  END is balanced by the tool and used; the result says so
@@ -654,13 +682,26 @@ lens and rasterised in process (raster.lisp): no Ghostscript."
 ;;   :findings      every edit that compiles is answered with what the
 ;;                  completion check finds now
 ;;
+;; and a second pack, from what the first trial's errors still were:
+;;
+;;   :evaluate-self an evaluate that fails for want of SELF -- (the x)
+;;                  outside any object -- is run again with SELF a fresh MODEL
+;;   :set-adds      set_slot on a slot that is not there adds it, unless a
+;;                  name near it is: then it is still refused, as a slip
+;;   :unquote       a VALUE that is one string holding code has its own
+;;                  pair of quotes taken off
+;;   :show-entry    an edit is answered with each changed entry as the file
+;;                  now has it
+;;
 
-(defparameter *rail-names* '(:paren-repair :upsert :hints :findings)
+(defparameter *rail-names* '(:paren-repair :upsert :hints :findings
+                             :evaluate-self :set-adds :unquote :show-entry)
   "Every rail *house-rails* can name.")
 
-(defparameter *house-rails* nil
+(defparameter *house-rails* t
   "Nil, T or a list of rails (*rail-names*) a house session rides; T is all
-of them.  Nil: the tools as they were.")
+of them, the default since a trial of four runs found the rails doing their
+own work at no cost.  Nil: the tools as they were.")
 
 (defvar *rails* nil
   "The rails in force for the tool call being run; run-tool binds it.")
@@ -683,6 +724,13 @@ run-tool appends to the call's result.")
 (defun rail-note (control &rest args)
   (push (apply #'format nil control args) *rail-notes*))
 
+(defvar *touched-entries* nil
+  "The entries the tool call being run has written to the file, newest
+first, each (object slot): what the :show-entry rail shows.")
+
+(defun touch-entry (object slot)
+  (push (list object slot) *touched-entries*))
+
 (defun run-tool (session name input)
   "Run tool NAME with INPUT (an alist, keys as strings or keywords) on
 SESSION, its refusals advising what this session can do.  Values: content
@@ -690,10 +738,13 @@ blocks, and true on failure.  For a house session on rails the result ends
 with what the rails did (*rail-notes*) and, for a failure, any hints."
   (let ((*rewrite-advice* (rewrite-advice session))
         (*rails* (session-rails session))
-        (*rail-notes* nil))
+        (*rail-notes* nil)
+        (*touched-entries* nil))
     (multiple-value-bind (blocks error?) (%run-tool session name input)
       (values (append blocks
                       (mapcar #'(lambda (note) (text-result "~a" note)) (reverse *rail-notes*))
+                      (and (rail? :show-entry) *touched-entries*
+                           (ignore-errors (touched-blocks session (reverse *touched-entries*))))
                       (and error? (rail? :hints) (ignore-errors (hint-blocks session blocks))))
               error?))))
 
@@ -1093,6 +1144,86 @@ the result; else as given.  WHAT names it in the note (\"VALUE of width\")."
       fragment))
 
 ;;
+;; The :unquote rail.  A house model now and then sends a VALUE wrapped in
+;; its own pair of double quotes: the entry then holds one string where code
+;; belongs, and the compile fails on its type some rounds later.
+;;
+
+(defun string-form-contents (text)
+  "When TEXT is exactly one Lisp string literal, what it holds, its escapes
+undone; else nil."
+  (let ((trimmed (string-trim '(#\Space #\Tab #\Newline #\Return) text)))
+    (when (and (> (length trimmed) 1) (char= (char trimmed 0) #\")
+               (eql (form-end trimmed 0) (length trimmed)))
+      (let ((last (1- (length trimmed))))
+        (with-output-to-string (out)
+          (loop with i = 1
+                while (< i last)
+                do (when (and (char= (char trimmed i) #\\) (< (1+ i) last)) (incf i))
+                   (write-char (char trimmed i) out)
+                   (incf i)))))))
+
+(defun unquoted (value section what)
+  "VALUE as a structural tool will take it: under the :unquote rail, with
+its own pair of double quotes taken off when the whole of it is one string
+that holds code -- always for a child or a function (SECTION; a string is
+never one), for an input or a computed slot only when what it holds begins
+like code, with '(' or ':'.  A note of it is kept for the result."
+  (if (and (rail? :unquote) (stringp value))
+      (let* ((inside (string-form-contents value))
+             (start (and inside (string-left-trim '(#\Space #\Tab #\Newline #\Return) inside))))
+        (cond ((and start (plusp (length start))
+                    (or (member section '(":objects" ":hidden-objects" ":functions") :test #'equal)
+                        (find (char start 0) "(:")))
+               (rail-note "UNWRAPPED: ~a came wrapped in its own double quotes, which would have made it one string and not code; the quotes were taken off."
+                          what)
+               inside)
+              (t value)))
+      value))
+
+;;
+;; The :show-entry rail.
+;;
+
+(defparameter *show-entries-most* 8
+  "Integer. The most changed entries one edit's result shows.")
+
+(defun object-slot-names (text elements)
+  "The names of every entry of the define-object whose ELEMENTS are given,
+lower case."
+  (declare (special *slot-sections*))   ; defined with the structural tools, below
+  (loop for (section . list-span) in (object-sections text elements)
+        when (member section *slot-sections* :test #'string=)
+          append (loop for entry in (form-elements text (car list-span))
+                       for name = (if (char= (char text (car entry)) #\()
+                                      (slot-entry-name text entry)
+                                      (and (char/= (char text (car entry)) #\")
+                                           (string-downcase (span-text text entry))))
+                       when name collect name)))
+
+(defun touched-blocks (session touched)
+  "The entries of TOUCHED -- lists (object slot), the oldest first -- as the
+model file now has them, one content block; nil when none is to be found."
+  (let* ((text (model-body-text session))
+         (pairs (remove-duplicates touched :test #'equalp :from-end t))
+         (lines (loop for (object slot) in pairs
+                      for found = (and (stringp object) (stringp slot)
+                                       (definitions-named text object '("define-object")))
+                      for entry = (and (= (length found) 1)
+                                       (nth-value 1 (find-slot text (second (first found)) slot)))
+                      when entry
+                        collect (let ((source (span-text text entry)))
+                                  (format nil "in ~a: ~a" object
+                                          (if (> (length source) 600)
+                                              (concatenate 'string (subseq source 0 600) " ...")
+                                              source))))))
+    (when lines
+      (list (text-result "AS WRITTEN, ~d entr~:@p in the file now~@[ (the first ~d shown)~]:~%~{~a~^~%~}"
+                         (length lines)
+                         (and (> (length lines) *show-entries-most*) *show-entries-most*)
+                         (subseq lines 0 (min *show-entries-most* (length lines))))))))
+
+;;
 ;; The :hints rail: what the common mistakes behind a tool error are, said
 ;; with the error.  Each test reads the error's text; nothing is guessed
 ;; from the request.
@@ -1268,11 +1399,13 @@ nil when there is nothing to judge or the check ran out of time."
       (cond ((or (null findings) (getf findings :unjudged)) nil)
             ((getf findings :error) (format nil "MODEL does not build: ~a" (clipped (getf findings :error) 300)))
             ((getf findings :empty) "MODEL has nothing in it yet: no part and no computed slot.")
-            ((not (or (getf findings :failing) (getf findings :broken)))
+            ((not (or (getf findings :failing) (getf findings :broken) (getf findings :no-parts)))
              "nothing wrong: every part and every computed slot of MODEL computes.")
             (t (let ((why (getf findings :why))
                      (broken (getf findings :broken)))
                  (with-output-to-string (out)
+                   (when (getf findings :no-parts)
+                     (format out "~%MODEL has no parts yet: nothing to draw."))
                    (when why
                      (format out "~%Computed slots of MODEL that do not compute:")
                      (loop for (name . reason) in (subseq why 0 (min 6 (length why)))
@@ -1401,9 +1534,10 @@ add_slot takes them (the object defaults to NAME), all or nothing."
                                  name entries)
                       (if entries
                           (multiple-value-bind (new reason) (add-entries text entries)
-                            (if reason
-                                (structural-refusal "~a" reason)
-                                (write-model session new)))
+                            (cond (reason (structural-refusal "~a" reason))
+                                  (t (loop for (entry-object nil entry-slot) in entries
+                                           do (touch-entry entry-object entry-slot))
+                                     (write-model session new))))
                           (values (list (text-result "~a stands as it was; nothing written.  add_slot adds to it, set_slot changes it." name))
                                   nil)))
                      ((definitions-named text name)
@@ -1414,9 +1548,11 @@ add_slot takes them (the object defaults to NAME), all or nothing."
                                                    (and (plusp (length kept)) kept))
                                                  (object-skeleton name (or mixins '("base-object")) description))
                                          entries)
-                          (if reason
-                              (structural-refusal "~a  (~a was not started either.)" reason name)
-                              (write-model session new)))))))))))
+                          (cond (reason
+                                 (structural-refusal "~a  (~a was not started either.)" reason name))
+                                (t (loop for (entry-object nil entry-slot) in entries
+                                         do (touch-entry entry-object entry-slot))
+                                   (write-model session new))))))))))))
 
 ;; the escape hatch: a whole define-object may be replaced in a
 ;; structure-only session once two structural edits of it have failed
@@ -1506,19 +1642,43 @@ own parentheses; else nil."
 child, a function -- with (SLOT VALUE)."
   (when (section-name? slot)
     (return-from set-slot-tool (section-refusal slot)))
-  ;; a closing count wrong at the end is put right (the :paren-repair rail)
-  (setq value (mended value (format nil "VALUE of ~a" slot)))
-  (let ((problem (fragment-problem value)))
+  (let ((problem (and (not (stringp value)) (fragment-problem value))))
     (when problem (return-from set-slot-tool (structural-refusal "Nothing written: VALUE ~a" problem))))
   (with-object session object
     #'(lambda (text span elements)
         (declare (ignore span))
         (multiple-value-bind (section entry) (find-slot text elements slot)
-          (cond ((null section)
-                 (structural-refusal "~a has no slot named ~a; add_slot adds one." object slot))
-                ((child-value-problem section value)
-                 (structural-refusal "~a" (child-value-problem section value)))
-                (t (write-model session (splice text (car entry) (cdr entry) (slot-entry-text slot value)))))))))
+          (let* ((what (format nil "VALUE of ~a" slot))
+                 ;; where a slot that is not there would go (the :set-adds
+                 ;; rail): a child when its value starts at :type, else a
+                 ;; computed slot
+                 (plain (string-left-trim '(#\Space #\Tab #\Newline #\Return)
+                                          (or (string-form-contents value) value)))
+                 (home (or section
+                           (if (and (>= (length plain) 5) (string-equal ":type" plain :end2 5))
+                               ":objects"
+                               ":computed-slots")))
+                 ;; its own quotes off, then a closing count wrong at the end
+                 ;; put right (the :unquote and :paren-repair rails)
+                 (value (mended (unquoted value home what) what))
+                 (problem (fragment-problem value)))
+            (cond (problem (structural-refusal "Nothing written: VALUE ~a" problem))
+                  ;; not there, and nothing near it is: added, and said so.  A
+                  ;; near name is a slip of the pen, refused as ever
+                  ((and (null section) (rail? :set-adds)
+                        (null (nearest-names slot (object-slot-names text elements))))
+                   (multiple-value-bind (new reason) (add-entry text object home slot value)
+                     (cond (reason (structural-refusal "~a" reason))
+                           (t (rail-note "ADDED, NOT CHANGED: ~a had no slot named ~a, so set_slot added it under ~a.  If it belongs in another section, remove_slot it and add_slot it there."
+                                         object slot (subseq home 1))
+                              (touch-entry object slot)
+                              (write-model session new)))))
+                  ((null section)
+                   (structural-refusal "~a has no slot named ~a; add_slot adds one." object slot))
+                  ((child-value-problem section value)
+                   (structural-refusal "~a" (child-value-problem section value)))
+                  (t (touch-entry object slot)
+                     (write-model session (splice text (car entry) (cdr entry) (slot-entry-text slot value))))))))))
 
 (defun entry-field (entry key)
   "KEY of one ENTRY of a batch: a JSON object as parsed (a hash table) or an
@@ -1531,12 +1691,14 @@ alist."
 Values: the new text, or nil and the reason it is refused.  On the :upsert
 rail a SLOT that is there already is changed instead -- where it stands, or
 moved to SECTION when it stood in another -- and the result says so."
-  ;; a closing count wrong at the end is put right (the :paren-repair rail)
-  (setq value (mended value (format nil "VALUE of ~a" slot)))
-  (let ((problem (fragment-problem value))
-        (section (string-downcase (if (and (stringp section) (plusp (length section)) (char/= (char section 0) #\:))
-                                      (concatenate 'string ":" section)
-                                      (or section "")))))
+  (let* ((section (string-downcase (if (and (stringp section) (plusp (length section)) (char/= (char section 0) #\:))
+                                       (concatenate 'string ":" section)
+                                       (or section ""))))
+         ;; its own quotes off, then a closing count wrong at the end put
+         ;; right (the :unquote and :paren-repair rails)
+         (value (let ((what (format nil "VALUE of ~a" slot)))
+                  (mended (unquoted value section what) what)))
+         (problem (fragment-problem value)))
     (flet ((no (control &rest args) (values nil (apply #'format nil control args))))
       (cond ((not (and (stringp slot) (plusp (length slot))))
              (no "Nothing written: every entry needs a SLOT, its own name."))
@@ -1615,9 +1777,10 @@ entries before it leave it, and one refused entry writes none."
                              (coerce entries 'list))
                      (list (list object section slot value)))))
     (multiple-value-bind (text refusal) (add-entries (model-body-text session) entries)
-      (if refusal
-          (structural-refusal "~a" refusal)
-          (write-model session text)))))
+      (cond (refusal (structural-refusal "~a" refusal))
+            (t (loop for (entry-object nil entry-slot) in entries
+                     do (touch-entry entry-object entry-slot))
+               (write-model session text))))))
 
 (defun remove-slot-tool (session object slot)
   "Remove SLOT from the define-object OBJECT."

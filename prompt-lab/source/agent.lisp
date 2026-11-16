@@ -1192,6 +1192,72 @@ into it would spend calls on a request already turned away."
                     (or (eql 0 (search cap text))
                         (string= text *length-limit-stop*))))))))
 
+;;
+;; THE DONE GATE (2026-11-16).  A build that ends with the lab's own check
+;; still finding something -- a part or a slot that does not compute, a
+;; model with nothing to draw -- has so far just stopped there, 'Not done',
+;; and only a visitor's next prompt took it further.  A trial's first
+;; builds ended that way 17 times in 20, nearly all with their rounds used
+;; up, and a scripted next line mended most of them.  With the gate the lab
+;; sends that line itself: the findings, and another allowance of rounds, a
+;; few times at most.  Off unless *house-done-gate* says how many times.
+;;
+
+(defparameter *house-done-gate* nil
+  "Nil, or the most continuations the lab sends a house session's model
+build on its own when a prompt ends with the completion check still
+finding something: each a line naming the findings and another allowance
+of rounds (max-rounds).  Nil: the build stops where it stops, as before.")
+
+(defparameter *done-gate-text*
+  "Not done yet: the lab's check of the model found ~{~a~^; ~}.  Fix those, then reply."
+  "What a continuation of the done gate tells the agent; ~{~} takes the
+findings.")
+
+(defun done-gate-tries (session)
+  "How many continuations the done gate may send SESSION's build: a house
+session building a model, with *house-done-gate* a whole number above 0."
+  (and (integerp *house-done-gate*) (plusp *house-done-gate*)
+       (eq (session-kind session) :model)
+       (house-model? session)
+       *house-done-gate*))
+
+(defun done-gate-findings (session)
+  "What the done gate would send SESSION's build on with, a list of short
+texts, or nil: nil when the prompt ended done, was refused or failed (as
+for a stage, stage-may-go-on?), or the lab's check finds nothing -- it
+cannot see what a request names and the model lacks."
+  (let ((end (find-if #'(lambda (entry) (member (second entry) '(:done :stopped)))
+                      (session-log session) :from-end t)))
+    (when (and end (eq (second end) :stopped)
+               (or (stage-may-go-on? session)
+                   ;; the check's own refusal of a closing reply
+                   (eql 0 (search "Not done" (or (third end) "")))))
+      (if (model-defined? session)
+          (let ((*completion-check?* t)) (completion-problems session))
+          (list "there is no MODEL yet")))))
+
+(defun run-gated-prompt (session prompt tries &key claimed?)
+  "PROMPT worked on as run-one-prompt does, then sent on by the lab itself,
+at most TRIES times, while the completion check still finds something
+(done-gate-findings): one claim of the session throughout, each
+continuation logged as a :gate and not as a prompt of the visitor's."
+  (unless (or claimed? (claim! session))
+    (return-from run-gated-prompt "Still working on the previous request."))
+  (let ((result nil))
+    (unwind-protect
+         (progn
+           (setq result (run-one-prompt session prompt :claimed? t :keep-busy? t))
+           (loop repeat tries
+                 for findings = (done-gate-findings session)
+                 while findings
+                 do (log-event session :note "The lab's check still finds the model not done, so the lab sends the agent on with what it found.")
+                    (setq result (run-one-prompt session (format nil *done-gate-text* findings)
+                                                 :claimed? t :keep-busy? t :log-as :gate))))
+      (setf (session-busy? session) nil)
+      (save-session! session))
+    result))
+
 (defun run-prompt (session prompt &key claimed?)
   "Work on one visitor PROMPT to the end, as run-one-prompt does -- or, a
 long request with *auto-stage* on, as its stages, one after another under
@@ -1200,10 +1266,15 @@ each stage as a :stage, so one request counts as one prompt wherever
 prompts are counted (the per-session cap, the funnel, the listings).  The
 stages stop after one that was refused or failed (stage-may-go-on?).  The
 completion check (Ruling 144) judges only the last stage: an earlier one is
-not meant to be complete.  Returns what the last prompt returned."
-  (let ((stages (auto-stages session prompt)))
+not meant to be complete.  Under the done gate (*house-done-gate*) a house
+session's build is sent on by the lab while the check finds something
+(run-gated-prompt).  Returns what the last prompt returned."
+  (let ((stages (auto-stages session prompt))
+        (tries (done-gate-tries session)))
     (if (null stages)
-        (run-one-prompt session prompt :claimed? claimed?)
+        (if tries
+            (run-gated-prompt session prompt tries :claimed? claimed?)
+            (run-one-prompt session prompt :claimed? claimed?))
         (progn
           (unless (or claimed? (claim! session))
             (return-from run-prompt "Still working on the previous request."))
