@@ -50,6 +50,42 @@ prompt is left out of the estimate and counted apart.")
 
 (defun eval-call (name &rest args) (apply (eval-lab name) args))
 
+(defparameter *eval-results* nil
+  "The results each trial prompt names, for the eval only (Ruling 145): an
+alist from a sample id to a list of (LABEL ALTERNATIVE ...), where a result
+is present when one of MODEL's own computed slots has an ALTERNATIVE in its
+name.  Loose by design -- a slot named spring-rate or rate-n-per-mm both
+answer (\"spring rate\" \"rate\") -- since the agent names its slots.
+Set with eval-load-results; visitors' sessions are never judged by it.")
+
+(defun eval-load-results (file)
+  "Read FILE, a list of (:id ID :results ((LABEL ALTERNATIVE ...) ...)), into
+*eval-results*."
+  (setq *eval-results*
+        (with-open-file (in file :external-format :utf-8)
+          (with-standard-io-syntax
+            (let ((*read-eval* nil))
+              (mapcar (lambda (entry) (cons (getf entry :id) (getf entry :results)))
+                      (read in)))))))
+
+(defun eval-results-for (id) (cdr (assoc id *eval-results* :test #'equal)))
+
+(defun eval-model-slot-names (session)
+  "The names of MODEL's own computed slots, lower case; nil when it does
+not build."
+  (ignore-errors
+   (let ((model (eval-call '#:make-model session)))
+     (mapcar (lambda (key) (string-downcase (symbol-name key)))
+             (the-object model (message-list :category :computed-slots :message-type :local))))))
+
+(defun eval-results-missing (session results)
+  "The labels of RESULTS (as in *eval-results*) that MODEL has no computed
+slot for."
+  (let ((names (eval-model-slot-names session)))
+    (loop for (label . alternatives) in results
+          unless (some (lambda (alt) (some (lambda (name) (search alt name)) names)) alternatives)
+            collect label)))
+
 (defun eval-get (object key)
   (and (hash-table-p object) (gethash key object)))
 
@@ -160,7 +196,13 @@ given.  Answers the results, plists."
                                    (and entry (eval-log-kind entry))))
                       (usage (eval-call '#:session-usage session))
                       (cents (eval-cents model usage))
+                      ;; the results the prompt names, where the eval knows them (Ruling 145)
+                      (named (eval-results-for (getf item :id)))
+                      (missing (and named (eval-results-missing session named)))
                       (result (list :id (getf item :id) :model model
+                                    :results-named (length named)
+                                    :results-missing (format nil "~{~a~^; ~}" missing)
+                                    :complete (and (eq last-kind :done) named (null missing) t)
                                     ;; when and as which session, to pair with the server's own timings
                                     :session (eval-call '#:session-id session)
                                     :started started :ended (eval-call '#:utc-time (get-universal-time))
