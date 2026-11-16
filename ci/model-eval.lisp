@@ -195,9 +195,18 @@ wrong, by name -- :no-model, :no-parts, :error, :broken, :failing,
       (list :sound nil :no-model t)
       (let* ((findings (progv (list (eval-lab '#:*completion-check?*)) (list t)
                          (ignore-errors (eval-call '#:completion-findings session))))
-             (parts (or (ignore-errors (length (the-object (eval-call '#:make-model session) leaves))) 0))
              (missing (and named (eval-results-missing session named)))
-             (no-parts (and (zerop parts) (not (getf findings :error)))))
+             ;; an empty MODEL is its own one leaf: it has no parts when it has
+             ;; no children and no size of its own (a MODEL that is itself a
+             ;; box, with no children, has parts)
+             (no-parts (and (not (getf findings :error))
+                            (ignore-errors
+                             (let* ((model (eval-call '#:make-model session))
+                                    (box (the-object model bounding-box)))
+                               (and (null (the-object model children))
+                                    (or (null box)
+                                        (every (lambda (low high) (< (abs (- high low)) 1e-9))
+                                               (first box) (second box)))))))))
         (list :sound (not (or (getf findings :error) (getf findings :broken) (getf findings :failing)
                               missing no-parts))
               :error (getf findings :error) :broken (getf findings :broken)
