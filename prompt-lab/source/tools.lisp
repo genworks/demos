@@ -228,7 +228,11 @@ version that fails to compile is kept too."
                 (or (ignore-errors (symbol-volume (uiop:read-file-string file :external-format :utf-8)
                                                   (session-package session)))
                     0))
-      (unless ok? (return-from load-model-file (meter-refusal reason))))
+      (unless ok?
+        ;; written and not compiled: the file is not what is loaded (the
+        ;; completion check reads this, model-load-failure)
+        (note-model-load! session "the compile was refused, so the file was not loaded")
+        (return-from load-model-file (meter-refusal reason))))
     (handler-case
         (with-time-limit (*load-seconds* "compile and load")
           (let ((fasl (handler-bind ((warning #'(lambda (w)
@@ -240,6 +244,8 @@ version that fails to compile is kept too."
             (unless fasl (error "The compiler produced no output file."))
             (let ((*package* (session-package session)))
               (load fasl))
+            ;; the file as it stands is what is loaded
+            (note-model-load! session nil)
             ;; MODEL, or for a session that builds a web app, APP (kinds.lisp)
             (let ((defined? (let ((symbol (built-symbol session)))
                               (and symbol (find-class symbol nil) t))))
@@ -248,6 +254,8 @@ version that fails to compile is kept too."
                       (not defined?)))))
       ;; a stack overflow too (see evaluate-expression)
       (serious-condition (condition)
+        ;; the file stays as written; the image keeps the last class that loaded
+        (note-model-load! session (condition-text condition))
         (values (list (text-result "Error compiling or loading the model file: ~a~@[~%Warnings first:~%~{- ~a~%~}~]~@[~%~a~]"
                                   condition (reverse warnings)
                                   ;; a house model loses count of its parentheses
@@ -375,41 +383,110 @@ as done (Ruling 144, 2026-11-16): MODEL builds, every part computes, and
 every computed slot of MODEL computes.  A reply that fails it is logged as
 not done, with what the check found.  Nil: the agent's word, as before.")
 
+;; THE FILE AND THE CLASS.  A model file that fails to compile or load stays
+;; on disk as written while the image keeps the last class that loaded, so a
+;; check of the class alone called a session done whose file -- what the
+;; visitor has, the archive keeps and a deployment compiles -- does not
+;; build.  load-model-file notes each outcome here, beside the session (no
+;; slot in the struct: sessions outlive a reload), and the check reads it.
+
+(defvar *model-load-failures* (make-hash-table :test #'equal)
+  "session package name -> why the model file as it now stands is not what
+is loaded: the text of its failed compile or load.")
+
+(defvar *model-load-lock* (bt:make-lock "prompt-lab model loads"))
+
+(defun note-model-load! (session failure)
+  "Keep whether SESSION's model file as last written is what is loaded:
+FAILURE is nil when it compiled and loaded, else why it did not."
+  (bt:with-lock-held (*model-load-lock*)
+    (if failure
+        (setf (gethash (session-package-name session) *model-load-failures*) failure)
+        (remhash (session-package-name session) *model-load-failures*))))
+
+(defun model-load-failure (session)
+  "Why SESSION's model file as it now stands is not what is loaded, or nil."
+  (bt:with-lock-held (*model-load-lock*)
+    (values (gethash (session-package-name session) *model-load-failures*))))
+
+(defun geometric? (object)
+  "Whether OBJECT has geometry to judge: a child whose type has no
+base-object in it (a holder of numbers) has no bounding box and is no
+'part whose geometry does not compute'."
+  (typep object 'base-object))
+
+(defun empty-model? (model leaves slots)
+  "Whether MODEL builds nothing yet: no child, no computed slot of its own
+and no size -- the skeleton a structure-only session starts from, or a
+define-object left bare.  LEAVES and SLOTS are MODEL's, already asked."
+  (and (null slots)
+       (null (rest leaves))
+       (or (null leaves) (eq (first leaves) model))
+       (let ((box (leaf-box model)))
+         (or (null box)
+             (every #'(lambda (low high) (< (abs (- high low)) 1e-9)) (first box) (second box))))))
+
 (defun completion-findings (session)
   "What the completion check (*completion-check?*) finds, by name: a plist
-(:broken PART-NAMES :failing SLOT-NAMES :error TEXT), or nil when there is
-nothing to judge -- no MODEL defined, or an app or project session.
-Everything empty means complete."
+(:broken PART-NAMES :failing SLOT-NAMES :error TEXT :empty BOOLEAN
+:unjudged TEXT), or nil when there is nothing to judge -- no MODEL
+defined, or an app or project session.  Everything empty means complete.
+:error also when the model FILE as it now stands failed to compile or load
+(model-load-failure): the class in the image is then an older version, and
+judging it would call a file done that does not build.  :empty for a MODEL
+with nothing in it.  :unjudged when the check itself ran out of time: that
+says nothing of the model either way."
   (when (and *completion-check?*
              (eq (session-kind session) :model)
              (model-defined? session))
-    (handler-case
-        (with-time-limit (*eval-seconds* "completion check")
-          (let ((model (make-model session)))
-            (list :broken (loop for leaf in (the-object model leaves)
-                                unless (leaf-box leaf) collect (leaf-name leaf))
-                  :failing (loop for key in (ignore-errors
-                                             (the-object model (message-list :category :computed-slots
-                                                                             :message-type :local)))
-                                 unless (ignore-errors (the-object model (evaluate key)) t)
-                                   collect (string-downcase (symbol-name key))))))
-      (serious-condition (condition)
-        (list :error (condition-text condition))))))
+    (let ((stale (model-load-failure session)))
+      (if stale
+          (list :error (format nil "the model file as it now stands did not compile or load, so what is loaded is an older version (~a)"
+                               (subseq stale 0 (min 300 (length stale)))))
+          (handler-case
+              (with-deadline (*eval-seconds*)
+                (let* ((model (make-model session))
+                       (leaves (the-object model leaves))
+                       (slots (ignore-errors
+                               (the-object model (message-list :category :computed-slots
+                                                               :message-type :local)))))
+                  (list :broken (loop for leaf in leaves
+                                      unless (or (not (geometric? leaf)) (leaf-box leaf))
+                                        collect (leaf-name leaf))
+                        :failing (loop for key in slots
+                                       unless (ignore-errors (the-object model (evaluate key)) t)
+                                         collect (string-downcase (symbol-name key)))
+                        :empty (empty-model? model leaves slots))))
+            ;; the check's own limit, not the model's fault: a sound model
+            ;; with one slow slot was reported as one that does not build
+            (bt2:timeout ()
+              (list :unjudged (format nil "the completion check took longer than ~a seconds and was stopped"
+                                      *eval-seconds*)))
+            (serious-condition (condition)
+              (list :error (condition-text condition))))))))
 
 (defun completion-problems (session)
   "What keeps SESSION's model from being done, as short texts; nil when it
-is complete by the check (*completion-check?*): MODEL builds, every part
-computes, every computed slot of MODEL computes.  Nil too when nothing was
-built -- no MODEL defined -- or the session builds an app or a project, which
-this check does not judge.  It cannot read which results a request names:
-it checks that the results MODEL declares compute."
+is complete by the check (*completion-check?*): the model file as it stands
+is what is loaded, MODEL builds and is not empty, every part computes, every
+computed slot of MODEL computes.  Nil too when nothing was built -- no MODEL
+defined -- or the session builds an app or a project, which this check does
+not judge; and nil, with a note in the session's log, when the check ran out
+of time and judged nothing (the agent's word then stands).  It cannot read
+which results a request names: it checks that the results MODEL declares
+compute."
   (let ((findings (completion-findings session)))
+    (when (getf findings :unjudged)
+      (log-event session :note "The lab's check of the model judged nothing: ~a.  The reply stands as the agent's word."
+                 (getf findings :unjudged)))
     (flet ((some-of (names)
              (format nil "~{~a~^, ~}~@[ and ~d more~]"
                      (subseq names 0 (min 8 (length names)))
                      (when (> (length names) 8) (- (length names) 8)))))
       (append (when (getf findings :error)
                 (list (format nil "MODEL does not build: ~a" (getf findings :error))))
+              (when (getf findings :empty)
+                (list "MODEL is empty: nothing has been built yet"))
               (when (getf findings :broken)
                 (list (format nil "parts whose geometry does not compute: ~a" (some-of (getf findings :broken)))))
               (when (getf findings :failing)
@@ -1421,7 +1498,11 @@ that has one."
 
 (defun look-at-model (session)
   "Render SESSION's model and have *house-viewer-model* describe the
-drawing against the request; answer its words."
+drawing against the request; answer its words.  The call is the session's:
+it names the session's wallet as the builder's calls do, its tokens join
+the session's usage and what the gate says of money is kept (it was outside
+all three: a hosted viewer's tokens read as nothing, and its calls fell to
+whoever pays for a session with no wallet)."
   (multiple-value-bind (blocks error?) (render session :layout "isometric-plus-ortho")
     (if error?
         (values blocks t)
@@ -1431,13 +1512,20 @@ drawing against the request; answer its words."
                                                        "content" (list (->json (first blocks))
                                                                        (h "type" "text"
                                                                           "text" (format nil *look-question* (latest-request session))))))))))
-              (multiple-value-bind (status text)
+              (multiple-value-bind (status text headers)
                   ;; read at run time: *messages-url* is agent.lisp's, which loads after this file
                   (post-json (symbol-value '*messages-url*) body
-                             :headers (list (cons "anthropic-version" "2023-06-01")
-                                            (cons *session-header* (session-id session)))
+                             :headers (append (list (cons "anthropic-version" "2023-06-01")
+                                                    (cons *session-header* (session-id session)))
+                                              (when (session-wallet session)
+                                                (list (cons *wallet-header* (session-wallet session)))))
                              :seconds 180)
                 (let ((json (ignore-errors (yason:parse text))))
+                  ;; the session's accounts, as for a builder's call (agent.lisp)
+                  (note-gate-answer session headers)
+                  (when (hash-table-p json)
+                    (let ((usage (gethash "usage" json)))
+                      (when (hash-table-p usage) (add-usage session usage))))
                   (if (and (eql status 200) (hash-table-p json))
                       (values (list (text-result "What a viewer sees in a drawing of your model:~%~{~a~}"
                                                  (loop for block in (coerce (gethash "content" json) 'list)

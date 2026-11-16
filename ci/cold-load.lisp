@@ -1070,6 +1070,185 @@ loaded) its page too."
                            (pl :funnel-count! "builds-done" -1)
                            (ignore-errors (pl :delete-session s))
                            (pl :funnel-count! "sessions" -1)))))))
+          ;; THE LAB'S LEFTOVERS (Ruling 188), each a case that went wrong before:
+          ;; a session that did nothing is not done; the check judges the FILE,
+          ;; not an older class still loaded; a child with no geometry is no
+          ;; broken part; a check that runs out of time judges nothing; a house
+          ;; model is one the gate's menu marks, whatever its id; the thinking
+          ;; budget is sent only when it is a sane one; the last round says it
+          ;; is the last, so the reply after it is words; a reply cut on the
+          ;; way still counts its tokens; the viewer's call is the session's
+          (smoke "prompt-lab leftovers: an empty model, a stale class, the house menu, the budget, the last round, cut calls"
+                 (lambda ()
+                   (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
+                     (let* ((sse (lab '#:post-sse))
+                            (saved (fdefinition sse))
+                            (post (lab '#:post-json))
+                            (saved-post (fdefinition post))
+                            (script nil)
+                            (failed nil)
+                            (menu (find-symbol (string '#:*house-menu*) :prompt-lab))
+                            (s (pl :open-session! "10.9.8.7" nil))
+                            (plate "(define-object model (base-object)
+  :computed-slots ((ratio (/ 1 2)))
+  :objects ((plate :type 'box :width 100 :length 50 :height 10)))"))
+                       (flet ((last-kind () (second (car (last (pl :session-log s)))))
+                              (last-text () (third (car (last (pl :session-log s)))))
+                              (usage (key) (or (getf (pl :session-usage s) key) 0))
+                              ;; each case on its own: one that fails does not hide the rest
+                              (part (label thunk)
+                                (handler-case (funcall thunk)
+                                  (error (condition) (push (format nil "~a: ~a" label condition) failed))))
+                              (words (on-event text)
+                                (funcall on-event "content_block_start" "{\"index\": 0, \"content_block\": {\"type\": \"text\", \"text\": \"\"}}")
+                                (funcall on-event "content_block_delta"
+                                         (format nil "{\"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"~a\"}}" text))
+                                (funcall on-event "content_block_stop" "{\"index\": 0}")))
+                         (unwind-protect
+                              (progv (cons (lab '#:*stream-replies?*) (and menu (list menu)))
+                                  ;; the gate's menu as last read: one house model, under an id of its own
+                                  (list t (cons (get-universal-time) (list "gate-house-9")))
+                                (setf (fdefinition sse)
+                                      (lambda (url body &key headers seconds on-event)
+                                        (declare (ignore url headers seconds))
+                                        (flet ((event (name json) (funcall on-event name json)))
+                                          (event "message_start" "{\"message\": {\"role\": \"assistant\", \"content\": [], \"usage\": {\"input_tokens\": 1000}}}")
+                                          (ecase script
+                                            (:words
+                                             (words on-event "All done.")
+                                             (event "message_delta" "{\"delta\": {\"stop_reason\": \"end_turn\"}, \"usage\": {\"output_tokens\": 3}}"))
+                                            ;; tools for ever, until told the round was the last
+                                            (:tools
+                                             (cond ((search "LAST ROUND" body)
+                                                    (words on-event "Closing words.")
+                                                    (event "message_delta" "{\"delta\": {\"stop_reason\": \"end_turn\"}, \"usage\": {\"output_tokens\": 3}}"))
+                                                   (t
+                                                    (event "content_block_start" "{\"index\": 0, \"content_block\": {\"type\": \"tool_use\", \"id\": \"t1\", \"name\": \"read_model\", \"input\": {}}}")
+                                                    (event "content_block_stop" "{\"index\": 0}")
+                                                    (event "message_delta" "{\"delta\": {\"stop_reason\": \"tool_use\"}, \"usage\": {\"output_tokens\": 3}}"))))
+                                            ;; 300 characters of reply, then the stream ends with no stop
+                                            (:cut (words on-event (make-string 300 :initial-element #\x)))
+                                            ;; the same, and the call never comes back
+                                            (:lost (words on-event (make-string 300 :initial-element #\x))
+                                             (error "The call did not answer."))))
+                                        (values 200 nil nil)))
+                                ;; a house model by the gate's word alone
+                                (part "the gate's house models" (lambda ()
+                                (pl :set-session-model! s "gate-house-9")
+                                (unless (pl :house-model? s)
+                                  (error "a model the gate's menu marks as the house's is not treated as one"))
+                                (pl :set-session-model! s "some-other-model")
+                                (when (pl :house-model? s) (error "a model no list and no menu names is treated as a house model"))))
+                                (pl :set-session-model! s "house-1")
+                                (part "the thinking budget" (lambda ()
+                                ;; the thinking budget: none for 0, a negative number or
+                                ;; a fraction; held under the reply's own limit
+                                (dolist (bad (list 0 -5 0.5))
+                                  (progv (list (lab '#:*house-thinking-budget*)) (list bad)
+                                    (when (search "budget_tokens" (pl :request-body s))
+                                      (error "a thinking budget of ~a was sent" bad))))
+                                (progv (list (lab '#:*house-thinking-budget*)) (list 999999)
+                                  (let ((most (- (symbol-value (lab '#:*max-tokens*)) (symbol-value (lab '#:*house-reply-room*)))))
+                                    (unless (search (format nil "\"budget_tokens\":~d" most) (pl :request-body s))
+                                      (error "a thinking budget over the reply's limit was not held under it"))))))
+                                (part "a session that built nothing" (lambda ()
+                                ;; a structure-only session that does nothing: MODEL is the
+                                ;; empty skeleton, and a reply of words alone is not done
+                                (progv (list (lab '#:*house-structure?*)) (list :only)
+                                  (setq script :words)
+                                  (pl :run-prompt s "a plate")
+                                  (unless (and (eq (last-kind) :stopped) (search "empty" (last-text)))
+                                    (error "a session that built nothing was logged ~s: ~a" (last-kind) (last-text))))))
+                                (pl :set-session-model! s nil)
+                                (part "the file and the class" (lambda ()
+                                ;; the file and the class: a good version, then one that
+                                ;; does not compile -- the old class stays loaded, and the
+                                ;; check must not call the session complete
+                                (pl :write-model s plate)
+                                (when (pl :completion-problems s) (error "a sound model has problems: ~a" (pl :completion-problems s)))
+                                (pl :write-model s "(define-object model (base-object)
+  :computed-slots ((ratio (no-such-package-zz:f 1))))")
+                                (unless (search "did not compile or load" (format nil "~{~a~}" (pl :completion-problems s)))
+                                  (error "a model file that does not compile was judged by the class still loaded"))
+                                (pl :write-model s plate)
+                                (when (pl :completion-problems s) (error "mended, the file is still called stale"))))
+                                (part "a child with no geometry" (lambda ()
+                                ;; a child with no geometry is not a broken part
+                                (pl :write-model s "(define-object numbers () :computed-slots ((n 1)))
+(define-object model (base-object)
+  :objects ((figures :type 'numbers)
+            (plate :type 'box :width 100 :length 50 :height 10)))")
+                                (when (pl :completion-problems s)
+                                  (error "a child with no geometry was called a broken part: ~a" (pl :completion-problems s)))))
+                                (part "a check out of time" (lambda ()
+                                ;; a check that runs out of time judges nothing
+                                (pl :write-model s "(define-object model (base-object)
+  :computed-slots ((slow (progn (sleep 3) 1)))
+  :objects ((plate :type 'box :width 100 :length 50 :height 10)))")
+                                (progv (list (lab '#:*eval-seconds*)) (list 1)
+                                  (unless (getf (pl :completion-findings s) :unjudged)
+                                    (error "a check that ran out of time did not say so: ~s" (pl :completion-findings s)))
+                                  (when (pl :completion-problems s)
+                                    (error "a check that ran out of time was read as a model that does not build")))))
+                                (part "the last round" (lambda ()
+                                ;; the last round allowed says it is the last, and the
+                                ;; reply after it is words, not a call thrown away
+                                (pl :write-model s plate)
+                                (progv (list (lab '#:*max-rounds*)) (list 2)
+                                  (setq script :tools)
+                                  (pl :run-prompt s "look twice")
+                                  (unless (and (eq (last-kind) :done) (search "Closing words" (last-text)))
+                                    (error "the round cap still ends on a reply thrown away: ~s ~a" (last-kind) (last-text))))))
+                                (part "cut calls" (lambda ()
+                                ;; a reply cut on the way counts what the stream reported
+                                ;; and an estimate of what arrived
+                                (let ((input (usage :input)) (output (usage :output)))
+                                  (setq script :cut)
+                                  (pl :run-prompt s "cut")
+                                  (unless (and (eq (last-kind) :stopped) (= (- (usage :input) input) 1000)
+                                               (= (- (usage :output) output) 100))
+                                    (error "a cut reply added ~a input and ~a output tokens"
+                                           (- (usage :input) input) (- (usage :output) output)))
+                                  (setq script :lost)
+                                  (pl :run-prompt s "lost")
+                                  (unless (and (eq (last-kind) :stopped) (= (- (usage :input) input) 2000))
+                                    (error "a call that never came back added no usage")))))
+                                (part "the viewer's call" (lambda ()
+                                ;; the viewer's call names the session's wallet and its
+                                ;; tokens join the session's.  The drawing is stood in
+                                ;; for, so the case runs where the image has no renderer.
+                                (let* ((render (lab '#:render))
+                                       (saved-render (fdefinition render))
+                                       (sent nil) (input (usage :input)))
+                                  (unwind-protect
+                                       (progn
+                                         (setf (fdefinition render)
+                                               (lambda (session &key layout)
+                                                 (declare (ignore session layout))
+                                                 (values (list (pl :text-result "a drawing")) nil))
+                                               (fdefinition post)
+                                               (lambda (url body &key headers seconds)
+                                                 (declare (ignore url body seconds))
+                                                 (setq sent headers)
+                                                 (values 200 "{\"content\": [{\"type\": \"text\", \"text\": \"A plate.\"}], \"usage\": {\"input_tokens\": 700, \"output_tokens\": 40}}" nil)))
+                                         (eval `(setf (,(lab '#:session-wallet) ,s) "0123456789abcdef01234567"))
+                                         (progv (list (lab '#:*house-viewer-model*)) (list "viewer-1")
+                                           (pl :look-at-model s)))
+                                    (setf (fdefinition render) saved-render))
+                                  (unless (equal (cdr (assoc (symbol-value (lab '#:*wallet-header*)) sent :test #'equal))
+                                                 "0123456789abcdef01234567")
+                                    (error "the viewer's call did not name the session's wallet"))
+                                  (unless (= (- (usage :input) input) 700)
+                                    (error "the viewer's tokens did not join the session's usage")))))
+                                (when failed (error "~{~a~^ | ~}" (reverse failed)))
+                                t)
+                           (setf (fdefinition sse) saved
+                                 (fdefinition post) saved-post)
+                           (pl :funnel-count! "prompts" -4)
+                           (pl :funnel-count! "builds-stopped" -3)
+                           (pl :funnel-count! "builds-done" -1)
+                           (ignore-errors (pl :delete-session s))
+                           (pl :funnel-count! "sessions" -1)))))))
           ;; AUTOMATIC STAGING (Ruling 153): a long request, *auto-stage* on, goes
           ;; as four stages in one session; only the last is judged complete
           (smoke "prompt-lab automatic staging: a long request in four stages, the check on the last"

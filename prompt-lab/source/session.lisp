@@ -359,6 +359,7 @@ there until its author decides or its time runs out (closed.lisp)."
     (remhash (session-id session) *session-locks*))
   (forget-session-kind! session)
   (forget-session-model! session)
+  (note-model-load! session nil)
   (set-own-agent! session nil)
   (let ((package (find-package (session-package-name session))))
     (when package (delete-package package)))

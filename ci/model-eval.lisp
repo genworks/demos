@@ -208,9 +208,40 @@ wrong, by name -- :no-model, :no-parts, :error, :broken, :failing,
                                         (every (lambda (low high) (< (abs (- high low)) 1e-9))
                                                (first box) (second box)))))))))
         (list :sound (not (or (getf findings :error) (getf findings :broken) (getf findings :failing)
-                              missing no-parts))
+                              (getf findings :unjudged) missing no-parts))
               :error (getf findings :error) :broken (getf findings :broken)
-              :failing (getf findings :failing) :missing missing :no-parts no-parts))))
+              :failing (getf findings :failing) :missing missing :no-parts no-parts
+              ;; the check ran out of time: not known to be sound, and nothing
+              ;; found wrong either
+              :unjudged (getf findings :unjudged)))))
+
+(defun eval-built? (session)
+  "True when SESSION has built something: MODEL is defined and is not the
+empty skeleton a structure-only session starts from (the lab's own test,
+completion-findings' :empty, asked whatever *completion-check?* says).  A
+session that did nothing used to count as built in such arms, so the
+figure was 100 whatever happened."
+  (and (ignore-errors (eval-call '#:model-defined? session))
+       (not (getf (progv (list (eval-lab '#:*completion-check?*)) (list t)
+                    (ignore-errors (eval-call '#:completion-findings session)))
+                  :empty))
+       t))
+
+(defun eval-verdict-pass? (answer)
+  "Whether a reviewer's ANSWER says PASS: the word PASS, upper case, first
+on its first line once markup and a 'Verdict:' label are set aside, and
+not the start of a longer word.  A bare prefix test read **PASS** and
+'Verdict: PASS' as corrections, and PASSABLE as a pass."
+  (let* ((line (string-trim '(#\Space #\Tab #\Return)
+                            (let ((text (string-left-trim '(#\Space #\Tab #\Newline #\Return) (or answer ""))))
+                              (subseq text 0 (or (position #\Newline text) (length text))))))
+         (line (string-left-trim "*_#>`\"' " line))
+         (line (if (and (>= (length line) 8) (string-equal "verdict:" line :end2 8))
+                   (string-left-trim "*_`\"' " (subseq line 8))
+                   line)))
+    (and (>= (length line) 4)
+         (string= "PASS" line :end2 4)
+         (or (= (length line) 4) (not (alphanumericp (char line 4)))))))
 
 (defun eval-state-text (state)
   "STATE (eval-model-state) in a few words, for the run's record."
@@ -225,7 +256,8 @@ wrong, by name -- :no-model, :no-parts, :error, :broken, :failing,
                                  (and (getf state :failing)
                                       (format nil "~d slot~:p failing" (length (getf state :failing))))
                                  (and (getf state :missing)
-                                      (format nil "~d named result~:p missing" (length (getf state :missing))))))))))
+                                      (format nil "~d named result~:p missing" (length (getf state :missing))))
+                                 (and (getf state :unjudged) "check timed out")))))))
 
 (defun eval-complete? (session named)
   "True when SESSION's model is sound (eval-model-state): judged by the
@@ -266,7 +298,9 @@ telling it to carry on had it edit sound models into broken ones."
            (when absent
              (push (format nil "these results are missing -- add each as a computed slot of MODEL with its unit: ~{~a~^, ~}" absent)
                    parts))))
-       (format nil "Not done yet: ~{~a~^; ~}.  Fix those and reply." (nreverse parts))))))
+       ;; nothing found wrong -- the check only ran out of time: no line to send
+       (and parts
+            (format nil "Not done yet: ~{~a~^; ~}.  Fix those and reply." (nreverse parts)))))))
 
 (defun eval-run (sample model &key budget-cents out (net 250) (followups 0) followup-rounds)
   "Replay SAMPLE's prompts on MODEL, one fresh session each, until the cost
@@ -297,8 +331,16 @@ from the build's."
                      (staging (find-symbol (symbol-name '#:*auto-stage*) :prompt-lab)))
                  (push (eval-model-state session named) states)
                  (loop repeat followups
+                       for line = (eval-followup-text (first states))
                        until (getf (first states) :sound)
-                       do (let ((line (eval-followup-text (first states))))
+                       ;; nothing to ask (the check only timed out)
+                       while line
+                       ;; the ceiling holds between follow-ups too, not only
+                       ;; between prompts: this session's cost so far counts
+                       until (and budget-cents
+                                  (>= (+ spent (eval-cents model (eval-call '#:session-usage session)))
+                                      budget-cents))
+                       do (progn
                             ;; a follow-up is one prompt: never staged, whatever its length
                             ;; FOLLOWUP-ROUNDS: a follow-up's own round cap, where the
                             ;; build was given a larger one (an equal-budget arm)
@@ -335,7 +377,7 @@ from the build's."
                                     :session (eval-call '#:session-id session)
                                     :started started :ended (eval-call '#:utc-time (get-universal-time))
                                     :finished (eq last-kind :done)
-                                    :built (and (ignore-errors (eval-call '#:model-defined? session)) t)
+                                    :built (eval-built? session)
                                     :seconds (float (/ (- (get-internal-real-time) start) internal-time-units-per-second) 1.0)
                                     ;; TOOL CALLS, not rounds: parallel calls in one
                                     ;; round count each (the name is kept for old files)
@@ -490,7 +532,7 @@ house model and STRONG planning or reviewing.  Results as eval-run's, with
                    (setq strong-usage (loop for (key value) on usage by #'cddr
                                             append (list key (+ value (or (getf strong-usage key) 0)))))
                    text))
-               (built? () (and (ignore-errors (eval-call '#:model-defined? session)) t)))
+               (built? () (eval-built? session)))
           (unwind-protect
                (let ((start (get-internal-real-time))
                      (started (eval-call '#:utc-time (get-universal-time)))
@@ -514,7 +556,7 @@ house model and STRONG planning or reviewing.  Results as eval-run's, with
                                                                                                        prompt (eval-call '#:model-body session) (eval-check-text session)))
                                                                               (eval-render-block session)))
                                                             2000 (format nil "review-~a-~d" id reviews))))
-                                           (if (eql 0 (search "PASS" (string-left-trim '(#\Space #\Newline) answer)))
+                                           (if (eval-verdict-pass? answer)
                                                (progn (setq verdict :pass) nil)
                                                (format nil "A reviewer looked at your model and the render.  Make these corrections, then check_model:~%~a" answer))))))
                                (if correction

@@ -220,9 +220,38 @@ minutes, which 300 seconds cut off with nothing to show.  The gate's
                    :defaults here))
   "Pathname. The house models' primer.")
 
+(defparameter *house-menu-seconds* 300
+  "Integer. How long the gate's word on which models are house models is
+kept before the menu is read again (gate-house-models).")
+
+(defvar *house-menu* nil
+  "Nil, or (universal-time . ids): when the gate's menu was last read for
+its house models, and the ids it marked.")
+
+(defun gate-house-models ()
+  "The ids the gate's menu marks as house models, read at most every
+*house-menu-seconds*; a read that gets no menu (no gate, no switch, the
+gate not answering) keeps the last answer.  So a house model the gate
+offers under an id *house-models* does not list is still treated as one:
+the longer call limit, the thinking budget, the primer and the tools."
+  (let ((now (get-universal-time)))
+    (when (or (null *house-menu*) (>= (- now (car *house-menu*)) *house-menu-seconds*))
+      ;; stamped before the gate is asked: one caller waits on a slow gate, not each
+      (setf *house-menu* (cons now (cdr *house-menu*)))
+      (let ((menu (gate-menu)))
+        (when menu
+          (setf *house-menu* (cons now (loop for entry in menu
+                                             when (getf entry :house) collect (getf entry :id)))))))
+    (cdr *house-menu*)))
+
 (defun house-model? (&optional session)
-  "Whether SESSION builds with a house model."
-  (and session (member (session-model session) *house-models* :test #'equal) t))
+  "Whether SESSION builds with a house model: one *house-models* lists, or
+one the gate's menu marks as the house's (gate-house-models)."
+  (and session
+       (let ((model (session-model session)))
+         (or (member model *house-models* :test #'equal)
+             (member model (gate-house-models) :test #'equal)))
+       t))
 
 (defparameter *house-max-rounds* 12
   "Integer. Tool rounds allowed a house model for one prompt.  Its rounds
@@ -403,19 +432,37 @@ many tokens a reply, as thinking.budget_tokens.  The house server ignores
 output_config.effort (25 probes of the house server, 2026-11-15: the same spread of
 thinking at low, medium and none, a third of replies running to the cap)
 but honors the budget.  4096 by Ruling 143 (2026-11-16), after four staged
-arms: no reply lost to the length limit and about a third less energy, the
-same share of prompts finished, some depth lost on the hardest geometry.
-Nil: no budget.")
+arms: runaway thinking ended and about a third less energy, the same share
+of prompts finished, some depth lost on the hardest geometry.  A reply can
+still reach the length limit on its text or a tool call (two did in the
+next trial).  Nil: no budget; so is 0, a negative number or anything that is
+not a whole number (house-thinking-budget).")
+
+(defparameter *house-reply-room* 2048
+  "Integer. Tokens of a reply a thinking budget may not take: the budget
+sent is held this far under the request's max_tokens.")
+
+(defun house-thinking-budget (&optional (max-tokens *max-tokens*))
+  "The thinking budget a house request carries, or nil for none:
+*house-thinking-budget* when it is a whole number above 0, held under
+MAX-TOKENS less *house-reply-room* so a reply has room after its thinking.
+It used to go out as set: 0 or a negative number was sent as a budget, and
+one at or above max_tokens left no reply."
+  (let ((budget *house-thinking-budget*))
+    (when (and (integerp budget) (plusp budget))
+      (let ((most (- max-tokens *house-reply-room*)))
+        (and (plusp most) (min budget most))))))
 
 (defun request-body (session &key stream?)
-  (let ((tools (->json (tool-definitions session))))
+  (let ((tools (->json (tool-definitions session)))
+        (budget (and (house-model? session) (house-thinking-budget))))
     (encode
      (apply #'h
       (append
        (when stream? (list "stream" t))
-       ;; a house model's thinking, capped (*house-thinking-budget*)
-       (when (and *house-thinking-budget* (house-model? session))
-         (list "thinking" (h "type" "enabled" "budget_tokens" *house-thinking-budget*)))
+       ;; a house model's thinking, capped (house-thinking-budget)
+       (when budget
+         (list "thinking" (h "type" "enabled" "budget_tokens" budget)))
        (list
         ;; the visitor's pick from the gate's menu, else *model*
         "model" (session-model session)
@@ -620,6 +667,12 @@ answer, and a large read-sequence would wait to fill its buffer.)"
     (error (condition)
       (error "The call to ~a failed: ~a" (or (url-host url) url) (condition-text condition)))))
 
+(defparameter *cut-reply-characters-per-token* 3
+  "Integer. Characters of streamed text, thinking and tool arguments counted
+as one output token for a reply cut before it completed (stream-messages-api):
+the figure the gate books a cut stream at, so the lab's count and the gate's
+agree.")
+
 (defparameter *unparsed-arguments-key* "lab_unparsed_arguments"
   "String.  The key a streamed tool call's input carries, holding the end of
 its arguments, when they did not parse as JSON; the loop answers such a call
@@ -635,8 +688,25 @@ no stream (a refusal), its parsed body and status."
         (texts (make-hash-table))
         (json-parts (make-hash-table))
         (gate nil)
-        (failure nil))
-    (flet ((on-event (name data)
+        (failure nil)
+        ;; characters of text, thinking and tool arguments as they arrive, and
+        ;; whether the call came back at all: for a reply cut on the way
+        (characters 0)
+        (returned? nil))
+    (flet ((count-cut! ()
+             ;; a reply that never completed -- cut by a timeout or a dropped
+             ;; stream -- still used tokens: what the stream reported (its
+             ;; input, at the start) and its output estimated from what
+             ;; arrived, as the gate books a cut stream.  It used to add
+             ;; nothing, so a run with cut calls read low.
+             (when message
+               (let ((usage (alexandria:copy-hash-table
+                             (or (gethash "usage" message) (make-hash-table :test #'equal)))))
+                 (setf (gethash "output_tokens" usage)
+                       (max (or (gethash "output_tokens" usage) 0)
+                            (ceiling characters *cut-reply-characters-per-token*)))
+                 (add-usage session usage)))))
+     (flet ((on-event (name data)
              (let ((json (ignore-errors (yason:parse data))))
                (when (hash-table-p json)
                  (let ((index (gethash "index" json)))
@@ -654,6 +724,10 @@ no stream (a refusal), its parsed body and status."
                             (delta (gethash "delta" json)))
                         (when (and block (hash-table-p delta))
                           (let ((kind (gethash "type" delta)))
+                            ;; what has arrived so far, for a reply cut on the way
+                            (dolist (key '("text" "thinking" "partial_json"))
+                              (let ((piece (gethash key delta)))
+                                (when (stringp piece) (incf characters (length piece)))))
                             (cond ((equal kind "text_delta")
                                    (let ((buffer (gethash index texts)))
                                      (when buffer
@@ -704,7 +778,12 @@ no stream (a refusal), its parsed body and status."
                      ((equal name "cyclops_gate")
                       (setq gate (alexandria:hash-table-alist json)))))))))
       (multiple-value-bind (status text response-headers)
-          (post-sse *messages-url* body :headers headers :seconds (call-seconds session) :on-event #'on-event)
+          (unwind-protect
+               (multiple-value-prog1
+                   (post-sse *messages-url* body :headers headers :seconds (call-seconds session) :on-event #'on-event)
+                 (setq returned? t))
+            ;; the call never came back: its time limit, or the connection lost
+            (unless returned? (count-cut!)))
         (cond
           (text
            (values (handler-case (yason:parse text)
@@ -719,13 +798,14 @@ no stream (a refusal), its parsed body and status."
           ;; stop reason is not one to act on
           ((null (gethash "stop_reason" message))
            (session-text-changed! session nil)
+           (count-cut!)
            (error "The model's reply was cut off before it was complete; nothing was built. Send the prompt again."))
           (t
            (setf (gethash "content" message)
                  (loop for i from 0 below (hash-table-count blocks)
                        for block = (gethash i blocks)
                        when block collect block))
-           (values message status gate)))))))
+           (values message status gate))))))))
 
 (defun streaming-refused? (response status)
   "True for a gate's refusal of a streamed call."
@@ -897,6 +977,13 @@ session builds from this prompt on (kinds.lisp)."
   "What the log says when a prompt ends at its round cap (a format control
 taking the cap).  run-prompt's stages go on after it.")
 
+(defparameter *last-round-notice*
+  "LAST ROUND: that was round ~d, the last round of tools for this request.  No more tools will be run for it.  Reply now in words: what is built, and what is not yet."
+  "What the results of the last tool round a prompt is allowed carry (~d the
+cap).  The cap is found out only when a reply asks for tools past it, so
+every capped prompt used to pay for one more reply that was thrown away;
+told, the model can spend that reply on its closing words.")
+
 (defparameter *length-limit-stop* "The reply hit its length limit."
   "What the log says when a reply is cut at max_tokens.  run-prompt's stages
 go on after it.")
@@ -1010,6 +1097,14 @@ for a caller with more to send (run-prompt's stages)."
                                                       "tool_use_id" (gethash "id" block)
                                                       "content" (->json blocks)
                                                       "is_error" (if error? t 'yason:false)))))))
+                         ;; the last round the cap allows: say so with its results,
+                         ;; so the reply that follows is words and not one more
+                         ;; tool call to be made and thrown away (*last-round-notice*)
+                         (when (and results (>= round (max-rounds session)))
+                           (let ((last (car (last results))))
+                             (setf (gethash "content" last)
+                                   (append (coerce (gethash "content" last) 'list)
+                                           (list (->json (text-result *last-round-notice* (max-rounds session))))))))
                          (setf (session-messages session)
                                (append (session-messages session)
                                        (list (h "role" "user" "content" results))))))
