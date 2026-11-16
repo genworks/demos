@@ -447,17 +447,38 @@ window.plToast=function(text,kind){if(!text)return;var t=document.getElementById
 // from its data-doc or its title (the sluice's controls carry titles)
 document.addEventListener('mouseover',function(e){var d=document.getElementById('pl-doc');if(!d||!e.target.closest)return;
  var el=e.target.closest('[data-doc],[title]');d.textContent=el?(el.getAttribute('data-doc')||el.getAttribute('title')||''):''});
-// an upload: the chosen file read here and sent, base64, through the
-// sheet's upload action; what the lab answers comes as a notice or an error
-window.plUpload=function(el,owner,wallet,token){var f=el.files&&el.files[0],n=document.getElementById('pl-upload-note'),r=document.getElementById('pl-rights');
- if(n&&!n.hint)n.hint=n.textContent;
- function say(t){if(n)n.textContent=t||n.hint||''}
+// uploads.  The bytes never ride the sheet's own actions (a page action
+// has a small body limit): the files are read and HELD here, the sheet's
+// upload or adopt action opens the session and has the human check passed
+// once, and then tells this page (plSendFiles) to hand what it holds to
+// the lab's upload door, one request a file
+var held=[],heldRights=false;
+function uploadNote(){var n=document.getElementById('pl-upload-note');if(n&&!n.hint)n.hint=n.textContent;
+ return function(t){if(n)n.textContent=t||n.hint||''}}
+// called by the sheet: with a door, the held files go to it; with none
+// (the action refused, and has said why) they are let go
+window.plSendFiles=function(door,id,key){var say=uploadNote(),files=held,rights=heldRights,kept=[],bad=[];held=[];
+ if(!door||!files.length){say('');return}
+ function done(){say('');
+  var k=kept.length?kept.join(', ')+(kept.length>1?' are uploaded; they go':' is uploaded; it goes')+' to the agent with your next prompt.':'';
+  if(bad.length)plToast((k?k+'  ':'')+bad.join('  '),'error');else plToast(k,'note')}
+ function send(i){if(i>=files.length)return done();var f=files[i];
+  say('Uploading '+f.name+(files.length>1?' ('+(i+1)+' of '+files.length+')':'')+'...');
+  fetch(door,{method:'POST',headers:{'Content-Type':'application/json','X-Prompt-Lab-Owner':key||''},body:JSON.stringify({session:id,name:f.name,data:f.data,rights:rights})})
+   .then(function(x){return x.json().then(function(j){return j||{}},function(){return {}}).then(function(j){
+     if(x.ok)kept.push(j.name||f.name);else bad.push(j.error||(x.status===413?f.name+' is too large for this lab.':f.name+' did not go through ('+x.status+').'))})},
+    function(e){bad.push(f.name+' did not go through: '+(e.message||e))})
+   .then(function(){send(i+1)})}
+ send(0)};
+// an upload: the chosen file read here and held, then the sheet asked
+window.plUpload=function(el,owner,wallet,token){var f=el.files&&el.files[0],r=document.getElementById('pl-rights'),say=uploadNote();
  if(!f)return;
  if(r&&r.offsetParent!==null&&!r.checked){say('Tick the box first: the file will be shared with this session.');el.value='';return}
- say('Uploading '+f.name+'...');var fr=new FileReader();
- fr.onload=function(){var s=String(fr.result),d=s.slice(s.indexOf(',')+1);
-  plAction('upload',{name:f.name,data:d,rights:!!(r&&r.checked),owner:owner||'',wallet:wallet||'',turnstile:token||'',closedPick:!!(document.getElementById('pl-closed')||{}).checked})
-   .then(function(x){say(x.ok?'':'The upload did not go through ('+x.status+').');el.value=''},function(e){say('The upload did not go through: '+e);el.value=''})};
+ say('Reading '+f.name+'...');var fr=new FileReader();
+ fr.onload=function(){var s=String(fr.result);held=[{name:f.name,data:s.slice(s.indexOf(',')+1)}];heldRights=!!(r&&r.checked);el.value='';
+  say('Uploading '+f.name+'...');
+  plAction('upload',{rights:heldRights,owner:owner||'',wallet:wallet||'',turnstile:token||'',closedPick:!!(document.getElementById('pl-closed')||{}).checked})
+   .then(function(x){if(!x.ok){held=[];say('The upload did not go through ('+x.status+').')}},function(e){held=[];say('The upload did not go through: '+e)})};
  fr.onerror=function(){say('The file could not be read.');el.value=''};
  fr.readAsDataURL(f)};
 // a request that wants the other lab's engine: the browser goes there,
@@ -473,11 +494,10 @@ function carried(){var c=null;try{c=JSON.parse(sessionStorage.getItem('prompt-la
 // (after Datastar has bound the prompt box, which sets it from its signal)
 window.addEventListener('load',function(){setTimeout(carried,1200)});
 // the files of a session in the sibling lab, brought here: fetched from
-// that lab's doors with this browser's key for the session, and sent,
-// all in one, through the sheet's adopt action
-window.plAdopt=function(from,id,wallet,token){var n=document.getElementById('pl-upload-note'),r=document.getElementById('pl-rights');
- if(n&&!n.hint)n.hint=n.textContent;
- function say(t){if(n)n.textContent=t||n.hint||''}
+// that lab's doors with this browser's key for the session and held; the
+// sheet's adopt action then has them sent to this lab's upload door, one
+// request a file, on one human check
+window.plAdopt=function(from,id,wallet,token){var r=document.getElementById('pl-rights'),say=uploadNote();
  if(!r||!r.checked){say('Tick the box first: you declare the right to use and share the files.');return}
  var key='';try{key=(JSON.parse(localStorage.getItem('prompt-lab-owners')||'{}')||{})[id]||''}catch(e){}
  var hs=key?{'X-Prompt-Lab-Owner':key}:{};
@@ -486,9 +506,10 @@ window.plAdopt=function(from,id,wallet,token){var n=document.getElementById('pl-
  fetch(from+'/api/state?session='+encodeURIComponent(id),{headers:hs}).then(function(x){if(!x.ok)throw new Error('that session is not to be had ('+x.status+')');return x.json()})
   .then(function(st){var fs=st.files||[];if(!fs.length)throw new Error('that session has no files');
    return Promise.all(fs.map(function(f){return fetch(f.url,{headers:hs}).then(function(x){if(!x.ok)throw new Error(f.name+' is not to be had');return x.blob()}).then(b64).then(function(d){return {name:f.name,data:d}})}))})
-  .then(function(files){say('Bringing '+files.length+' over...');return plAction('adopt',{files:files,rights:true,wallet:wallet||'',turnstile:token||''})})
-  .then(function(x){say(x.ok?'':'The files did not come over ('+x.status+').')})
-  .catch(function(e){say('The files did not come over: '+(e.message||e))})};
+  .then(function(files){say('Bringing '+files.length+' over...');held=files;heldRights=true;
+   return plAction('adopt',{count:files.length,rights:true,wallet:wallet||'',turnstile:token||''})})
+  .then(function(x){if(!x.ok){held=[];say('The files did not come over ('+x.status+').')}})
+  .catch(function(e){held=[];say('The files did not come over: '+(e.message||e))})};
 })();"
   "String. The sheet's toast (plToast), its documentation line and the
 upload control's reader (plUpload).")
@@ -2298,15 +2319,36 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                           "{\"deployed\": \"\", \"error\": \"\", \"notice\": \"The deployment is taken down.\"}")))
                 (the (tell-error! reason)))))))
 
+   (send-files!
+    ()
+    ;; the page hands the files it holds (plSendFiles, *sheet-ui-script*) to
+    ;; the upload door, one request a file: the bytes never come through a
+    ;; sheet action, whose body the room caps well under a file's size
+    (let ((session (the session)))
+      (sheet-send! self (datastar-script-event
+                         (format nil "plSendFiles(~a,~a,~a)"
+                                 (js-string-literal (door-path "upload"))
+                                 (js-string-literal (session-id session))
+                                 (js-string-literal (or (the owner-key) "")))))))
+
+   (no-files!
+    (&optional reason)
+    ;; an upload refused before any file was sent: the reason shown, and
+    ;; the page told to let go of what it holds
+    (when reason (the (tell-error! reason)))
+    (sheet-send! self (datastar-script-event "plSendFiles()")))
+
    (upload
     (signals)
     ;; a file for the agent to build from (uploads.lisp), the visitor's
-    ;; first act here opening the session as a first build does
+    ;; first act here opening the session as a first build does.  The file
+    ;; itself goes to the upload door (send-files!); this passes the human
+    ;; check, which then covers that request (page.lisp, checked-lately?)
     (let ((address (client-address *datastar-request*))
           (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
-      (cond ((the archive-id) (the (tell-error! "An archived session takes no uploads.")))
+      (cond ((the archive-id) (the (no-files! "An archived session takes no uploads.")))
             ((and (the session) (not (the owner?)))
-             (the (tell-error! "This session is someone else's; start your own to upload.")))
+             (the (no-files! "This session is someone else's; start your own to upload.")))
             ;; a file is public with its session, and that is acknowledged
             ;; first -- unless the session is closed-source or its author trusted
             ((not (or (eq (gethash "rights" signals) t)
@@ -2314,55 +2356,39 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                         (if session
                             (or (session-closed? session) (paid? session))
                             (and (closed-offered?) (eq (gethash "closedPick" signals) t))))))
-             (the (tell-error! "Tick the box first: the file will be shared with this session.")))
+             (the (no-files! "Tick the box first: the file will be shared with this session.")))
             ((and *turnstile-site-key* (null token))
-             (the (tell-error! "Complete the human check first.")))
+             (the (no-files! "Complete the human check first.")))
             ((the (own-session! address (gethash "wallet" signals) (eq (gethash "closedPick" signals) t)))
-             (multiple-value-bind (file reason)
-                 (accept-upload! (the session) (gethash "name" signals) (gethash "data" signals)
-                                 :rights? t :token token :address address)
-               (if file
-                   (sheet-send! self (datastar-signals-event
-                                      (with-output-to-string (s)
-                                        (yason:encode (h "error" ""
-                                                         "notice" (format nil "~a is uploaded; it goes to the agent with your next prompt."
-                                                                          (the-object file file-name)))
-                                                      s))))
-                   (the (tell-error! reason)))
-               (the spent-token!))))))
+             (the (check-and-send-files! token address)))
+            ;; no session to be had: own-session! has said why
+            (t (the no-files!)))))
 
    (adopt
     (signals)
     ;; the files of a session in the sibling lab, fetched by the browser
-    ;; and handed over in one (routing.lisp): one human check for all
+    ;; (routing.lisp) and held there: one human check here, and the page
+    ;; then sends each to the upload door in a request of its own
     (let ((address (client-address *datastar-request*))
-          (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token)))
-          (files (gethash "files" signals)))
-      (cond ((the archive-id) (the (tell-error! "An archived session takes no uploads.")))
+          (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
+      (cond ((the archive-id) (the (no-files! "An archived session takes no uploads.")))
             ((and (the session) (not (the owner?)))
-             (the (tell-error! "This session is someone else's; start your own to upload.")))
+             (the (no-files! "This session is someone else's; start your own to upload.")))
             ((not (eq (gethash "rights" signals) t))
-             (the (tell-error! "Tick the box first: you declare the right to use and share the files.")))
-            ((not (and (listp files) files (every #'hash-table-p files)))
-             (the (tell-error! "No files were sent.")))
-            ((not (verify-turnstile token address))
-             (the (tell-error! "Complete the human check first.")))
+             (the (no-files! "Tick the box first: you declare the right to use and share the files.")))
+            ((and *turnstile-site-key* (null token))
+             (the (no-files! "Complete the human check first.")))
             ((the (own-session! address (gethash "wallet" signals) (eq (gethash "closedPick" signals) t)))
-             (let ((kept nil) (refused nil))
-               (dolist (entry files)
-                 (multiple-value-bind (file reason)
-                     (accept-upload! (the session) (gethash "name" entry) (gethash "data" entry)
-                                     :rights? t :checked? t)
-                   (if file (push (the-object file file-name) kept) (push reason refused))))
-               (sheet-send! self (datastar-signals-event
-                                  (with-output-to-string (s)
-                                    (yason:encode (h "error" (format nil "~{~a~^  ~}" (reverse refused))
-                                                     "notice" (if kept
-                                                                  (format nil "~{~a~^, ~} came over; ~:[it goes~;they go~] to the agent with your next prompt."
-                                                                          (reverse kept) (rest kept))
-                                                                  ""))
-                                                  s))))
-               (the spent-token!))))))
+             (the (check-and-send-files! token address)))
+            (t (the no-files!)))))
+
+   (check-and-send-files!
+    (token address)
+    ;; the one human check for whatever the page holds -- a file, or a
+    ;; session's files brought over -- and then the word to send them
+    (multiple-value-bind (ok? reason) (topup-check! (the session) token address)
+      (if ok? (the send-files!) (the (no-files! reason)))
+      (the spent-token!)))
 
    (start-payment!
     (session amount &key card?)

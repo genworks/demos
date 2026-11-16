@@ -710,24 +710,30 @@ One address opens at most *max-sessions-per-address* a day."
 request: the card line first, then 'more payment options' if the payer
 wants them, is one purchase and one check.")
 
+(defun checked-lately? (session)
+  "Whether SESSION passed the human check in the last
+*topup-check-seconds*: what lets one check cover a purchase's two steps,
+or the several files of one upload (the upload door)."
+  (let ((checked (gethash (session-id session) *topup-checked*)))
+    (and checked (< (- (get-universal-time) checked) *topup-check-seconds*) t)))
+
 (defun topup-check! (session token address)
   "Whether a purchase in SESSION passes the human check: a check passed for
 the session in the last *topup-check-seconds* covers it (the card line,
 then 'more payment options', is one purchase), else TOKEN is verified --
 once, a token is single-use.  Values: true, or nil and the reason."
-  (let ((checked (gethash (session-id session) *topup-checked*)))
-    (if (and checked (< (- (get-universal-time) checked) *topup-check-seconds*))
-        t
-        (multiple-value-bind (ok? reason) (verify-turnstile token address)
-          (cond (ok?
-                 (let ((now (get-universal-time)))
-                   ;; the old ones go as a new one comes: the table stays small
-                   (maphash #'(lambda (id at) (when (> (- now at) *topup-check-seconds*)
-                                                (remhash id *topup-checked*)))
-                            *topup-checked*)
-                   (setf (gethash (session-id session) *topup-checked*) now))
-                 t)
-                (t (values nil (or reason "Complete the human check first."))))))))
+  (if (checked-lately? session)
+      t
+      (multiple-value-bind (ok? reason) (verify-turnstile token address)
+        (cond (ok?
+               (let ((now (get-universal-time)))
+                 ;; the old ones go as a new one comes: the table stays small
+                 (maphash #'(lambda (id at) (when (> (- now at) *topup-check-seconds*)
+                                              (remhash id *topup-checked*)))
+                          *topup-checked*)
+                 (setf (gethash (session-id session) *topup-checked*) now))
+               t)
+              (t (values nil (or reason "Complete the human check first.")))))))
 
 (defun begin-topup! (session amount return-url &key embedded? flow)
   "Ask the gate for a payment of AMOUNT cents in SESSION, coming back to

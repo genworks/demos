@@ -2156,6 +2156,43 @@ loaded) its page too."
                               (error "a keyless prompt past the address's prompts was answered ~a: ~a" status body)))
                           t))
               (setf (symbol-value (lab '#:*max-prompts-per-address*)) most)))
+          ;; uploads from the page go to the upload door, one request a
+          ;; file, on ONE human check: where a check stands the door wants
+          ;; a token, a check the session passed lately covers the next
+          ;; requests, and an old one covers nothing.  And the page's
+          ;; script sends no file through a sheet action, whose body the
+          ;; room caps under a file's size.  (The site key is pretended.)
+          (when (gethash "uploads" (json-of :get (door "config")))
+            (smoke "prompt-lab upload door takes several files on one human check"
+                   (lambda ()
+                     (let ((data (uiop:symbol-call :cl-base64 :string-to-base64-string (format nil "a,b~%1,2~%")))
+                           (checked (symbol-value (lab '#:*topup-checked*)))
+                           (script (let ((symbol (find-symbol (string '#:*sheet-ui-script*) :prompt-lab)))
+                                     (and symbol (boundp symbol) (symbol-value symbol)))))
+                       (flet ((upload (name)
+                                (http :post (door "upload") :headers (owner-headers)
+                                      :json (table "session" session "name" name "data" data "rights" t))))
+                         (remhash session checked)
+                         (multiple-value-bind (body status) (upload "one.csv")
+                           (unless (and (eql status 400) (search "human check" body))
+                             (error "with no check passed, the door answered ~a: ~a" status body)))
+                         (setf (gethash session checked) (get-universal-time))
+                         (dolist (name '("one.csv" "two.csv"))
+                           (multiple-value-bind (body status) (upload name)
+                             (unless (eql status 200)
+                               (error "on a check passed lately, ~a was answered ~a: ~a" name status body))))
+                         (setf (gethash session checked)
+                               (- (get-universal-time) (symbol-value (lab '#:*topup-check-seconds*)) 5))
+                         (unless (eql 400 (nth-value 1 (upload "late.csv")))
+                           (error "a check long past still covered an upload"))
+                         (remhash session checked)
+                         (when script
+                           (unless (search "plSendFiles" script)
+                             (error "the sheet's script does not send files to the upload door"))
+                           (when (or (search "plAction('upload',{name" script)
+                                     (search "plAction('adopt',{files" script))
+                             (error "the sheet's script still sends file bytes through a sheet action")))
+                         t)))))
           (setf (symbol-value (lab '#:*pot*)) nil
                 (symbol-value (lab '#:*pot-asked*)) 0
                 (symbol-value (lab '#:*turnstile-site-key*)) nil)

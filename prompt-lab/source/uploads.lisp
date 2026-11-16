@@ -533,7 +533,9 @@ and where to fetch each."
   "POST <prefix>/api/upload {session, name, data, rights, turnstile}: the
 owner hands the session a file, DATA its bytes in base64, RIGHTS true for
 the declaration that they may use and share it.  Answers the session's
-files."
+files.  One file a request; a human check the session passed in the last
+few minutes (checked-lately?) covers the request, so the several files of
+one upload want one check and the later requests carry no token."
   (let* ((json (request-json req))
          (session (requested-session req json))
          (address (client-address req)))
@@ -547,7 +549,8 @@ files."
                                  ;; closed-source, or one that has topped up
                                  :rights? (or (eq (gethash "rights" json) t)
                                               (session-closed? session) (paid? session))
-                                 :token (gethash "turnstile" json) :address address)
+                                 :token (gethash "turnstile" json) :address address
+                                 :checked? (checked-lately? session))
                (if file
                    (respond-json req ent (h "name" (the-object file file-name)
                                             "bytes" (the-object file bytes)
