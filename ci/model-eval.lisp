@@ -183,39 +183,81 @@ follow-up line (eval-followup-text).")
                         (reverse (coerce (eval-call '#:session-log session) 'list)))))
     (and entry (eval-log-kind entry))))
 
-(defun eval-complete? (session named)
-  "True when SESSION's latest prompt ended done -- past the lab's completion
-check -- and, where the prompt names results (NAMED), none is missing."
-  (and (eq (eval-last-kind session) :done)
-       (or (null named) (null (eval-results-missing session named)))
-       t))
+(defun eval-model-state (session named)
+  "What SESSION's model is now, judged by the MODEL ALONE: no closing reply
+is asked for, so a sound model cut off at a round cap is sound.  A plist:
+:sound true when MODEL is defined, has at least one part, the lab's
+completion check finds nothing (it is asked whatever *completion-check?*
+says) and no result the prompt names (NAMED) is missing; else what is
+wrong, by name -- :no-model, :no-parts, :error, :broken, :failing,
+:missing."
+  (if (not (ignore-errors (eval-call '#:model-defined? session)))
+      (list :sound nil :no-model t)
+      (let* ((findings (progv (list (eval-lab '#:*completion-check?*)) (list t)
+                         (ignore-errors (eval-call '#:completion-findings session))))
+             (parts (or (ignore-errors (length (the-object (eval-call '#:make-model session) leaves))) 0))
+             (missing (and named (eval-results-missing session named)))
+             (no-parts (and (zerop parts) (not (getf findings :error)))))
+        (list :sound (not (or (getf findings :error) (getf findings :broken) (getf findings :failing)
+                              missing no-parts))
+              :error (getf findings :error) :broken (getf findings :broken)
+              :failing (getf findings :failing) :missing missing :no-parts no-parts))))
 
-(defun eval-followup-text (session named)
-  "A visitor's next line for a build that is not complete, scripted from the
-lab's completion check and the results the prompt names (NAMED): no model
-writes it.  At most *eval-followup-names* findings are named."
-  (let* ((findings (ignore-errors (eval-call '#:completion-findings session)))
-         (missing (and named (eval-results-missing session named)))
-         (budget *eval-followup-names*)
-         (parts nil))
-    (flet ((take (names)
-             (let ((some (subseq names 0 (min budget (length names)))))
-               (decf budget (length some))
-               some)))
-      (when (getf findings :error)
-        (decf budget)
-        (push (format nil "MODEL does not build (~a)" (getf findings :error)) parts))
-      (let ((broken (take (getf findings :broken))))
-        (when broken (push (format nil "these parts' geometry does not compute: ~{~a~^, ~}" broken) parts)))
-      (let ((failing (take (getf findings :failing))))
-        (when failing (push (format nil "these computed slots of MODEL fail: ~{~a~^, ~}" failing) parts)))
-      (let ((absent (take missing)))
-        (when absent
-          (push (format nil "these results are missing -- add each as a computed slot of MODEL with its unit: ~{~a~^, ~}" absent)
-                parts))))
-    (if parts
-        (format nil "Not done yet: ~{~a~^; ~}.  Fix those and reply." (nreverse parts))
-        "Not done yet: you stopped before finishing.  Carry on from the model as it is now, and reply when it is done.")))
+(defun eval-state-text (state)
+  "STATE (eval-model-state) in a few words, for the run's record."
+  (cond ((getf state :sound) "sound")
+        ((getf state :no-model) "no model")
+        (t (format nil "~{~a~^; ~}"
+                   (remove nil
+                           (list (and (getf state :error) "MODEL does not build")
+                                 (and (getf state :no-parts) "no parts")
+                                 (and (getf state :broken)
+                                      (format nil "~d part~:p not computing" (length (getf state :broken))))
+                                 (and (getf state :failing)
+                                      (format nil "~d slot~:p failing" (length (getf state :failing))))
+                                 (and (getf state :missing)
+                                      (format nil "~d named result~:p missing" (length (getf state :missing))))))))))
+
+(defun eval-complete? (session named)
+  "True when SESSION's model is sound (eval-model-state): judged by the
+model's state, not by whether the agent closed with a reply."
+  (and (getf (eval-model-state session named) :sound) t))
+
+(defun eval-followup-text (state)
+  "A visitor's next line for a model that is not sound, scripted from STATE
+(eval-model-state): the lab's findings and the results the prompt names.
+No model writes it; at most *eval-followup-names* findings are named.  NIL
+for a sound model: nothing is asked of a model with nothing wrong -- a line
+telling it to carry on had it edit sound models into broken ones."
+  (cond
+    ((getf state :sound) nil)
+    ((getf state :no-model)
+     "Not done yet: there is no MODEL yet.  Build what the request asks, and reply.")
+    (t
+     (let ((budget *eval-followup-names*)
+           (parts nil))
+       (flet ((take (names)
+                (let ((some (subseq names 0 (min budget (length names)))))
+                  (decf budget (length some))
+                  some)))
+         (when (getf state :error)
+           (decf budget)
+           ;; clipped: an untrimmed error text made a line long enough to stage
+           (push (format nil "MODEL does not build (~a)"
+                         (let ((text (princ-to-string (getf state :error))))
+                           (subseq text 0 (min 200 (length text)))))
+                 parts))
+         (when (getf state :no-parts)
+           (push "MODEL has no parts yet" parts))
+         (let ((broken (take (getf state :broken))))
+           (when broken (push (format nil "these parts' geometry does not compute: ~{~a~^, ~}" broken) parts)))
+         (let ((failing (take (getf state :failing))))
+           (when failing (push (format nil "these computed slots of MODEL fail: ~{~a~^, ~}" failing) parts)))
+         (let ((absent (take (getf state :missing))))
+           (when absent
+             (push (format nil "these results are missing -- add each as a computed slot of MODEL with its unit: ~{~a~^, ~}" absent)
+                   parts))))
+       (format nil "Not done yet: ~{~a~^; ~}.  Fix those and reply." (nreverse parts))))))
 
 (defun eval-run (sample model &key budget-cents out (net 250) (followups 0))
   "Replay SAMPLE's prompts on MODEL, one fresh session each, until the cost
@@ -234,17 +276,24 @@ after each line sent."
         (unless session (error "The lab would not open a session for ~a." address))
         (unwind-protect
              (let ((start (get-internal-real-time))
-                   (started (eval-call '#:utc-time (get-universal-time))))
+                   (started (eval-call '#:utc-time (get-universal-time)))
+                   ;; the model's state after the build, then after each follow-up sent
+                   (states nil))
                (eval-call '#:set-session-model! session model)
                (eval-call '#:run-prompt session (getf item :prompt))
-               ;; scripted follow-ups while the build is not complete (Ruling 153)
-               (let ((after (list (eval-complete? session (eval-results-for (getf item :id))))))
+               ;; scripted follow-ups while the model is not sound (Rulings 153, 166):
+               ;; judged by the model's state, and never sent to a sound model
+               (let ((named (eval-results-for (getf item :id)))
+                     (staging (find-symbol (symbol-name '#:*auto-stage*) :prompt-lab)))
+                 (push (eval-model-state session named) states)
                  (loop repeat followups
-                       until (first after)
-                       do (eval-call '#:run-prompt session
-                                     (eval-followup-text session (eval-results-for (getf item :id))))
-                          (push (eval-complete? session (eval-results-for (getf item :id))) after))
-                 (setf (getf item :complete-after) (reverse after)))
+                       until (getf (first states) :sound)
+                       do (let ((line (eval-followup-text (first states))))
+                            ;; a follow-up is one prompt: never staged, whatever its length
+                            (progv (and staging (list staging)) (and staging (list nil))
+                              (eval-call '#:run-prompt session line)))
+                          (push (eval-model-state session named) states))
+                 (setq states (reverse states)))
                (let* ((log (eval-call '#:session-log session))
                       (last-kind (let ((entry (find-if (lambda (e) (member (eval-log-kind e) '(:done :stopped)))
                                                        (reverse (coerce log 'list)))))
@@ -257,17 +306,25 @@ after each line sent."
                       (result (list :id (getf item :id) :model model
                                     :results-named (length named)
                                     :results-missing (format nil "~{~a~^; ~}" missing)
-                                    :complete (and (eq last-kind :done) named (null missing) t)
+                                    ;; by the model's state at the end (eval-model-state);
+                                    ;; :finished below is the agent's closing reply
+                                    :complete (and (getf (car (last states)) :sound) t)
                                     ;; after the build, then after each follow-up sent
-                                    :complete-after (format nil "~{~:[no~;yes~]~^,~}" (getf item :complete-after))
-                                    :followups-sent (max 0 (1- (length (getf item :complete-after))))
+                                    :complete-after (format nil "~{~:[no~;yes~]~^,~}"
+                                                            (mapcar (lambda (s) (getf s :sound)) states))
+                                    ;; what the check found at each of those steps
+                                    :step-findings (format nil "~{~a~^ | ~}" (mapcar #'eval-state-text states))
+                                    :followups-sent (max 0 (1- (length states)))
                                     ;; when and as which session, to pair with the server's own timings
                                     :session (eval-call '#:session-id session)
                                     :started started :ended (eval-call '#:utc-time (get-universal-time))
                                     :finished (eq last-kind :done)
                                     :built (and (ignore-errors (eval-call '#:model-defined? session)) t)
                                     :seconds (float (/ (- (get-internal-real-time) start) internal-time-units-per-second) 1.0)
+                                    ;; TOOL CALLS, not rounds: parallel calls in one
+                                    ;; round count each (the name is kept for old files)
                                     :rounds (count :tool (coerce log 'list) :key #'eval-log-kind)
+                                    :tool-calls (count :tool (coerce log 'list) :key #'eval-log-kind)
                                     :input (getf usage :input) :output (getf usage :output)
                                     :cache-read (getf usage :cache-read) :cache-write (getf usage :cache-write)
                                     :cents (float cents 1.0)
@@ -291,13 +348,16 @@ after each line sent."
 
 (defun eval-summary (results)
   "RESULTS (a list of plists, or a JSON-lines file eval-run wrote) summed up:
-how many, the share finished and built, the median seconds, the rounds,
-the cents in all.  A plist."
+how many, the share finished (the agent closed with a reply), built (a MODEL
+is defined) and complete (the model is sound), the median seconds (the upper
+of the two middle ones for an even count), the mean tool calls a prompt
+(:mean-rounds, its old name), the cents in all.  A plist."
   (let* ((rows (if (or (stringp results) (pathnamep results))
                    (with-open-file (in results :external-format :utf-8)
                      (loop for line = (read-line in nil nil) while line
                            collect (let ((h (yason:parse line)))
                                      (list :finished (gethash "finished" h) :built (gethash "built" h)
+                                           :complete (eq (gethash "complete" h) t)
                                            :seconds (gethash "seconds" h) :rounds (gethash "rounds" h)
                                            :cents (gethash "cents" h)))))
                    results))
@@ -308,6 +368,8 @@ the cents in all.  A plist."
         (list :n n
               :finished-percent (round (* 100 (count-if (lambda (r) (getf r :finished)) rows)) n)
               :built-percent (round (* 100 (count-if (lambda (r) (getf r :built)) rows)) n)
+              ;; by the model's state (eval-model-state), where the rows carry it
+              :complete-percent (round (* 100 (count-if (lambda (r) (getf r :complete)) rows)) n)
               :median-seconds (nth (floor n 2) seconds)
               :mean-rounds (float (/ (reduce #'+ rows :key (lambda (r) (or (getf r :rounds) 0))) n) 1.0)
               :cents (float (reduce #'+ rows :key (lambda (r) (or (getf r :cents) 0))) 1.0)))))
