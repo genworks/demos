@@ -173,12 +173,59 @@ keyword values as their lower-case names."
                          (t value))))
     table))
 
-(defun eval-run (sample model &key budget-cents out (net 250))
+(defparameter *eval-followup-names* 6
+  "Integer.  At most this many findings are named in one scripted
+follow-up line (eval-followup-text).")
+
+(defun eval-last-kind (session)
+  "The kind, :done or :stopped, of SESSION's latest ending; nil if none."
+  (let ((entry (find-if (lambda (e) (member (eval-log-kind e) '(:done :stopped)))
+                        (reverse (coerce (eval-call '#:session-log session) 'list)))))
+    (and entry (eval-log-kind entry))))
+
+(defun eval-complete? (session named)
+  "True when SESSION's latest prompt ended done -- past the lab's completion
+check -- and, where the prompt names results (NAMED), none is missing."
+  (and (eq (eval-last-kind session) :done)
+       (or (null named) (null (eval-results-missing session named)))
+       t))
+
+(defun eval-followup-text (session named)
+  "A visitor's next line for a build that is not complete, scripted from the
+lab's completion check and the results the prompt names (NAMED): no model
+writes it.  At most *eval-followup-names* findings are named."
+  (let* ((findings (ignore-errors (eval-call '#:completion-findings session)))
+         (missing (and named (eval-results-missing session named)))
+         (budget *eval-followup-names*)
+         (parts nil))
+    (flet ((take (names)
+             (let ((some (subseq names 0 (min budget (length names)))))
+               (decf budget (length some))
+               some)))
+      (when (getf findings :error)
+        (decf budget)
+        (push (format nil "MODEL does not build (~a)" (getf findings :error)) parts))
+      (let ((broken (take (getf findings :broken))))
+        (when broken (push (format nil "these parts' geometry does not compute: ~{~a~^, ~}" broken) parts)))
+      (let ((failing (take (getf findings :failing))))
+        (when failing (push (format nil "these computed slots of MODEL fail: ~{~a~^, ~}" failing) parts)))
+      (let ((absent (take missing)))
+        (when absent
+          (push (format nil "these results are missing -- add each as a computed slot of MODEL with its unit: ~{~a~^, ~}" absent)
+                parts))))
+    (if parts
+        (format nil "Not done yet: ~{~a~^; ~}.  Fix those and reply." (nreverse parts))
+        "Not done yet: you stopped before finishing.  Carry on from the model as it is now, and reply when it is done.")))
+
+(defun eval-run (sample model &key budget-cents out (net 250) (followups 0))
   "Replay SAMPLE's prompts on MODEL, one fresh session each, until the cost
 reaches BUDGET-CENTS (nil: no ceiling).  Each session opens from an address
 of its own in 10.NET.x.y, so the lab's sessions-per-address cap never stops
 a run.  Each result is written to OUT (a JSON-lines file, appended) when
-given.  Answers the results, plists."
+given.  Answers the results, plists.  FOLLOWUPS (Ruling 153): up to that
+many scripted visitor lines (eval-followup-text) while the build is not
+complete; the result says whether it was complete after the build and
+after each line sent."
   (let ((spent 0) (results nil) (index 0))
     (dolist (item sample)
       (when (and budget-cents (>= spent budget-cents)) (return))
@@ -190,6 +237,14 @@ given.  Answers the results, plists."
                    (started (eval-call '#:utc-time (get-universal-time))))
                (eval-call '#:set-session-model! session model)
                (eval-call '#:run-prompt session (getf item :prompt))
+               ;; scripted follow-ups while the build is not complete (Ruling 153)
+               (let ((after (list (eval-complete? session (eval-results-for (getf item :id))))))
+                 (loop repeat followups
+                       until (first after)
+                       do (eval-call '#:run-prompt session
+                                     (eval-followup-text session (eval-results-for (getf item :id))))
+                          (push (eval-complete? session (eval-results-for (getf item :id))) after))
+                 (setf (getf item :complete-after) (reverse after)))
                (let* ((log (eval-call '#:session-log session))
                       (last-kind (let ((entry (find-if (lambda (e) (member (eval-log-kind e) '(:done :stopped)))
                                                        (reverse (coerce log 'list)))))
@@ -203,6 +258,9 @@ given.  Answers the results, plists."
                                     :results-named (length named)
                                     :results-missing (format nil "~{~a~^; ~}" missing)
                                     :complete (and (eq last-kind :done) named (null missing) t)
+                                    ;; after the build, then after each follow-up sent
+                                    :complete-after (format nil "~{~:[no~;yes~]~^,~}" (getf item :complete-after))
+                                    :followups-sent (max 0 (1- (length (getf item :complete-after))))
                                     ;; when and as which session, to pair with the server's own timings
                                     :session (eval-call '#:session-id session)
                                     :started started :ended (eval-call '#:utc-time (get-universal-time))
