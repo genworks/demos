@@ -259,7 +259,7 @@ telling it to carry on had it edit sound models into broken ones."
                    parts))))
        (format nil "Not done yet: ~{~a~^; ~}.  Fix those and reply." (nreverse parts))))))
 
-(defun eval-run (sample model &key budget-cents out (net 250) (followups 0))
+(defun eval-run (sample model &key budget-cents out (net 250) (followups 0) followup-rounds)
   "Replay SAMPLE's prompts on MODEL, one fresh session each, until the cost
 reaches BUDGET-CENTS (nil: no ceiling).  Each session opens from an address
 of its own in 10.NET.x.y, so the lab's sessions-per-address cap never stops
@@ -267,7 +267,8 @@ a run.  Each result is written to OUT (a JSON-lines file, appended) when
 given.  Answers the results, plists.  FOLLOWUPS (Ruling 153): up to that
 many scripted visitor lines (eval-followup-text) while the build is not
 complete; the result says whether it was complete after the build and
-after each line sent."
+after each line sent.  FOLLOWUP-ROUNDS caps each follow-up's rounds apart
+from the build's."
   (let ((spent 0) (results nil) (index 0))
     (dolist (item sample)
       (when (and budget-cents (>= spent budget-cents)) (return))
@@ -290,7 +291,13 @@ after each line sent."
                        until (getf (first states) :sound)
                        do (let ((line (eval-followup-text (first states))))
                             ;; a follow-up is one prompt: never staged, whatever its length
-                            (progv (and staging (list staging)) (and staging (list nil))
+                            ;; FOLLOWUP-ROUNDS: a follow-up's own round cap, where the
+                            ;; build was given a larger one (an equal-budget arm)
+                            (progv (append (and staging (list staging))
+                                           (and followup-rounds
+                                                (list (eval-lab '#:*house-max-rounds*) (eval-lab '#:*max-rounds*))))
+                                (append (and staging (list nil))
+                                        (and followup-rounds (list followup-rounds followup-rounds)))
                               (eval-call '#:run-prompt session line)))
                           (push (eval-model-state session named) states))
                  (setq states (reverse states)))
