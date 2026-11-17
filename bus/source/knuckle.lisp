@@ -40,13 +40,22 @@
    (tie-rod-arm-axis-point (inter-line-plane (the :center)
 					     (the (:face-normal-vector :top))
 					     (the :tie-rod-arm-end)
-					     (the (:face-normal-vector :top))))
-   (tie-rod-arm-circle (list :center (the :tie-rod-arm-axis-point) :radius
-			     (3d-distance (the :tie-rod-arm-axis-point)
-					  (the :tie-rod-arm-end))
-			     :axis-vector (the (:face-normal-vector :top))))
-   (tie-rod-sphere (list :center (the :tie-rod-arm-end) :radius
-			 (the :tie-rod-length))))
+					     (the (:face-normal-vector :top)))))
+
+  ;; The steering linkage's constraints, as geometry: the circle this
+  ;; knuckle's tie-rod arm end sweeps about the kingpin axis, and the
+  ;; sphere the far end of the tie rod must lie on.  The chassis
+  ;; intersects one knuckle's circle with the other knuckle's sphere.
+  ;; A circle lies in its own right/rear plane, and these inherit the
+  ;; knuckle's orientation, so the circle's axis is the knuckle's :top.
+  :hidden-objects
+  ((tie-rod-arm-circle :type 'circle
+		       :center (the :tie-rod-arm-axis-point)
+		       :radius (3d-distance (the :tie-rod-arm-axis-point)
+					    (the :tie-rod-arm-end)))
+   (tie-rod-sphere :type 'sphere
+		   :center (the :tie-rod-arm-end)
+		   :radius (the :tie-rod-length)))
 
   :objects
   ((tie-rod-ball :type 'sphere
