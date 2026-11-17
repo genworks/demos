@@ -675,6 +675,54 @@ loaded) its page too."
                      ;; the file put back as it was, for the smokes after this one
                      (http :post (door "model") :headers (owner-headers) :json (table "session" session "source" source))
                      t)))
+          ;; REVIEW MY EDITS: what the author changed by hand since the agent's
+          ;; last version -- from the page's editor, or in the console, which
+          ;; the lab loads first -- is put to the agent as a request to review
+          ;; it; with no edit of the author's own there is nothing to ask.
+          (smoke "prompt-lab review my edits: the author's changes, a console edit loaded first"
+                 (lambda ()
+                   (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
+                     (let ((s (pl :open-session! "10.9.8.11" nil))
+                           (plate "(define-object model (base-object)
+  :objects ((plate :type 'box :width 100 :length 50 :height 10)))"))
+                       (unwind-protect
+                            (progn
+                              (pl :write-model s plate)
+                              (when (pl :edits-review-prompt s)
+                                (error "the agent's own version was offered for review"))
+                              ;; an edit saved from the page's editor
+                              (progv (list (lab '#:*model-writer*)) (list :author)
+                                (pl :write-model s (uiop:frob-substrings plate '(":height 10") ":height 12")))
+                              (let ((prompt (pl :edits-review-prompt s)))
+                                (unless (and prompt (search "Review my edits" prompt)
+                                             (search ":height 12" prompt) (search ":height 10" prompt))
+                                  (error "the author's edit is not in the request: ~a" prompt)))
+                              ;; an edit saved in the console: on disk, not yet loaded
+                              (let* ((file (pl :session-model-file s))
+                                     (text (uiop:read-file-string file :external-format :utf-8)))
+                                (with-open-file (out file :direction :output :if-exists :supersede :external-format :utf-8)
+                                  (write-string (uiop:frob-substrings text '(":height 12") ":height 15") out)))
+                              (unless (pl :terminal-edit-pending? s)
+                                (error "an edit on disk the lab has not loaded was not seen"))
+                              (unless (pl :reload-from-disk! s) (error "the console edit did not load"))
+                              (when (pl :terminal-edit-pending? s)
+                                (error "the console edit is still pending after it was loaded"))
+                              ;; both hand edits read as one change against the agent's version
+                              (let ((prompt (pl :edits-review-prompt s)))
+                                (unless (and prompt (search ":height 15" prompt) (search ":height 10" prompt)
+                                             (not (search ":height 12" prompt)))
+                                  (error "the console edit is not what the request shows: ~a" prompt)))
+                              ;; a long change is counted, not sent whole
+                              (progv (list (lab '#:*edits-review-characters*)) (list 20)
+                                (unless (search "more changed lines" (pl :edits-review-prompt s))
+                                  (error "a change past the limit was sent whole")))
+                              ;; the agent writes again: nothing of the author's to review
+                              (pl :write-model s plate)
+                              (when (pl :edits-review-prompt s)
+                                (error "an edit the agent has since written over was offered for review"))
+                              t)
+                         (ignore-errors (pl :delete-session s))
+                         (pl :funnel-count! "sessions" -1))))))
           ;; the author takes their own source at any time; nobody else does
           (smoke "prompt-lab source download: the owner's file, a stranger's 404"
                  (lambda ()

@@ -641,7 +641,7 @@ not hold."
    (user-mode?-default t)
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
-   (datastar-actions (list :build :claim :save :topup :topup-full :confirm :privacy :author :author-name :closed-decide :connect-agent :agent-mode :mcp-token-new :wear-skin :shade-desk :upload :adopt
+   (datastar-actions (list :build :review :claim :save :topup :topup-full :confirm :privacy :author :author-name :closed-decide :connect-agent :agent-mode :mcp-token-new :wear-skin :shade-desk :upload :adopt
                            :deploy :undeploy :connect :open-project :push-project :deploy-project))
 
    ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
@@ -1314,7 +1314,18 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                          :|data-on:click|
                                          (format nil "plConfirmSave() && ($source = plSourceText(), ~a)"
                                                  (the (datastar-action :save :options "{filterSignals: {include: /^(source|owner)$/}}")))
-                                         "Save"))
+                                         "Save")
+                                ;; the author's own edits -- saved here, or made in the
+                                ;; console -- put to the agent to review (export.lisp)
+                                (:button :type "button" :class "pl-review"
+                                         :|data-show| "$editable && $built"
+                                         :|data-attr:disabled| (format nil "$busy || $saving~@[ || !$turnstile~]"
+                                                                       *turnstile-site-key*)
+                                         :title "Have the agent look at what you changed by hand, here or in the console, and say whether it is sound.  Save first."
+                                         :data-doc "Have the agent review the changes you made to the model file by hand"
+                                         :|data-on:click|
+                                         (the (datastar-action :review :options "{filterSignals: {include: /^(turnstile|owner|tagree)$/}}"))
+                                         "Review my edits"))
                           (:textarea :id "pl-source" :spellcheck "false"
                                      (esc (or (the archive-source)
                                               (and session (ignore-errors (model-body session)))
@@ -1347,7 +1358,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                       (with-lhtml-string ()
                         (when asked
                           (htm (:div :class "pl-card pl-reply"
-                                     (:p :class "pl-line pl-dim" "You asked: " (esc (third asked)))
+                                     ;; line breaks kept: a request to review edits
+                                     ;; carries the changed lines, one a line
+                                     (:p :class "pl-line pl-dim" :style "white-space:pre-wrap;max-height:14rem;overflow:auto"
+                                         "You asked: " (esc (third asked)))
                                      (if answer
                                          (htm (:div :class "pl-line" :style "white-space:pre-wrap;max-height:24rem;overflow:auto"
                                                     (esc (plain (third answer)))))
@@ -2167,6 +2181,37 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                                       (if kind (kind-name kind) "")))))))
                      (t (the (tell-error! reason))))
                (the spent-token!))))))
+
+   (review
+    (signals)
+    ;; 'Review my edits': what the owner changed in the model file by hand
+    ;; -- saved from the editor, or in the console, which is loaded here
+    ;; first -- goes to the agent as a request to review it (export.lisp).
+    ;; A prompt like any other: the same checks, the same count.
+    (let ((session (the session))
+          (address (client-address *datastar-request*))
+          (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
+      (cond ((or (null session) (not (the owner?)))
+             (the (tell-error! "Only the session's owner may ask for a review of its edits.")))
+            ((session-busy? session)
+             (the (tell-error! "Wait for the agent to finish first.")))
+            (t
+             ;; an edit saved in the console that the lab has not compiled yet
+             (when (terminal-edit-pending? session)
+               (reload-from-disk! session))
+             (let ((prompt (edits-review-prompt session)))
+               (if (null prompt)
+                   (the (tell-error! "There is no edit of your own to review: the model file is as the agent last wrote it.  Change it in the Model file editor and press Save, or in the console, then ask again."))
+                   (multiple-value-bind (started reason)
+                       ;; the lab's own words and the changed lines, not typing:
+                       ;; the length a typed prompt is held to does not apply
+                       (let ((*max-prompt-length* (max *max-prompt-length* (length prompt))))
+                         (begin-prompt! session prompt address token :route? nil
+                                        :accepted (eq (gethash "tagree" signals) t) :via "sheet"))
+                     (if started
+                         (the (tell-error! ""))
+                         (the (tell-error! reason)))
+                     (the spent-token!))))))))
 
    (deploy
     (signals)

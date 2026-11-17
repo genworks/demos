@@ -335,6 +335,100 @@ call at or before the file's date."
                                               (t "author"))
                                 :time date :sha256 (and text (watch-sha256-hex text)) :inferred t :text text)))))))
 
+;;
+;; REVIEW MY EDITS.  An author may change the model file by hand -- in the
+;; page's editor, or in the console beside it -- and until now the agent
+;; learned of it only by reading the file at the next prompt.  The page's
+;; 'Review my edits' asks for it outright: the lab loads an edit made in
+;; the console that it has not compiled yet, works out what the author
+;; changed since the last version another writer wrote (the authorship
+;; record's versions), and puts that to the agent with the request to say
+;; what each change does and whether it is sound.
+;;
+
+(defparameter *edits-review-characters* 6000
+  "Integer.  At most this many characters of changed lines go with a
+request to review the author's edits; the rest are counted.")
+
+(defparameter *edits-review-text*
+  "I changed the model file by hand since your last version.  Review my edits.~@[  These are the lines I changed (- taken out, + put in):~%~%~a~]~%~%Read the model as it stands now, check that it still builds, and tell me in plain words: what each of my changes does to the model, whether it is sound Gendl, and anything you would do differently.  Change nothing of mine unless it keeps the model from building or breaks a part; if you do change something, say what and why."
+  "The request to review the author's hand edits; ~a takes the changed
+lines, when they could be worked out.")
+
+(defun terminal-edit-pending? (session)
+  "Whether SESSION's model file on disk holds an edit the lab has not
+loaded: it differs from the newest version the archive keeps or, without
+an archive, is newer than what was compiled from it."
+  (let ((file (session-model-file session))
+        (kept (archive-directory session)))
+    (and (probe-file file)
+         (if kept
+             (let ((newest (car (last (sort (mapcar #'namestring (directory (merge-pathnames "model-*.lisp" kept)))
+                                            #'string<)))))
+               (not (and newest (same-text-file? file newest))))
+             (let ((fasl (make-pathname :type "fasl" :defaults file)))
+               (or (not (probe-file fasl))
+                   (> (file-write-date file) (file-write-date fasl))))))))
+
+(defun reload-from-disk! (session)
+  "Compile and load SESSION's model file as it is on disk, the author's
+own edit made in the console, as the reload door does.  Values: true when
+it loaded, and what the compiler said; nil and the reason when the session
+is busy."
+  (if (not (claim! session))
+      (values nil "Wait for the agent to finish first.")
+      (multiple-value-bind (blocks error?)
+          (unwind-protect (let ((*model-writer* :terminal)) (load-model-file (touch session)))
+            (setf (session-busy? session) nil))
+        (let ((text (or (cdr (assoc "text" (first blocks) :test #'string=)) "")))
+          (log-event session :reload "Reloaded from disk: ~a" text)
+          (save-session! session)
+          (values (not error?) text)))))
+
+(defun hand-edit-lines (session)
+  "What SESSION's author changed by hand since the last version another
+writer wrote: the changed lines, each '+ ...' or '- ...', oldest change
+first.  Second value: whether the newest version is the author's own at
+all (true with no lines when the versions are too big to compare, or the
+lab keeps no archive and only the log says so)."
+  (let* ((kept (archive-directory session))
+         (versions (and kept (authorship-versions kept nil)))
+         (hand? #'(lambda (version) (member (getf version :writer) '("author" "terminal") :test #'equal)))
+         (run (loop for version in (reverse versions) while (funcall hand? version) count t)))
+    (cond ((null kept)
+           ;; no versions to read: an edit of the author's own is the log's
+           ;; last word on the file when nothing the agent ran came after it
+           (let ((last (find-if #'(lambda (entry) (member (second entry) '(:reload :tool)))
+                                (session-log session) :from-end t)))
+             (values nil (and last (eq (second last) :reload)))))
+          ((zerop run) (values nil nil))
+          (t (let* ((base (nth run (reverse versions)))
+                    (lines-of #'(lambda (version)
+                                  (uiop:split-string (or (and version (getf version :text)) "")
+                                                     :separator '(#\Newline))))
+                    (diff (line-diff (funcall lines-of base) (funcall lines-of (car (last versions))))))
+               (values (loop for (kind . line) in diff
+                             unless (eq kind :same)
+                               collect (format nil "~:[-~;+~] ~a" (eq kind :add) line))
+                       t))))))
+
+(defun edits-review-prompt (session)
+  "The request that asks the agent to review the hand edits of SESSION's
+author, or nil when the model file's newest version is not the author's
+own."
+  (multiple-value-bind (lines hand?) (hand-edit-lines session)
+    (when hand?
+      (format nil *edits-review-text*
+              (and lines
+                   (with-output-to-string (out)
+                     (loop with room = *edits-review-characters*
+                           for (line . more) on lines
+                           do (decf room (1+ (length line)))
+                              (when (minusp room)
+                                (format out "(and ~d more changed lines)" (1+ (length more)))
+                                (return))
+                              (format out "~a~%" line))))))))
+
 (defun authorship-text (id directory)
   "The authorship record of session ID from its archive DIRECTORY, Markdown:
 the author's prompts, the uploads, each version with its writer, its hash
