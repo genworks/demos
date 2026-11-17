@@ -253,16 +253,26 @@ one the gate's menu marks as the house's (gate-house-models)."
              (member model (gate-house-models) :test #'equal)))
        t))
 
-(defparameter *house-max-rounds* 12
+(defparameter *house-max-rounds* 60
   "Integer. Tool rounds allowed a house model for one prompt.  Its rounds
-cost the house only power, so the cap may differ from *max-rounds*; but
-24 was tried on 2026-11-14 (GLM-4.7-Flash with the primer) and finished
-no more of the same prompts than 12, at twice the time: the rounds past
-twelve went on a model that was not converging.")
+cost the house only power, so the cap differs from *max-rounds*.  It was
+12 until 2026-11-16: 24 had been tried on 2026-11-14 (GLM-4.7-Flash with
+the primer, writing whole files) and finished no more of the same prompts
+than 12, at twice the time.  Building by structure with the rails on, a
+house model uses its later rounds on what the request names: in a trial
+of the same prompts one build of up to 60 rounds ended sound more often
+than 20 rounds with the done gate, which stops a build the lab's check
+passes although the request is not all there.")
+
+(defvar *prompt-rounds* nil
+  "Nil, or the tool rounds allowed the prompt being worked on in this
+thread, in place of its session's own cap: the done gate binds it for a
+continuation (*done-gate-rounds*).")
 
 (defun max-rounds (&optional session)
   "Tool rounds allowed for one prompt of SESSION: more for a house model."
-  (if (house-model? session) *house-max-rounds* *max-rounds*))
+  (or *prompt-rounds*
+      (if (house-model? session) *house-max-rounds* *max-rounds*)))
 
 (defun call-seconds (&optional session)
   "Seconds one call for SESSION may take: longer for a house model."
@@ -1176,21 +1186,31 @@ model one request would cost four loops of rounds."
                 (if (search "~a" control) (format nil control prompt) control))
             *auto-stage-texts*)))
 
+(defun last-ending (session)
+  "The log entry that ended SESSION's latest prompt, a :done or a :stopped,
+or nil when none has ended yet."
+  (find-if #'(lambda (entry) (member (second entry) '(:done :stopped)))
+           (session-log session) :from-end t))
+
+(defun stopped-at-round-cap? (session)
+  "Whether SESSION's latest prompt was stopped at its round cap: the agent
+asked for tools once more than it was allowed (*round-cap-stop*)."
+  (let ((end (last-ending session))
+        (cap (subseq *round-cap-stop* 0 (search "~" *round-cap-stop*))))
+    (and end (eq (second end) :stopped) (stringp (third end))
+         (eql 0 (search cap (third end))))))
+
 (defun stage-may-go-on? (session)
   "Whether the stage SESSION just ended leaves the next one worth sending:
 it ended done, or at its round cap, or with a reply cut at its length limit
 -- the model was working.  Anything else is a refusal or a failure (the
 model declined, the gate refused, the API failed), and sending more stages
 into it would spend calls on a request already turned away."
-  (let ((end (find-if #'(lambda (entry) (member (second entry) '(:done :stopped)))
-                      (session-log session) :from-end t)))
+  (let ((end (last-ending session)))
     (and end
          (or (eq (second end) :done)
-             (let ((text (third end))
-                   (cap (subseq *round-cap-stop* 0 (search "~" *round-cap-stop*))))
-               (and (stringp text)
-                    (or (eql 0 (search cap text))
-                        (string= text *length-limit-stop*))))))))
+             (stopped-at-round-cap? session)
+             (equal (third end) *length-limit-stop*)))))
 
 ;;
 ;; THE DONE GATE (2026-11-16).  A build that ends with the lab's own check
@@ -1202,17 +1222,34 @@ into it would spend calls on a request already turned away."
 ;; sends that line itself: the findings, and another allowance of rounds, a
 ;; few times at most.  Off unless *house-done-gate* says how many times.
 ;;
+;; The check sees only what the lab can judge.  A build stopped at its
+;; round cap with a model the check passes was not sent on at first, and
+;; in the trial of the gate that was most of what it missed: the agent was
+;; still adding what the request names.  So a build stopped at the cap
+;; while it was still asking for tools is sent on too, whatever the check
+;; says (*done-gate-cap-text*).
+;;
 
 (defparameter *house-done-gate* nil
   "Nil, or the most continuations the lab sends a house session's model
 build on its own when a prompt ends with the completion check still
-finding something: each a line naming the findings and another allowance
-of rounds (max-rounds).  Nil: the build stops where it stops, as before.")
+finding something, or stopped at its round cap while the agent was still
+asking for tools: each a line saying which and another allowance of rounds
+(*done-gate-rounds*).  Nil: the build stops where it stops, as before.")
+
+(defparameter *done-gate-rounds* nil
+  "Nil, or the tool rounds a continuation of the done gate is allowed.
+Nil: as many as a prompt of the session's (max-rounds).")
 
 (defparameter *done-gate-text*
   "Not done yet: the lab's check of the model found ~{~a~^; ~}.  Fix those, then reply."
   "What a continuation of the done gate tells the agent; ~{~} takes the
 findings.")
+
+(defparameter *done-gate-cap-text*
+  "The lab stopped that build at its limit of tool rounds while you were still working, and its own check of the model finds nothing wrong.  You have more rounds now.  Finish what the request still lacks, then reply."
+  "What a continuation of the done gate tells an agent stopped at its round
+cap with a model the lab's check passes.")
 
 (defun done-gate-tries (session)
   "How many continuations the done gate may send SESSION's build: a house
@@ -1227,8 +1264,7 @@ session building a model, with *house-done-gate* a whole number above 0."
 texts, or nil: nil when the prompt ended done, was refused or failed (as
 for a stage, stage-may-go-on?), or the lab's check finds nothing -- it
 cannot see what a request names and the model lacks."
-  (let ((end (find-if #'(lambda (entry) (member (second entry) '(:done :stopped)))
-                      (session-log session) :from-end t)))
+  (let ((end (last-ending session)))
     (when (and end (eq (second end) :stopped)
                (or (stage-may-go-on? session)
                    ;; the check's own refusal of a closing reply
@@ -1237,11 +1273,22 @@ cannot see what a request names and the model lacks."
           (let ((*completion-check?* t)) (completion-problems session))
           (list "there is no MODEL yet")))))
 
+(defun done-gate-line (session)
+  "What the done gate sends SESSION's build on with, or nil when it is not
+sent on: the findings of the lab's check (done-gate-findings), else, for a
+build stopped at its round cap while still asking for tools, the word that
+it has more rounds.  The second value says which, :findings or :cap."
+  (let ((findings (done-gate-findings session)))
+    (cond (findings (values (format nil *done-gate-text* findings) :findings))
+          ((stopped-at-round-cap? session) (values *done-gate-cap-text* :cap)))))
+
 (defun run-gated-prompt (session prompt tries &key claimed?)
   "PROMPT worked on as run-one-prompt does, then sent on by the lab itself,
-at most TRIES times, while the completion check still finds something
-(done-gate-findings): one claim of the session throughout, each
-continuation logged as a :gate and not as a prompt of the visitor's."
+at most TRIES times, while the completion check still finds something or
+the build was stopped at its round cap still asking for tools
+(done-gate-line): one claim of the session throughout, each continuation
+logged as a :gate and not as a prompt of the visitor's, and allowed
+*done-gate-rounds* rounds when that is set."
   (unless (or claimed? (claim! session))
     (return-from run-gated-prompt "Still working on the previous request."))
   (let ((result nil))
@@ -1249,11 +1296,15 @@ continuation logged as a :gate and not as a prompt of the visitor's."
          (progn
            (setq result (run-one-prompt session prompt :claimed? t :keep-busy? t))
            (loop repeat tries
-                 for findings = (done-gate-findings session)
-                 while findings
-                 do (log-event session :note "The lab's check still finds the model not done, so the lab sends the agent on with what it found.")
-                    (setq result (run-one-prompt session (format nil *done-gate-text* findings)
-                                                 :claimed? t :keep-busy? t :log-as :gate))))
+                 do (multiple-value-bind (line why) (done-gate-line session)
+                      (unless line (return))
+                      (log-event session :note
+                                 (if (eq why :cap)
+                                     "The build was stopped at its limit of rounds while the agent was still working, so the lab sends it on."
+                                     "The lab's check still finds the model not done, so the lab sends the agent on with what it found."))
+                      (setq result (let ((*prompt-rounds* (or *done-gate-rounds* *prompt-rounds*)))
+                                     (run-one-prompt session line
+                                                     :claimed? t :keep-busy? t :log-as :gate))))))
       (setf (session-busy? session) nil)
       (save-session! session))
     result))
@@ -1267,7 +1318,8 @@ prompts are counted (the per-session cap, the funnel, the listings).  The
 stages stop after one that was refused or failed (stage-may-go-on?).  The
 completion check (Ruling 144) judges only the last stage: an earlier one is
 not meant to be complete.  Under the done gate (*house-done-gate*) a house
-session's build is sent on by the lab while the check finds something
+session's build is sent on by the lab while the check finds something, or
+when it was stopped at its round cap still asking for tools
 (run-gated-prompt).  Returns what the last prompt returned."
   (let ((stages (auto-stages session prompt))
         (tries (done-gate-tries session)))

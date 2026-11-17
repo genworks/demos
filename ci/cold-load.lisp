@@ -1374,7 +1374,8 @@ loaded) its page too."
           ;; is not there, unless a near name is; a VALUE in its own quotes is
           ;; unwrapped; a changed entry is shown.  A model with slots and no
           ;; parts is not done.  And under the gate a build the check finds
-          ;; not done is sent on by the lab, a capped number of times.
+          ;; not done is sent on by the lab, a capped number of times -- and
+          ;; so is one stopped at its round cap while still asking for tools.
           (smoke "prompt-lab the second pack of rails, a model with no parts, and the done gate"
                  (lambda ()
                    (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
@@ -1385,6 +1386,7 @@ loaded) its page too."
                             (gate (find-symbol (string '#:*house-done-gate*) :prompt-lab))
                             (mend? nil)
                             (calls 0)
+                            (tools 0)   ; the stand-in asks for a tool in its first TOOLS calls
                             (s (pl :open-session! "10.9.8.9" nil))
                             (plate "(define-object model (base-object)
   :computed-slots ((ratio (/ 1 2)))
@@ -1467,10 +1469,16 @@ loaded) its page too."
                                           (pl :write-model s plate))
                                         (flet ((event (name json) (funcall on-event name json)))
                                           (event "message_start" "{\"message\": {\"role\": \"assistant\", \"content\": [], \"usage\": {\"input_tokens\": 10}}}")
-                                          (event "content_block_start" "{\"index\": 0, \"content_block\": {\"type\": \"text\", \"text\": \"\"}}")
-                                          (event "content_block_delta" "{\"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"All done.\"}}")
-                                          (event "content_block_stop" "{\"index\": 0}")
-                                          (event "message_delta" "{\"delta\": {\"stop_reason\": \"end_turn\"}, \"usage\": {\"output_tokens\": 3}}"))
+                                          (cond ((<= calls tools)
+                                                 ;; still working: one more tool call
+                                                 (event "content_block_start" "{\"index\": 0, \"content_block\": {\"type\": \"tool_use\", \"id\": \"t1\", \"name\": \"read_model\", \"input\": {}}}")
+                                                 (event "content_block_stop" "{\"index\": 0}")
+                                                 (event "message_delta" "{\"delta\": {\"stop_reason\": \"tool_use\"}, \"usage\": {\"output_tokens\": 3}}"))
+                                                (t
+                                                 (event "content_block_start" "{\"index\": 0, \"content_block\": {\"type\": \"text\", \"text\": \"\"}}")
+                                                 (event "content_block_delta" "{\"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"All done.\"}}")
+                                                 (event "content_block_stop" "{\"index\": 0}")
+                                                 (event "message_delta" "{\"delta\": {\"stop_reason\": \"end_turn\"}, \"usage\": {\"output_tokens\": 3}}"))))
                                         (values 200 nil nil)))
                                 (part "no gate: the build stops not done" (lambda ()
                                   (pl :write-model s broken)
@@ -1493,6 +1501,35 @@ loaded) its page too."
                                       (error "the cap: ~s after ~d calls, ~d continuations" (last-kind) calls (- (count :gate (kinds)) before))))
                                   (unless (= 3 (count :prompt (kinds)))
                                     (error "a continuation was counted as a prompt of the visitor's: ~d prompts" (count :prompt (kinds))))))
+                                ;; a build stopped at its round cap while the agent still
+                                ;; asks for tools: the model passes the check, so the
+                                ;; findings alone would leave it there
+                                (part "a build stopped at its round cap is sent on" (lambda ()
+                                  (pl :write-model s plate)
+                                  (progv (list (lab '#:*house-max-rounds*)) (list 2)
+                                    (setf (symbol-value gate) nil mend? nil calls 0 tools 3)
+                                    (pl :run-prompt s "a plate, slowly")
+                                    (unless (and (eq (last-kind) :stopped) (= calls 3)
+                                                 (search "2 rounds" (third (car (last (pl :session-log s))))))
+                                      (error "with no gate, at the cap: ~s after ~d calls" (last-kind) calls))
+                                    (let ((before (count :gate (kinds))))
+                                      (setf (symbol-value gate) 2 calls 0)
+                                      (pl :run-prompt s "a plate, slowly, again")
+                                      (unless (and (eq (last-kind) :done) (= calls 4) (= 1 (- (count :gate (kinds)) before)))
+                                        (error "stopped at the cap under the gate: ~s after ~d calls, ~d continuations"
+                                               (last-kind) calls (- (count :gate (kinds)) before)))
+                                      (unless (search "more rounds" (third (find :gate (pl :session-log s) :key #'second :from-end t)))
+                                        (error "the continuation after the cap does not say there are more rounds")))
+                                    ;; a continuation with an allowance of its own
+                                    (let ((rounds (find-symbol (string '#:*done-gate-rounds*) :prompt-lab))
+                                          (before (count :gate (kinds))))
+                                      (unless rounds (error "this lab has no *done-gate-rounds*"))
+                                      (progv (list rounds) (list 1)
+                                        (setf calls 0 tools 5)
+                                        (pl :run-prompt s "a plate, more slowly still")
+                                        (unless (and (eq (last-kind) :done) (= calls 6) (= 2 (- (count :gate (kinds)) before)))
+                                          (error "continuations of one round each: ~s after ~d calls, ~d continuations"
+                                                 (last-kind) calls (- (count :gate (kinds)) before))))))))
                                 (when failed (error "~{~a~^ | ~}" (reverse failed)))
                                 t)
                            (setf (fdefinition sse) saved)
