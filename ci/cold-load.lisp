@@ -1607,6 +1607,58 @@ loaded) its page too."
                            (pl :funnel-count! "builds-done" (- (count :done (kinds))))
                            (ignore-errors (pl :delete-session s))
                            (pl :funnel-count! "sessions" -1)))))))
+          ;; A RUN OF REFUSED REWRITES (the :refusal-run rail, not on by
+          ;; default): a whole define-object sent to replace_form is refused
+          ;; in a structure-only session; the third such refusal in a row
+          ;; says plainly that it will be refused again and what to call.
+          (smoke "prompt-lab a run of refused rewrites is answered plainly, on its rail"
+                 (lambda ()
+                   (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
+                     (let ((menu (find-symbol (string '#:*house-menu*) :prompt-lab))
+                           (s (pl :open-session! "10.9.8.12" nil))
+                           (whole "(define-object model (base-object)
+  :objects ((plate :type 'box :width 1 :length 1 :height 1)))"))
+                       (labels ((call (tool &rest pairs)
+                                  (multiple-value-bind (blocks error?)
+                                      (pl :run-tool s tool (loop for (key value) on pairs by #'cddr collect (cons key value)))
+                                    (values (format nil "~{~a~^ ~}"
+                                                    (loop for block in blocks
+                                                          for words = (cdr (assoc "text" block :test #'string=))
+                                                          when words collect words))
+                                            error?)))
+                                (rewrite () (call "replace_form" "name" "model" "source" whole)))
+                         (unwind-protect
+                              (progv (append (list (lab '#:*house-structure?*)) (and menu (list menu)))
+                                  (append (list :only) (and menu (list (cons (get-universal-time) nil))))
+                                (pl :set-session-model! s "house-1")
+                                (pl :ensure-model-skeleton! s)
+                                ;; by default the rail is off: the same refusal every time
+                                (dotimes (i 4)
+                                  (multiple-value-bind (words error?) (rewrite)
+                                    (unless error? (error "a whole define-object was written in a structure-only session"))
+                                    (when (search "REFUSED AGAIN" words)
+                                      (error "the rail answered although it is not on by default"))))
+                                (pl :note-whole-refusal! s nil)
+                                (progv (list (lab '#:*house-rails*)) (list '(:all :refusal-run))
+                                  (unless (and (member :upsert (pl :house-rails)) (member :refusal-run (pl :house-rails)))
+                                    (error ":all with a later rail gives ~s" (pl :house-rails)))
+                                  (let ((first (rewrite)) (second (rewrite)) (third (rewrite)) (fourth (rewrite)))
+                                    (when (or (search "REFUSED AGAIN" first) (search "REFUSED AGAIN" second))
+                                      (error "the plain words came before the run was three long"))
+                                    (unless (and (search "REFUSED AGAIN" third) (search "third time" third)
+                                                 (search "add_slot" third))
+                                      (error "the third refusal in a row reads: ~a" third))
+                                    (unless (search "fourth time" fourth)
+                                      (error "the fourth refusal in a row reads: ~a" fourth)))
+                                  ;; an edit that goes through ends the run
+                                  (when (nth-value 1 (call "add_slot" "object" "model" "section" "computed-slots"
+                                                           "slot" "n" "value" "1"))
+                                    (error "the add_slot between the runs failed"))
+                                  (when (search "REFUSED AGAIN" (rewrite))
+                                    (error "an edit that went through did not end the run")))
+                                t)
+                           (ignore-errors (pl :delete-session s))
+                           (pl :funnel-count! "sessions" -1)))))))
           ;; NAMED RESULTS, DECLARED FIRST: with *house-named-results* on, one
           ;; call lists the results a request names and the lab writes each
           ;; into MODEL as a slot that signals until it is written; the check

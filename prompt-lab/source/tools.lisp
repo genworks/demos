@@ -771,10 +771,26 @@ own work at no cost.  Nil: the tools as they were.")
   "What the rails did during the tool call being run, newest first: texts
 run-tool appends to the call's result.")
 
+(defparameter *later-rail-names* '(:refusal-run)
+  "Rails built since *rail-names* and not yet measured in a trial.  T does
+not turn them on; a list that names one does, with :all in it for every
+rail of *rail-names* beside.
+  :refusal-run   a whole define-object sent to replace_form and refused
+                 several times in a row (*refusal-run-length*) is answered
+                 plainly: it will be refused again, and what to call
+                 instead (*refusal-run-text*)")
+
+(defparameter *structural-tool-names* '("set_slot" "add_slot" "remove_slot" "new_object_def" "replace_form")
+  "The tools that edit the model file by structure.")
+
 (defun house-rails ()
-  "The rails *house-rails* names, a list."
+  "The rails *house-rails* names, a list: T is *rail-names*; in a list,
+:all stands for those."
   (cond ((eq *house-rails* t) *rail-names*)
-        ((listp *house-rails*) *house-rails*)))
+        ((listp *house-rails*)
+         (if (member :all *house-rails*)
+             (union *rail-names* (remove :all *house-rails*))
+             *house-rails*))))
 
 (defun session-rails (session)
   "The rails SESSION rides: *house-rails* for a house session, else none."
@@ -802,6 +818,9 @@ with what the rails did (*rail-notes*) and, for a failure, any hints."
         (*rail-notes* nil)
         (*touched-entries* nil))
     (multiple-value-bind (blocks error?) (%run-tool session name input)
+      ;; an edit that went through ends a run of refused rewrites (below)
+      (when (and (not error?) (member name *structural-tool-names* :test #'string=))
+        (note-whole-refusal! session nil))
       (values (append blocks
                       (mapcar #'(lambda (note) (text-result "~a" note)) (reverse *rail-notes*))
                       (and (rail? :show-entry) *touched-entries*
@@ -1638,6 +1657,39 @@ add_slot takes them (the object defaults to NAME), all or nothing."
       (incf (gethash (list (session-id session) (string-downcase (or object ""))) *structural-failures* 0))))
   (values blocks error?))
 
+;;
+;; A RUN OF REFUSED REWRITES (the :refusal-run rail).  A house session
+;; building by structure was seen sending a whole define-object to
+;; replace_form thirty times in a row, each refused in the same words,
+;; until its context was full: a third of a run's tokens, and no model.
+;; The refusal that says how to work did not turn it.  On this rail a
+;; refusal of that kind that is the third in a row or later says instead,
+;; plainly, that the call will be refused every time, and what to call.  A
+;; run is refusals of a whole define-object with no structural edit that
+;; went through between them; reading or viewing does not end one.
+;;
+
+(defparameter *refusal-run-length* 3
+  "Integer.  From this many refusals of a whole define-object in a row, the
+:refusal-run rail answers with *refusal-run-text*.")
+
+(defparameter *refusal-run-text*
+  "REFUSED AGAIN: nothing written, and nothing will be.  This is the ~:r time in a row you sent a whole define-object to replace_form; it is refused every time here, and sending it again only uses up your rounds.  Stop rewriting ~a whole.  What the file holds of it now is what read_model shows.  Add what is missing with add_slot (its ENTRIES takes many slots in one call) and change what is wrong with set_slot, one entry at a time."
+  "What a refused whole define-object is answered with once it is a run:
+~:r the count, ~a the object's name.")
+
+(defvar *whole-refusals* (make-hash-table :test #'equal)
+  "Session id -> how many whole define-objects in a row replace_form has
+refused it.")
+
+(defun note-whole-refusal! (session refused?)
+  "Count one more refused whole define-object for SESSION and answer the
+run's length so far -- or, with REFUSED? nil, end the run."
+  (bt2:with-lock-held (*structural-failures-lock*)
+    (if refused?
+        (incf (gethash (session-id session) *whole-refusals* 0))
+        (progn (remhash (session-id session) *whole-refusals*) 0))))
+
 (defun replace-form-tool (session name source)
   "Replace the top-level form defining NAME with SOURCE, one whole form that
 defines NAME; with no such form, add SOURCE at the end of the file."
@@ -1658,7 +1710,10 @@ defines NAME; with no such form, add SOURCE at the end of the file."
                (string-equal (span-text source (first own)) "define-object")
                (< (structural-failures session name) 2))
       (return-from replace-form-tool
-        (structural-refusal "Nothing written: here a define-object is not written whole.  Change ~a one entry at a time -- add_slot, set_slot, remove_slot -- or make a new object with new_object_def.  (A whole replacement of ~a is allowed once two structural edits of it have failed.)" name name)))
+        (let ((run (note-whole-refusal! session t)))
+          (if (and (rail? :refusal-run) (>= run *refusal-run-length*))
+              (structural-refusal *refusal-run-text* run name)
+              (structural-refusal "Nothing written: here a define-object is not written whole.  Change ~a one entry at a time -- add_slot, set_slot, remove_slot -- or make a new object with new_object_def.  (A whole replacement of ~a is allowed once two structural edits of it have failed.)" name name)))))
     (let ((text (model-body-text session)))
       (multiple-value-bind (forms complete?) (top-forms text)
         (declare (ignore forms))
