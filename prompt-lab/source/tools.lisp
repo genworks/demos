@@ -427,6 +427,62 @@ FAILURE is nil when it compiled and loaded, else why it did not."
   (bt:with-lock-held (*model-load-lock*)
     (values (gethash (session-package-name session) *model-load-failures*))))
 
+;;
+;; NAMED RESULTS (2026-11-17).  The completion check cannot read which
+;; results a request names: it checks that what MODEL declares computes.  A
+;; trial's unsound builds were, more often than anything else, models the
+;; check passed that lacked results the request had asked for.  So for a
+;; house session the lab may ask first which results the request names
+;; (agent.lisp, extract-results) and declare each in MODEL as a computed
+;; slot that signals until it is written.  The check, the findings sent
+;; with every edit and the done gate then see them like any slot that does
+;; not compute.
+;;
+
+(defparameter *house-named-results* nil
+  "Boolean.  Whether a house session's model build has the results its
+request names declared first: listed by one call to the session's model
+and written into MODEL as slots that signal until the agent writes them.")
+
+(defvar *session-results* (make-hash-table :test #'equal)
+  "Session id -> the results declared for it, a list of (NAME . LABEL):
+the slot's name and what the request calls it.")
+
+(defvar *session-results-lock* (bt:make-lock "prompt-lab declared results"))
+
+(defun session-results (session)
+  "The results declared for SESSION, a list of (NAME . LABEL)."
+  (bt:with-lock-held (*session-results-lock*)
+    (values (gethash (session-id session) *session-results*))))
+
+(defun set-session-results! (session results)
+  "Keep RESULTS, a list of (NAME . LABEL), as SESSION's declared results;
+nil forgets them."
+  (bt:with-lock-held (*session-results-lock*)
+    (if results
+        (setf (gethash (session-id session) *session-results*) results)
+        (remhash (session-id session) *session-results*)))
+  results)
+
+(defparameter *result-stub-words* "Not written yet"
+  "How the message of a declared result's stub begins.")
+
+(defun result-stub-value (label)
+  "The value a declared result has until the agent writes it: an error
+that says so."
+  (format nil "(error ~s)"
+          (format nil "~a: ~a.  Give this slot its expression with set_slot." *result-stub-words* label)))
+
+(defun unwritten-results (session model)
+  "The names declared for SESSION that MODEL, an instance, has no message
+for: a stub replaced along with the whole define-object, or removed."
+  (let ((declared (and (not (session-replay? session)) (session-results session))))
+    (when declared
+      (let ((have (ignore-errors (the-object model (message-list :message-type :local)))))
+        (loop for (name . nil) in declared
+              unless (member name have :test #'string-equal)
+                collect name)))))
+
 (defun geometric? (object)
   "Whether OBJECT has geometry to judge: a child whose type has no
 base-object in it (a holder of numbers) has no bounding box and is no
@@ -486,7 +542,9 @@ says nothing of the model either way."
                           :why why
                           :empty (empty-model? model leaves slots)
                           ;; slots, perhaps, but nothing to draw
-                          :no-parts (partless-model? model leaves)))))
+                          :no-parts (partless-model? model leaves)
+                          ;; results declared for the request that MODEL has lost
+                          :unwritten (unwritten-results session model)))))
             ;; the check's own limit, not the model's fault: a sound model
             ;; with one slow slot was reported as one that does not build
             (bt2:timeout ()
@@ -504,7 +562,8 @@ defined -- or the session builds an app or a project, which this check does
 not judge; and nil, with a note in the session's log, when the check ran out
 of time and judged nothing (the agent's word then stands).  It cannot read
 which results a request names: it checks that the results MODEL declares
-compute."
+compute -- and, where the lab declared the request's results first
+(*house-named-results*), that MODEL still has each of them."
   (let ((findings (completion-findings session)))
     (when (getf findings :unjudged)
       (log-event session :note "The lab's check of the model judged nothing: ~a.  The reply stands as the agent's word."
@@ -523,7 +582,9 @@ compute."
               (when (getf findings :broken)
                 (list (format nil "parts whose geometry does not compute: ~a" (some-of (getf findings :broken)))))
               (when (getf findings :failing)
-                (list (format nil "computed slots of MODEL that do not compute -- results and helpers alike, since a broken helper is a broken model: ~a" (some-of (getf findings :failing)))))))))
+                (list (format nil "computed slots of MODEL that do not compute -- results and helpers alike, since a broken helper is a broken model: ~a" (some-of (getf findings :failing)))))
+              (when (getf findings :unwritten)
+                (list (format nil "results the request names that MODEL does not have -- add each as a computed slot of MODEL under this name: ~a" (some-of (getf findings :unwritten)))))))))
 
 (defun leaf-center (leaf)
   "The midpoint of LEAF's bounding box -- not its center: leaves made by
@@ -1399,13 +1460,19 @@ nil when there is nothing to judge or the check ran out of time."
       (cond ((or (null findings) (getf findings :unjudged)) nil)
             ((getf findings :error) (format nil "MODEL does not build: ~a" (clipped (getf findings :error) 300)))
             ((getf findings :empty) "MODEL has nothing in it yet: no part and no computed slot.")
-            ((not (or (getf findings :failing) (getf findings :broken) (getf findings :no-parts)))
+            ((not (or (getf findings :failing) (getf findings :broken) (getf findings :no-parts)
+                      (getf findings :unwritten)))
              "nothing wrong: every part and every computed slot of MODEL computes.")
             (t (let ((why (getf findings :why))
-                     (broken (getf findings :broken)))
+                     (broken (getf findings :broken))
+                     (unwritten (getf findings :unwritten)))
                  (with-output-to-string (out)
                    (when (getf findings :no-parts)
                      (format out "~%MODEL has no parts yet: nothing to draw."))
+                   (when unwritten
+                     (format out "~%Results the request names that MODEL does not have (add each as a computed slot of MODEL under this name): ~{~a~^, ~}~@[ and ~d more~]"
+                             (subseq unwritten 0 (min 8 (length unwritten)))
+                             (and (> (length unwritten) 8) (- (length unwritten) 8))))
                    (when why
                      (format out "~%Computed slots of MODEL that do not compute:")
                      (loop for (name . reason) in (subseq why 0 (min 6 (length why)))
@@ -1761,6 +1828,40 @@ refused entry was refused, naming it when there are several."
                                              i count slot object count reason))))
                    (setq text next))))
     (values text nil)))
+
+(defun declare-results-in-model! (session results)
+  "Write a stub (result-stub-value) into MODEL's computed slots for each of
+RESULTS, a list of (NAME . LABEL), whose name MODEL has no slot for yet,
+in one write of the file.  Answers the names written; none, and nothing
+written, when the file has no one define-object named MODEL to take them."
+  (let* ((text (model-body-text session))
+         (found (and (nth-value 1 (top-forms text))
+                     (definitions-named text "model" '("define-object")))))
+    (when (= (length found) 1)
+      (let ((elements (second (first found)))
+            (*rails* nil)
+            (written nil))
+        (loop for (name . label) in results
+              unless (find-slot text elements name)
+                do (multiple-value-bind (next refusal)
+                       (add-entry text "model" ":computed-slots" name (result-stub-value label))
+                     (unless refusal
+                       (setq text next)
+                       (push name written)
+                       ;; the spans moved: read the form again
+                       (setq elements (second (first (definitions-named text "model" '("define-object"))))))))
+        (when written
+          ;; the lab's own lines, in the record of who wrote what (archive.lisp)
+          (let ((*model-writer* :lab))
+            (write-model session text)))
+        (reverse written)))))
+
+(defun model-takes-results? (session)
+  "Whether SESSION's model file has the one define-object named MODEL that
+declared results are written into."
+  (let ((text (model-body-text session)))
+    (and (nth-value 1 (top-forms text))
+         (= 1 (length (definitions-named text "model" '("define-object")))))))
 
 (defun add-slot-tool (session object section slot value &optional entries)
   "Add (SLOT VALUE) to SECTION of the define-object OBJECT, making the

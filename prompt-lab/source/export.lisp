@@ -296,7 +296,8 @@ the longest common subsequence; nil when the two are too big to compare
     ("own-agent" . "the author's own agent, over MCP")
     ("author" . "the author, by hand")
     ("terminal" . "the author, by hand in the terminal")
-    ("seed" . "a file the session started from"))
+    ("seed" . "a file the session started from")
+    ("lab" . "the lab itself, declaring the results the request names"))
   "How the authorship record names each writer (archive.lisp *model-writer*).")
 
 (defun authorship-versions (directory log)

@@ -998,6 +998,150 @@ told, the model can spend that reply on its closing words.")
   "What the log says when a reply is cut at max_tokens.  run-prompt's stages
 go on after it.")
 
+;;
+;; NAMED RESULTS, DECLARED FIRST (tools.lisp, *house-named-results*).  One
+;; call to the session's own model lists the results a request names; the
+;; lab writes each into MODEL as a slot that signals until it is written,
+;; and tells the agent so with the request.
+;;
+
+(defparameter *results-most* 16
+  "Integer.  At most this many results are declared for one request.")
+
+(defparameter *results-extractor-tokens* 6144
+  "Integer.  max_tokens of the call that lists a request's results, its
+thinking included.")
+
+(defparameter *results-extractor-seconds* 180
+  "Integer.  How long the call that lists a request's results may take.")
+
+(defparameter *results-extractor-text*
+  "Below is a request for a parametric 3D model.  List the RESULTS it asks the model to compute: the output values it names (not the inputs it gives, and not the parts).  One line for each, as
+
+name | what it is, with its unit
+
+where name is a short lower-case name with hyphens, as for a Lisp slot (spring-rate, solid-length-mm).  List only results the request itself names.  If it names none, answer NONE.  No other words.
+
+The request:
+
+~a"
+  "What the session's model is asked before a build; ~a takes the request.")
+
+(defparameter *results-declared-text*
+  "~a~%~%(The lab read this request and declared the results it names as computed slots of MODEL: ~{~a~^, ~}.  Each signals an error until you give it its expression with set_slot, under the same name, and the lab's check does not pass while one is unwritten.  If the request names a result that is not in this list, add it.)"
+  "The request as the agent gets it once its results are declared: ~a the
+request, ~{~} the slots' names.")
+
+(defun named-results? (session)
+  "Whether SESSION's requests have their results declared first: a house
+session building a model, with *house-named-results* on."
+  (and *house-named-results*
+       (eq (session-kind session) :model)
+       (house-model? session)
+       (not (session-replay? session))))
+
+(defvar *reserved-result-names* nil
+  "The messages every base-object has, as strings, once asked: a result
+declared under one of them would replace it.")
+
+(defun reserved-result-names ()
+  (or *reserved-result-names*
+      (setq *reserved-result-names*
+            (mapcar #'symbol-name
+                    (ignore-errors (the-object (make-object 'base-object) (message-list)))))))
+
+(defun result-name (text)
+  "TEXT as the name of a slot -- lower case, letters, digits and hyphens,
+a letter first -- or nil when nothing usable is left or the name is one
+every object already has."
+  (let* ((cleaned (string-trim "-" (with-output-to-string (out)
+                                     ;; a bullet or a number before the name goes
+                                     (loop for c across (string-downcase (string-left-trim " `*-.0123456789)" text))
+                                           do (cond ((or (char<= #\a c #\z) (digit-char-p c)) (write-char c out))
+                                                    ((member c '(#\- #\_ #\Space)) (write-char #\- out))))))))
+    (and (<= 2 (length cleaned) 48)
+         (alpha-char-p (char cleaned 0))
+         (not (member cleaned (reserved-result-names) :test #'string-equal))
+         cleaned)))
+
+(defun parse-results (text)
+  "The results a reply to *results-extractor-text* lists: (NAME . LABEL)
+for each line 'name | what it is', at most *results-most*, a name once."
+  (let ((results nil))
+    (with-input-from-string (in text)
+      (loop for line = (read-line in nil)
+            while line
+            do (let* ((bar (position #\| line))
+                      (name (and bar (result-name (subseq line 0 bar))))
+                      ;; no tilde: the label goes into the stub's error message
+                      (label (and bar (remove #\~ (string-trim " `*|" (subseq line (1+ bar)))))))
+                 (when (and name (plusp (length label))
+                            ;; the pattern line itself, said back
+                            (string/= name "name")
+                            (not (assoc name results :test #'string=))
+                            (< (length results) *results-most*))
+                   (push (cons name (subseq label 0 (min 120 (length label)))) results)))))
+    (reverse results)))
+
+(defun extract-results (session prompt)
+  "Ask SESSION's model which results PROMPT names; a list of (NAME .
+LABEL), nil when it names none.  The call is the session's: its wallet,
+its usage, the gate's word on money.  Signals when the call fails."
+  (let* ((budget (and (house-model? session) (house-thinking-budget *results-extractor-tokens*)))
+         (body (encode (apply #'h
+                              (append (when budget
+                                        (list "thinking" (h "type" "enabled" "budget_tokens" budget)))
+                                      (list "model" (session-model session)
+                                            "max_tokens" *results-extractor-tokens*
+                                            "messages" (list (h "role" "user"
+                                                                "content" (format nil *results-extractor-text* prompt))))))))
+         (key (api-key)))
+    (multiple-value-bind (status text headers)
+        (post-json *messages-url* body
+                   :headers (append (list (cons "anthropic-version" "2023-06-01"))
+                                    (when key (list (cons "x-api-key" key)))
+                                    (list (cons *session-header* (session-id session)))
+                                    (when (session-wallet session)
+                                      (list (cons *wallet-header* (session-wallet session)))))
+                   :seconds *results-extractor-seconds*)
+      (note-gate-answer session headers)
+      (let ((json (ignore-errors (yason:parse text))))
+        (unless (and (eql status 200) (hash-table-p json))
+          (error "the call answered ~a" status))
+        (when (hash-table-p (gethash "usage" json)) (add-usage session (gethash "usage" json)))
+        (parse-results (format nil "~{~a~^~%~}"
+                               (loop for block in (coerce (gethash "content" json) 'list)
+                                     when (and (hash-table-p block) (equal (gethash "type" block) "text"))
+                                       collect (gethash "text" block))))))))
+
+(defun declare-results! (session prompt)
+  "Where SESSION's requests have their results declared first
+(named-results?): list the results PROMPT names, write a stub for each
+into MODEL, keep them as the session's, and answer PROMPT as the agent is
+to get it, naming them.  PROMPT itself when nothing was declared -- the
+request names none, MODEL would not take them, or the call failed, which
+the log notes; the build goes on either way."
+  (if (not (and (named-results? session) (model-takes-results? session)))
+      prompt
+      (handler-case
+          (let* ((listed (extract-results session prompt))
+                 (written (and listed (declare-results-in-model! session listed))))
+            (cond (written
+                   (set-session-results! session
+                                         (remove-duplicates (append (session-results session)
+                                                                    (remove-if-not #'(lambda (result)
+                                                                                       (member (car result) written :test #'string=))
+                                                                                   listed))
+                                                            :key #'car :test #'string= :from-end t))
+                   (log-event session :note "The lab declared the ~d result~:p this request names in MODEL, to be written: ~{~a~^, ~}."
+                              (length written) written)
+                   (format nil *results-declared-text* prompt written))
+                  (t prompt)))
+        (error (condition)
+          (log-event session :note "The lab could not list the results this request names (~a); the build goes on without them declared."
+                     (condition-text condition))
+          prompt))))
+
 (defun run-one-prompt (session prompt &key claimed? keep-busy? (log-as :prompt))
   "Work on one visitor PROMPT to the end: call the API, run the tools it
 asks for, repeat until it finishes or a cap is reached.  Returns the
@@ -1015,9 +1159,13 @@ for a caller with more to send (run-prompt's stages)."
          ;; a session saved with a dangling tool call (before this was
          ;; guarded) is mended before the prompt goes on
          (close-dangling-tool-uses! session "the previous request ended before this tool ran")
-         (add-user-prompt! session prompt)
          ;; building by structure alone, MODEL starts as a skeleton (tools.lisp)
          (ensure-model-skeleton! session)
+         ;; a visitor's request may have its results declared in MODEL
+         ;; first (declare-results!); a stage or a continuation never
+         (add-user-prompt! session (if (eq log-as :prompt)
+                                       (declare-results! session prompt)
+                                       prompt))
          (loop for round from 1
                do (block round (multiple-value-bind (response status)
                       (handler-case (call-messages-api session)
