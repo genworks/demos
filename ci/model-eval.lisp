@@ -302,21 +302,42 @@ telling it to carry on had it edit sound models into broken ones."
        (and parts
             (format nil "Not done yet: ~{~a~^; ~}.  Fix those and reply." (nreverse parts)))))))
 
-(defun eval-run (sample model &key budget-cents out (net 250) (followups 0) followup-rounds)
+(defun eval-run (sample model &key budget-cents out (net 250) (followups 0) followup-rounds (wide 1))
   "Replay SAMPLE's prompts on MODEL, one fresh session each, until the cost
 reaches BUDGET-CENTS (nil: no ceiling).  Each session opens from an address
 of its own in 10.NET.x.y, so the lab's sessions-per-address cap never stops
 a run.  Each result is written to OUT (a JSON-lines file, appended) when
-given.  Answers the results, plists.  FOLLOWUPS (Ruling 153): up to that
-many scripted visitor lines (eval-followup-text) while the build is not
-complete; the result says whether it was complete after the build and
-after each line sent.  FOLLOWUP-ROUNDS caps each follow-up's rounds apart
-from the build's."
-  (let ((spent 0) (results nil) (index 0))
-    (dolist (item sample)
-      (when (and budget-cents (>= spent budget-cents)) (return))
-      (let* ((address (format nil "10.~d.~d.~d" net (floor index 250) (1+ (mod index 250))))
-             (session (progn (incf index) (eval-call '#:open-session! address nil))))
+given.  Answers the results, plists, in the sample's order.  FOLLOWUPS
+(Ruling 153): up to that many scripted visitor lines (eval-followup-text)
+while the build is not complete; the result says whether it was complete
+after the build and after each line sent.  FOLLOWUP-ROUNDS caps each
+follow-up's rounds apart from the build's.  WIDE: how many sessions run at
+once (1: one after another, as before).  A server that decodes several
+streams at once gives more tokens a second in all, so a wide run ends
+sooner; each session then takes longer than it would alone, so the seconds
+of a wide run's rows are not to be set beside a one-wide run's, and OUT's
+rows come in the order the sessions end."
+  (let ((spent 0) (results nil) (index 0) (failure nil)
+        (queue (copy-list sample))
+        (lock (bt:make-lock "eval-run")))
+   (labels
+    ((next-item ()
+       ;; the next prompt and its place in the sample; nil when the sample or
+       ;; the budget is spent, or a session failed
+       (bt:with-lock-held (lock)
+         (when (and queue (null failure) (not (and budget-cents (>= spent budget-cents))))
+           (values (pop queue) (prog1 index (incf index))))))
+     (work ()
+       (loop
+         (multiple-value-bind (item place) (next-item)
+           (unless item (return))
+           (handler-case (run-item item place)
+             (error (condition)
+               (bt:with-lock-held (lock) (unless failure (setq failure condition)))
+               (return))))))
+     (run-item (item place)
+      (let* ((address (format nil "10.~d.~d.~d" net (floor place 250) (1+ (mod place 250))))
+             (session (eval-call '#:open-session! address nil)))
         (unless session (error "The lab would not open a session for ~a." address))
         (unwind-protect
              (let ((start (get-internal-real-time))
@@ -338,7 +359,8 @@ from the build's."
                        ;; the ceiling holds between follow-ups too, not only
                        ;; between prompts: this session's cost so far counts
                        until (and budget-cents
-                                  (>= (+ spent (eval-cents model (eval-call '#:session-usage session)))
+                                  (>= (+ (bt:with-lock-held (lock) spent)
+                                         (eval-cents model (eval-call '#:session-usage session)))
                                       budget-cents))
                        do (progn
                             ;; a follow-up is one prompt: never staged, whatever its length
@@ -387,15 +409,23 @@ from the build's."
                                     :cache-read (getf usage :cache-read) :cache-write (getf usage :cache-write)
                                     :cents (float cents 1.0)
                                     :archived-outcome (getf item :archived-outcome))))
-                 (incf spent cents)
-                 (push result results)
-                 (when out
-                   (with-open-file (stream out :direction :output :if-exists :append :if-does-not-exist :create
-                                               :external-format :utf-8)
-                     (yason:encode (eval-json-object result) stream)
-                     (terpri stream)))))
-          (ignore-errors (eval-call '#:delete-session session)))))
-    (nreverse results)))
+                 ;; one writer at a time: the sums, the results, the file
+                 (bt:with-lock-held (lock)
+                   (incf spent cents)
+                   (push (cons place result) results)
+                   (when out
+                     (with-open-file (stream out :direction :output :if-exists :append :if-does-not-exist :create
+                                                 :external-format :utf-8)
+                       (yason:encode (eval-json-object result) stream)
+                       (terpri stream))))))
+          (ignore-errors (eval-call '#:delete-session session))))))
+    (if (and (integerp wide) (> wide 1))
+        (mapc #'bt:join-thread
+              (loop repeat wide collect (bt:make-thread #'work :name "eval-run")))
+        (work))
+    ;; a session that failed stops the run, as it always did
+    (when failure (error failure)))
+   (mapcar #'cdr (sort results #'< :key #'car))))
 
 (defun eval-log-kind (entry)
   "The kind of a session log entry, a keyword, whatever shape the lab keeps it in."
