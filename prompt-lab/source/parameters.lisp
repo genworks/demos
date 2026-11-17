@@ -106,6 +106,14 @@ reverse proxy): \"/console\" on the public workshop, \"/ttyd\" on a dev
 ship.  The page's editor link is <*console-base*>/?arg=<model file>, which
 the terminal's door script hands to emacsclient.  Nil: no link.")
 
+(defparameter *console-newcomer-arg* "newcomer"
+  "String or nil.  A second ?arg= the page's main console link carries, by
+which the terminal's door script opens the file in an Emacs frame set up
+for someone new to it (a menu bar, the usual keys, the mouse) where the
+host's Emacs has such a setting; a door script that does not know the
+word ignores it.  A second, smaller link opens the file without it.  Nil:
+one link, without it, as before.")
+
 (defparameter *external-agent?* nil
   "Nil, t or :authors.  True opens the two doors of external.lisp: an agent
 that runs somewhere else (a developer's headless Claude Code, say) is

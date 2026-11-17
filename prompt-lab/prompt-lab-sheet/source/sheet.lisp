@@ -1751,8 +1751,17 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               (when console
                                 (htm (:p :class "pl-line"
                                          (:a :href console :target "_blank" :rel "noopener"
-                                             :data-doc "Open the model file in a terminal on the host, beside the page"
-                                             "Open the file in a console")))))
+                                             :data-doc "Open the model file in Emacs in a terminal on the host, beside the page.  Save there, then press Review my edits here."
+                                             "Open the file in a console")
+                                         ;; the same file in Emacs as it comes, for
+                                         ;; whoever knows it (parameters.lisp,
+                                         ;; *console-newcomer-arg*)
+                                         (when *console-newcomer-arg*
+                                           (htm " "
+                                                (:a :href (console-url session :plain? t) :target "_blank" :rel "noopener"
+                                                    :class "pl-dim" :style "font-size:.85em"
+                                                    :data-doc "The same file in Emacs as it comes, with its own keys and no menu bar"
+                                                    "(plain Emacs)")))))))
                             (:p :id "pl-download-note" :class "pl-line")))))))
 
   :functions

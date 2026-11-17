@@ -723,6 +723,26 @@ loaded) its page too."
                               t)
                          (ignore-errors (pl :delete-session s))
                          (pl :funnel-count! "sessions" -1))))))
+          ;; THE CONSOLE LINKS: the main one asks the terminal's door script for
+          ;; a newcomer's frame with a second ?arg=, the plain one does not
+          (smoke "prompt-lab console links: a newcomer's frame asked for, and a plain one"
+                 (lambda ()
+                   (let ((found (uiop:symbol-call :prompt-lab :find-session session))
+                         (arg (lab '#:*console-newcomer-arg*)))
+                     (flet ((url (&rest keys) (apply #'uiop:symbol-call :prompt-lab :console-url found keys))
+                            (ends? (text end) (and (stringp text) (>= (length text) (length end))
+                                                   (string= end text :start2 (- (length text) (length end))))))
+                       (progv (list (lab '#:*console-base*)) (list "/console")
+                         (unless (and (ends? (url) "model.lisp&arg=newcomer") (eql 0 (search "/console/?arg=/" (url))))
+                           (error "the console link is ~a" (url)))
+                         (unless (ends? (url :plain? t) "model.lisp")
+                           (error "the plain console link is ~a" (url :plain? t)))
+                         (progv (list arg) (list nil)
+                           (unless (ends? (url) "model.lisp")
+                             (error "with no word to pass the console link is ~a" (url)))))
+                       (progv (list (lab '#:*console-base*)) (list nil)
+                         (when (url) (error "a console link with no console")))
+                       t))))
           ;; the author takes their own source at any time; nobody else does
           (smoke "prompt-lab source download: the owner's file, a stranger's 404"
                  (lambda ()

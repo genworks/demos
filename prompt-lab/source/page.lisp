@@ -373,10 +373,13 @@ the page's editor shows, and what write-model takes back."
 (defun viewer-url (session)
   (format nil "~a/viewer?session=~a" *url-prefix* (session-id session)))
 
-(defun console-url (session)
-  "The terminal opened on the session's model file, or nil without a terminal."
+(defun console-url (session &key plain?)
+  "The terminal opened on the session's model file, or nil without a
+terminal: in a frame for a newcomer to Emacs where the host has that
+setting (*console-newcomer-arg*), or with PLAIN? in Emacs as it comes."
   (when *console-base*
-    (format nil "~a/?arg=~a" *console-base* (namestring (session-model-file session)))))
+    (format nil "~a/?arg=~a~@[&arg=~a~]" *console-base* (namestring (session-model-file session))
+            (and (not plain?) *console-newcomer-arg*))))
 
 ;;
 ;; The gate's side doors -- balance, top-up, confirm -- beside the
