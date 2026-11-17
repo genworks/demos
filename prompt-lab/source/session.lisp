@@ -371,6 +371,7 @@ there until its author decides or its time runs out (closed.lisp)."
   (note-model-load! session nil)
   (set-session-results! session nil)
   (note-whole-refusal! session nil)
+  (forget-prompt-tokens! session)
   (set-own-agent! session nil)
   (let ((package (find-package (session-package-name session))))
     (when package (delete-package package)))

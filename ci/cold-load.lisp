@@ -1569,6 +1569,30 @@ loaded) its page too."
                                       (error "the cap: ~s after ~d calls, ~d continuations" (last-kind) calls (- (count :gate (kinds)) before))))
                                   (unless (= 3 (count :prompt (kinds)))
                                     (error "a continuation was counted as a prompt of the visitor's: ~d prompts" (count :prompt (kinds))))))
+                                ;; no room in the context for another allowance of rounds
+                                ;; (Ruling 263): the stand-in's every call reports a prompt
+                                ;; of 10 tokens, so a context of 10 has no room and one of
+                                ;; 1000 has
+                                (part "the gate sends nothing on where the context has no room" (lambda ()
+                                  (let ((context (lab '#:*done-gate-context-tokens*)))
+                                    (unless context (error "this lab has no *done-gate-context-tokens*"))
+                                    (pl :write-model s broken)
+                                    (setf (symbol-value gate) 2 mend? nil calls 0)
+                                    (let ((before (count :gate (kinds))))
+                                      (progv (list context) (list 10)
+                                        (pl :run-prompt s "a plate in a full context"))
+                                      (unless (and (eq (last-kind) :note) (= calls 1) (= before (count :gate (kinds)))
+                                                   (search "does not send the build on" (third (car (last (pl :session-log s))))))
+                                        (error "with no room: ~s after ~d calls, ~d continuations"
+                                               (last-kind) calls (- (count :gate (kinds)) before))))
+                                    ;; the arithmetic, on the sizes of the arm's builds: one
+                                    ;; at 126K after 61 calls has no room; one at 104K after
+                                    ;; 46 has room for 8 rounds, not 20; one at 40K for all 20
+                                    (let ((none (pl :rounds-that-fit 126389 2000 61 20 131072))
+                                          (some (pl :rounds-that-fit 104357 2000 46 20 131072))
+                                          (all (pl :rounds-that-fit 40000 2000 20 20 131072)))
+                                      (unless (and (zerop none) (= some 8) (= all 20))
+                                        (error "rounds that fit: ~d, ~d, ~d" none some all))))))
                                 ;; a build stopped at its round cap while the agent still
                                 ;; asks for tools: the model passes the check, so the
                                 ;; findings alone would leave it there

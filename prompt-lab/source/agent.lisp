@@ -1159,6 +1159,9 @@ for a caller with more to send (run-prompt's stages)."
          ;; a session saved with a dangling tool call (before this was
          ;; guarded) is mended before the prompt goes on
          (close-dangling-tool-uses! session "the previous request ended before this tool ran")
+         ;; a visitor's request starts its count of prompt sizes afresh; a
+         ;; stage or a continuation of it goes on counting
+         (when (eq log-as :prompt) (forget-prompt-tokens! session))
          ;; building by structure alone, MODEL starts as a skeleton (tools.lisp)
          (ensure-model-skeleton! session)
          ;; a visitor's request may have its results declared in MODEL
@@ -1203,6 +1206,8 @@ for a caller with more to send (run-prompt's stages)."
                                               (let ((text (yason-text response)))
                                                 (subseq text 0 (min 200 (length text))))))))
                     (add-usage session (gethash "usage" response))
+                    ;; the prompt's size, for the done gate's room (Ruling 263)
+                    (note-prompt-tokens! session (gethash "usage" response))
                     (when (and (session-wallet session) (null (session-credits session)))
                       ;; a wallet named but never priced: ask once
                       (refresh-balance! session))
@@ -1399,6 +1404,80 @@ findings.")
   "What a continuation of the done gate tells an agent stopped at its round
 cap with a model the lab's check passes.")
 
+;;
+;; ROOM FOR A CONTINUATION (Ruling 263).  A continuation sends the whole
+;; conversation again and adds its own rounds to it.  In the named-results
+;; arm one build's conversation stood at about 126K tokens when it ended;
+;; the gate sent it on, the reply was cut at the 128K context, and the next
+;; continuation was refused for exceeding it.  So before sending a build on
+;; the gate asks how many rounds fit: from the last request's prompt as the
+;; server counted it, at the rate this request has grown per call, up to a
+;; share of the context.  It sends the build on with that many rounds, if
+;; it is fewer than the continuation's own, and not at all when fewer than
+;; *done-gate-least-rounds* fit.  (Refusing outright whenever the full
+;; allowance would not fit was tried on the archived builds first: it would
+;; also have stopped the one continuation in that arm that mended a build,
+;; at about 104K, which finished in 14 rounds.)
+;;
+
+(defparameter *done-gate-context-tokens* 131072
+  "Nil, or the context the house model serves a request in, in tokens (one
+slot of house-1).  Nil: the gate sends a build on without asking whether
+there is room.")
+
+(defparameter *done-gate-context-share* 0.95
+  "Number.  The share of *done-gate-context-tokens* a continuation may be
+expected to fill; the rest is held for the estimate's error and the last
+reply.")
+
+(defvar *request-prompt-tokens* (make-hash-table :test #'equal)
+  "Session id -> the prompt tokens of each call of its current request,
+newest first, as the server reported them (input plus cache read and
+written).")
+
+(defun note-prompt-tokens! (session usage)
+  "Keep the prompt size USAGE reports for SESSION's call."
+  (when (hash-table-p usage)
+    (let ((tokens (+ (or (gethash "input_tokens" usage) 0)
+                     (or (gethash "cache_read_input_tokens" usage) 0)
+                     (or (gethash "cache_creation_input_tokens" usage) 0))))
+      (when (plusp tokens)
+        (bt:with-lock-held (*session-results-lock*)
+          (push tokens (gethash (session-id session) *request-prompt-tokens*)))))))
+
+(defun forget-prompt-tokens! (session)
+  (bt:with-lock-held (*session-results-lock*)
+    (remhash (session-id session) *request-prompt-tokens*)))
+
+(defparameter *done-gate-least-rounds* 4
+  "Integer.  A continuation for which fewer rounds than this fit in the
+context is not sent: so few rounds rarely mend a build, and the last of
+them would be its closing reply.  (One allowed fewer than this in all is
+sent when they all fit.)")
+
+(defun rounds-that-fit (last first calls rounds context &optional (share *done-gate-context-share*))
+  "How many of ROUNDS rounds are expected to fit in SHARE of CONTEXT tokens,
+for a request whose CALLS calls grew its prompt from FIRST to LAST tokens,
+at that request's growth per call: ROUNDS when it has not grown.  Never
+below 0."
+  (let ((growth (if (> calls 1) (/ (max 0 (- last first)) (1- calls)) 0))
+        (room (- (* share context) last)))
+    (cond ((<= room 0) 0)
+          ((zerop growth) rounds)
+          (t (min rounds (floor room growth))))))
+
+(defun done-gate-room (session rounds)
+  "How many of ROUNDS rounds a continuation of SESSION's build may have
+(rounds-that-fit): ROUNDS when there is no context to keep under
+(*done-gate-context-tokens* nil) or no call of this request reported its
+size.  Second value: the last prompt's tokens."
+  (let ((sizes (bt:with-lock-held (*session-results-lock*)
+                 (gethash (session-id session) *request-prompt-tokens*))))
+    (if (or (null *done-gate-context-tokens*) (null sizes))
+        rounds
+        (values (rounds-that-fit (first sizes) (car (last sizes)) (length sizes) rounds *done-gate-context-tokens*)
+                (first sizes)))))
+
 (defun done-gate-tries (session)
   "How many continuations the done gate may send SESSION's build: a house
 session building a model, with *house-done-gate* a whole number above 0."
@@ -1446,13 +1525,23 @@ logged as a :gate and not as a prompt of the visitor's, and allowed
            (loop repeat tries
                  do (multiple-value-bind (line why) (done-gate-line session)
                       (unless line (return))
-                      (log-event session :note
-                                 (if (eq why :cap)
-                                     "The build was stopped at its limit of rounds while the agent was still working, so the lab sends it on."
-                                     "The lab's check still finds the model not done, so the lab sends the agent on with what it found."))
-                      (setq result (let ((*prompt-rounds* (or *done-gate-rounds* *prompt-rounds*)))
-                                     (run-one-prompt session line
-                                                     :claimed? t :keep-busy? t :log-as :gate))))))
+                      ;; only as many rounds as the context has room for (Ruling 263)
+                      (let ((allowed (or *done-gate-rounds* *prompt-rounds* (max-rounds session))))
+                        (multiple-value-bind (fit last) (done-gate-room session allowed)
+                          ;; (a continuation allowed fewer rounds than the least
+                          ;; is sent when all of them fit)
+                          (when (< fit (min allowed *done-gate-least-rounds*))
+                            (log-event session :note "The lab does not send the build on: its conversation is already ~:d tokens, and there is room for ~d more round~:p at most before what the model can hold (~:d)."
+                                       last fit *done-gate-context-tokens*)
+                            (return))
+                          (log-event session :note "~a~:[~;  Its conversation is already ~:d tokens, so it has ~d rounds, not ~d.~]"
+                                     (if (eq why :cap)
+                                         "The build was stopped at its limit of rounds while the agent was still working, so the lab sends it on."
+                                         "The lab's check still finds the model not done, so the lab sends the agent on with what it found.")
+                                     (< fit allowed) last fit allowed)
+                          (setq result (let ((*prompt-rounds* fit))
+                                         (run-one-prompt session line
+                                                         :claimed? t :keep-busy? t :log-as :gate))))))))
       (setf (session-busy? session) nil)
       (save-session! session))
     result))
