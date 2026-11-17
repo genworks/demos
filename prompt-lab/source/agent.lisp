@@ -1142,6 +1142,58 @@ the log notes; the build goes on either way."
                      (condition-text condition))
           prompt))))
 
+;;
+;; EXAMPLES (candidate 12).  A house model writes Gendl from what its
+;; training and the primer gave it.  With *house-examples* the first
+;; request of a house session that builds a model comes with one or two
+;; whole models the house has written for other requests, the nearest it
+;; has, as a pattern of how a model is written here.  Which models, and how
+;; they are found, is the caller's: the lab only puts them in.
+;;
+
+(defparameter *house-examples* nil
+  "Nil, or a function of a session and its first request answering the
+examples to give with it: a list of (LABEL . SOURCE), LABEL naming where
+the model comes from, SOURCE its text.  Nil: no examples.")
+
+(defparameter *house-example-characters* 14000
+  "Integer.  At most this many characters of one example are given.")
+
+(defparameter *house-examples-text*
+  "Before the request: ~d model~:p from the house's own collection, written for other requests, shown as a pattern of how a model is written here -- its objects, inputs with input-controls, results as computed slots with their units, placement.  ~:[It is~;They are~] not this request.  Take the way of writing, not the content: build what the request below asks.~%~{~%=== ~a ===~%~a~%~}~%=== The request ===~%~%~a"
+  "The first request as the agent gets it with examples: ~d their number, a
+boolean for the plural, ~{~} label and source by turns, ~a the request.")
+
+(defun house-examples (session prompt)
+  "The examples SESSION's request PROMPT is given, a list of (LABEL .
+SOURCE), each clipped to *house-example-characters*; nil unless
+*house-examples* is set and this is the first request of a house session
+that builds a model."
+  (when (and *house-examples*
+             (eq (session-kind session) :model)
+             (house-model? session)
+             (not (session-replay? session))
+             (<= (count :prompt (session-log session) :key #'second) 1))
+    (loop for (label . source) in (ignore-errors (funcall *house-examples* session prompt))
+          when (and (stringp label) (stringp source) (plusp (length source)))
+            collect (cons label (if (> (length source) *house-example-characters*)
+                                    (concatenate 'string (subseq source 0 *house-example-characters*)
+                                                 (format nil "~%;; ... (the rest of this example is left out)"))
+                                    source)))))
+
+(defun with-examples (session prompt text)
+  "TEXT, the request PROMPT as the agent is to get it, preceded by the
+examples SESSION is given for it (house-examples), which the log names."
+  (let ((examples (house-examples session prompt)))
+    (if (null examples)
+        text
+        (progn
+          (log-event session :note "The lab gives the agent ~d model~:p of its own as a pattern: ~{~a~^; ~}."
+                     (length examples) (mapcar #'car examples))
+          (format nil *house-examples-text* (length examples) (rest examples)
+                  (loop for (label . source) in examples append (list label source))
+                  text)))))
+
 (defun run-one-prompt (session prompt &key claimed? keep-busy? (log-as :prompt))
   "Work on one visitor PROMPT to the end: call the API, run the tools it
 asks for, repeat until it finishes or a cap is reached.  Returns the
@@ -1166,8 +1218,9 @@ for a caller with more to send (run-prompt's stages)."
          (ensure-model-skeleton! session)
          ;; a visitor's request may have its results declared in MODEL
          ;; first (declare-results!); a stage or a continuation never
+         ;; and the house's own models as examples (house-examples)
          (add-user-prompt! session (if (eq log-as :prompt)
-                                       (declare-results! session prompt)
+                                       (with-examples session prompt (declare-results! session prompt))
                                        prompt))
          (loop for round from 1
                do (block round (multiple-value-bind (response status)

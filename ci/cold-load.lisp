@@ -1683,6 +1683,62 @@ loaded) its page too."
                                 t)
                            (ignore-errors (pl :delete-session s))
                            (pl :funnel-count! "sessions" -1)))))))
+          ;; EXAMPLES (candidate 12): with *house-examples* set, a house
+          ;; session's first request goes to the agent with the house's own
+          ;; models before it, and the log names them; a later request, a
+          ;; session not on the house model, or the switch off: none.
+          (smoke "prompt-lab the house's own models as examples with a first request"
+                 (lambda ()
+                   (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
+                     (let* ((sse (lab '#:post-sse))
+                            (saved (fdefinition sse))
+                            (menu (find-symbol (string '#:*house-menu*) :prompt-lab))
+                            (examples (find-symbol (string '#:*house-examples*) :prompt-lab))
+                            (bodies nil)
+                            (s (pl :open-session! "10.9.8.13" nil))
+                            (other (pl :open-session! "10.9.8.13" nil)))
+                       (labels ((kinds (session) (mapcar #'second (pl :session-log session))))
+                         (unless examples (error "this lab has no *house-examples*"))
+                         (unwind-protect
+                              (progv (append (list (lab '#:*stream-replies?*) examples) (and menu (list menu)))
+                                  (append (list t (lambda (session request)
+                                                    (declare (ignore session request))
+                                                    (list (cons "catalog: a sample bracket"
+                                                                "(define-object model (base-object) :objects ((sample-plate-zz :type 'box)))"))))
+                                          (and menu (list (cons (get-universal-time) nil))))
+                                (setf (fdefinition sse)
+                                      (lambda (url body &key headers seconds on-event)
+                                        (declare (ignore url headers seconds))
+                                        (push body bodies)
+                                        (flet ((event (name json) (funcall on-event name json)))
+                                          (event "message_start" "{\"message\": {\"role\": \"assistant\", \"content\": [], \"usage\": {\"input_tokens\": 10}}}")
+                                          (event "content_block_start" "{\"index\": 0, \"content_block\": {\"type\": \"text\", \"text\": \"\"}}")
+                                          (event "content_block_delta" "{\"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"All done.\"}}")
+                                          (event "content_block_stop" "{\"index\": 0}")
+                                          (event "message_delta" "{\"delta\": {\"stop_reason\": \"end_turn\"}, \"usage\": {\"output_tokens\": 3}}"))
+                                        (values 200 nil nil)))
+                                (pl :set-session-model! s "house-1")
+                                (pl :run-prompt s "a plate")
+                                (unless (and (search "sample-plate-zz" (first bodies))
+                                             (search "=== The request ===" (first bodies)))
+                                  (error "the first request went out without its example"))
+                                (unless (find-if (lambda (e) (search "catalog: a sample bracket" (third e))) (pl :session-log s))
+                                  (error "the log does not name the example"))
+                                (pl :run-prompt s "a thicker plate")
+                                (when (search "sample-plate-zz" (subseq (first bodies) (search "a thicker plate" (first bodies))))
+                                  (error "a later request was given the example again"))
+                                ;; not on the house model: no examples
+                                (pl :run-prompt other "a plate")
+                                (when (search "sample-plate-zz" (first bodies))
+                                  (error "a session not on the house model was given examples"))
+                                t)
+                           (setf (fdefinition sse) saved)
+                           (dolist (session (list s other))
+                             (pl :funnel-count! "prompts" (- (count :prompt (kinds session))))
+                             (pl :funnel-count! "builds-stopped" (- (count :stopped (kinds session))))
+                             (pl :funnel-count! "builds-done" (- (count :done (kinds session))))
+                             (ignore-errors (pl :delete-session session))
+                             (pl :funnel-count! "sessions" -1))))))))
           ;; NAMED RESULTS, DECLARED FIRST: with *house-named-results* on, one
           ;; call lists the results a request names and the lab writes each
           ;; into MODEL as a slot that signals until it is written; the check
