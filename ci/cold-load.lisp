@@ -154,7 +154,7 @@ thing this check should report instead."
   '((:brick-wall :brick-wall-demo :publish-brick-wall! "/demo/brick-wall")
     (:bus :genworks.demos.bus :publish-bus! "/demo/bus")
     (:pod-line :pod-line-demo :publish-pod-line! "/demo/pod-line")
-    (:robot :robot-demo :publish-robot! "/demo/robot")
+    (:robot-demo :robot-demo :publish-robot! "/demo/robot")
     (:staircase :staircase-demo :publish-staircase! "/demo/staircase")
     ;; surf's two, on Genworks GDL only (see *not-loaded*)
     (:gear :gear :publish-gear! "/demo/gear")
