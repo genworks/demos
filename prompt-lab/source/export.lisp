@@ -51,9 +51,12 @@ extension, and the label the page shows.")
   "Keyword. The drawing system's views-config for the PDF sheet.")
 
 (defun solids-available? ()
-  "Whether this engine writes solids: a brep type is defined."
+  "Whether this engine writes solids: the solids engine (*engine* :solid,
+which has a solid modeller aboard) with a brep type defined.  A brep type
+alone is not enough: open Gendl's surf defines the class too, and a free
+lab that offered STEP, IGES and STL answered every such download 422."
   (let ((symbol (find-symbol (image-case "BREP") :surf)))
-    (and symbol (find-class symbol nil) t)))
+    (and (eq *engine* :solid) symbol (find-class symbol nil) t)))
 
 (defun download-formats ()
   "List of the formats this lab offers: the drawings everywhere, STEP,
