@@ -1196,6 +1196,126 @@ that builds a model."
                                                  (format nil "~%;; ... (the rest of this example is left out)"))
                                     source)))))
 
+;;
+;; CHOOSING EXAMPLES AT RUN TIME.  `nearest-examples' is a function to set
+;; *house-examples* to: it reads a pool directory -- for each example a
+;; <name>.lisp model and a <name>.txt, the request it was built for -- and
+;; answers the models whose requests share the most weighted words with
+;; this one (tf-idf over the pool, cosine).  Words, not an embedding: it
+;; needs no service beside the lab, answers the same way every time, and
+;; chose for the trial prompts the same models a person would.  A model
+;; whose request covers most of this request's words is this request's own
+;; answer, or near it, and is never given (*examples-leak-share*); one
+;; less near than *examples-least-score* is not given either.
+;;
+
+(defparameter *examples-pool* nil
+  "Nil, or the directory of the pool `nearest-examples' chooses from.")
+
+(defparameter *examples-most* 2
+  "Integer.  At most this many examples go with one request.")
+
+(defparameter *examples-least-score* 0.12
+  "Number.  An example whose nearness to the request is below this is not
+given.  Chosen on the trial prompts: above it were models of the same kind
+of mechanism; below it, Gendl's own regression tests.")
+
+(defparameter *examples-leak-share* 0.6
+  "Number.  An example whose request holds this share of the request's
+words or more is taken to be the request's own answer, and never given.")
+
+(defparameter *examples-boilerplate* '("(This prompt was written by")
+  "Texts that begin a part of a request common to many requests -- a house
+brief -- which nearness ignores, in the request and in the pool alike.")
+
+(defparameter *examples-stop-words*
+  '("the" "and" "for" "with" "its" "each" "from" "that" "this" "are" "into" "one" "two" "per"
+    "inputs" "input" "parts" "part" "compute" "model" "state" "states" "default" "shown" "show"
+    "about" "over" "under" "between" "them" "they" "their" "which" "when" "where" "also" "both"
+    "mm" "deg" "degrees" "kg" "rpm" "km" "computed" "slot" "slots" "results" "result")
+  "Words nearness ignores.")
+
+(defun request-words (text)
+  "TEXT's words for nearness: up to the first of *examples-boilerplate*,
+lower case, letters only, three or more, none of *examples-stop-words*."
+  (let* ((cut (let ((ats (remove nil (mapcar #'(lambda (mark) (search mark text)) *examples-boilerplate*))))
+                (and ats (reduce #'min ats))))
+         (text (string-downcase (if cut (subseq text 0 cut) text)))
+         (out nil)
+         (word (make-string-output-stream)))
+    (flet ((flush ()
+             (let ((w (get-output-stream-string word)))
+               (when (and (>= (length w) 3) (not (member w *examples-stop-words* :test #'string=)))
+                 (push w out)))))
+      (loop for c across text
+            do (if (alpha-char-p c) (write-char c word) (flush)))
+      (flush))
+    (nreverse out)))
+
+(defvar *examples-pool-cache* nil
+  "(directory write-date entries): the pool as last read, each entry
+(name model-file words).")
+
+(defun examples-pool (directory)
+  "The pool in DIRECTORY, each (name model-file words), read again when a
+file there changed."
+  (let* ((models (directory (merge-pathnames "*.lisp" directory)))
+         (stamp (reduce #'max models :key #'file-write-date :initial-value 0)))
+    (if (and *examples-pool-cache*
+             (equal (first *examples-pool-cache*) (namestring directory))
+             (eql (second *examples-pool-cache*) stamp))
+        (third *examples-pool-cache*)
+        (let ((entries (loop for model in models
+                             for about = (make-pathname :type "txt" :defaults model)
+                             when (probe-file about)
+                               collect (list (pathname-name model) model
+                                             (request-words (uiop:read-file-string about :external-format :utf-8))))))
+          (setq *examples-pool-cache* (list (namestring directory) stamp entries))
+          entries))))
+
+(defun word-weights (word-lists)
+  "A tf-idf table (word -> weight) for each of WORD-LISTS."
+  (let ((df (make-hash-table :test #'equal)) (n (length word-lists)))
+    (dolist (words word-lists)
+      (dolist (w (remove-duplicates words :test #'string=)) (incf (gethash w df 0))))
+    (loop for words in word-lists
+          collect (let ((out (make-hash-table :test #'equal)))
+                    (dolist (w words) (incf (gethash w out 0)))
+                    (maphash #'(lambda (w count)
+                                 (setf (gethash w out) (* count (log (/ (+ 1 n) (+ 1 (gethash w df 0)))))))
+                             out)
+                    out))))
+
+(defun weights-cosine (a b)
+  (let ((dot 0) (na 0) (nb 0))
+    (maphash #'(lambda (w x) (incf na (* x x)) (let ((y (gethash w b))) (when y (incf dot (* x y))))) a)
+    (maphash #'(lambda (w y) (declare (ignore w)) (incf nb (* y y))) b)
+    (if (or (zerop na) (zerop nb)) 0 (/ dot (sqrt (* na nb))))))
+
+(defun nearest-examples (session prompt &key (pool *examples-pool*))
+  "The examples of POOL nearest the request PROMPT, a list of (LABEL .
+SOURCE), nearest first: at most *examples-most*, none below
+*examples-least-score*, none that is the request's own answer or near it
+(*examples-leak-share*).  Nil without a pool.  A function to set
+*house-examples* to."
+  (declare (ignore session))
+  (when (and pool (probe-file pool))
+    (let* ((entries (examples-pool pool))
+           (words (request-words prompt))
+           (distinct (remove-duplicates words :test #'string=))
+           (tables (word-weights (cons words (mapcar #'third entries))))
+           (scored (loop for (name file their-words) in entries
+                         for table in (rest tables)
+                         for share = (if distinct
+                                         (/ (count-if #'(lambda (w) (member w their-words :test #'string=)) distinct)
+                                            (length distinct))
+                                         0)
+                         unless (>= share *examples-leak-share*)
+                           collect (list (weights-cosine (first tables) table) name file))))
+      (loop for (score name file) in (subseq (sort scored #'> :key #'first) 0 (min *examples-most* (length scored)))
+            when (>= score *examples-least-score*)
+              collect (cons name (uiop:read-file-string file :external-format :utf-8))))))
+
 (defun with-examples (session prompt text)
   "TEXT, the request PROMPT as the agent is to get it, preceded by the
 examples SESSION is given for it (house-examples), which the log names."

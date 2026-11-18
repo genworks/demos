@@ -1770,6 +1770,48 @@ loaded) its page too."
                              (pl :funnel-count! "builds-done" (- (count :done (kinds session))))
                              (ignore-errors (pl :delete-session session))
                              (pl :funnel-count! "sessions" -1))))))))
+          ;; EXAMPLES CHOSEN AT RUN TIME: from a pool of models and the
+          ;; requests they answer, the nearest by weighted words; never the
+          ;; request's own answer, never one too far
+          (smoke "prompt-lab examples chosen at run time: nearest, never its own answer"
+                 (lambda ()
+                   (let ((pool (merge-pathnames (format nil "pl-pool-~d/" (random 1000000)) (uiop:temporary-directory))))
+                     (flet ((entry (name request)
+                              (with-open-file (out (merge-pathnames (format nil "~a.lisp" name) pool)
+                                                   :direction :output :if-exists :supersede)
+                                (format out "(define-object model (base-object)) ; ~a" name))
+                              (with-open-file (out (merge-pathnames (format nil "~a.txt" name) pool)
+                                                   :direction :output :if-exists :supersede)
+                                (write-string request out)))
+                            (chosen (request)
+                              (mapcar #'car (uiop:symbol-call :prompt-lab :nearest-examples nil request :pool pool))))
+                       (ensure-directories-exist pool)
+                       (unwind-protect
+                            ;; three models are too few for the floor chosen on a
+                            ;; pool of seventy (shared words weigh little in a pool
+                            ;; this small): a low floor, which a model sharing no
+                            ;; word still fails
+                            (progv (list (lab '#:*examples-least-score*)) (list 0.01)
+                            (let ((request "A torsion bar of round steel twisted by a lever arm at each end, for a front suspension.  Compute the twist angle and the shear stress.  (This prompt was written by someone, with a house brief.)"))
+                              (entry "own" "A torsion bar of round steel twisted by a lever arm at each end, for a front suspension.  Compute the twist angle and the shear stress.")
+                              (entry "near" "A coil spring of round steel wire for a front suspension, its shear stress and rate.")
+                              (entry "far" "A pair of gears in mesh, pinion and wheel, with their tooth counts.")
+                              (let ((answer (chosen request)))
+                                (when (member "own" answer :test #'string=)
+                                  (error "the request's own answer was given as an example: ~s" answer))
+                                (unless (equal (first answer) "near")
+                                  (error "the nearest example was not chosen first: ~s" answer))
+                                (when (member "far" answer :test #'string=)
+                                  (error "an example below the floor was given: ~s" answer)))
+                              ;; the pool is read again when a file in it changes
+                              (sleep 1.1)
+                              (entry "closer" "A torsion bar of round steel for a rear suspension, with its lever arms.")
+                              (unless (member "closer" (chosen request) :test #'string=)
+                                (error "a model added to the pool was not seen"))
+                              (unless (null (uiop:symbol-call :prompt-lab :nearest-examples nil request :pool nil))
+                                (error "examples were chosen with no pool"))
+                              t))
+                         (uiop:delete-directory-tree pool :validate t))))))
           ;; NAMED RESULTS, DECLARED FIRST: with *house-named-results* on, one
           ;; call lists the results a request names and the lab writes each
           ;; into MODEL as a slot that signals until it is written; the check
