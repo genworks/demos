@@ -771,14 +771,18 @@ own work at no cost.  Nil: the tools as they were.")
   "What the rails did during the tool call being run, newest first: texts
 run-tool appends to the call's result.")
 
-(defparameter *later-rail-names* '(:refusal-run)
+(defparameter *later-rail-names* '(:refusal-run :glime)
   "Rails built since *rail-names* and not yet measured in a trial.  T does
 not turn them on; a list that names one does, with :all in it for every
 rail of *rail-names* beside.
   :refusal-run   a whole define-object sent to replace_form and refused
                  several times in a row (*refusal-run-length*) is answered
                  plainly: it will be refused again, and what to call
-                 instead (*refusal-run-text*)")
+                 instead (*refusal-run-text*)
+  :glime         an edit that compiles is answered with Gendl's reference
+                 check over the model file: each (the ...) or (the-child ...)
+                 whose first message the object and its mixins do not
+                 answer (glime-findings-blocks)")
 
 (defparameter *structural-tool-names* '("set_slot" "add_slot" "remove_slot" "new_object_def" "replace_form")
   "The tools that edit the model file by structure.")
@@ -2118,6 +2122,49 @@ edit that compiled, for a SESSION on the :findings rail; else nil."
              (member name *auto-view-tools* :test #'string=))
     (let ((text (ignore-errors (edit-findings-text session))))
       (and text (list (text-result "~a ~a" *edit-findings-mark* text))))))
+
+;;
+;; The :glime rail (a later rail: off unless a list names it).  An edit that
+;; compiles is answered with Gendl's reference check over the model file,
+;; gendl-lisply:gendl-check -- Glime's checker without SLIME, in Gendl's
+;; Lisply backend since 2026-11-18; an image without it skips the rail.
+;; What it marks is a hint, never an error: a slot that reaches an object by
+;; trickling down from its parent cannot be seen from a definition.
+;;
+
+(defparameter *glime-findings-mark*
+  "REFERENCES, Gendl's reference check (hints: a slot trickling down from a parent is not seen):"
+  "The words that open the reference check's findings appended to an edit.")
+
+(defparameter *glime-findings-most* 8
+  "Most findings of the reference check shown after one edit.")
+
+(defun gendl-checks? ()
+  "Whether this image's Lisply backend carries gendl-check.  Named through
+the reader so the symbol wears the image's case."
+  (let ((symbol (and (find-package :gendl-lisply)
+                     (find-symbol (symbol-name :gendl-check) :gendl-lisply))))
+    (and symbol (fboundp symbol) t)))
+
+(defun glime-findings-blocks (session name)
+  "The reference check's findings to append to the result of tool NAME, an
+edit that compiled, for a SESSION on the :glime rail; else nil."
+  (when (and (member :glime (session-rails session))
+             (member name *auto-view-tools* :test #'string=)
+             (gendl-checks?))
+    (let ((findings (ignore-errors
+                     (with-time-limit (*eval-seconds* "reference check")
+                       (uiop:symbol-call :gendl-lisply :gendl-check
+                                         (uiop:read-file-string (session-model-file session))
+                                         :package (session-package session))))))
+      (when findings
+        (list (text-result "~a~{~%- line ~a: ~a~}~@[~%- ... and ~a more~]"
+                           *glime-findings-mark*
+                           (loop for f in findings
+                                 for n from 1 to *glime-findings-most*
+                                 append (list (getf f :line) (getf f :note)))
+                           (and (> (length findings) *glime-findings-most*)
+                                (- (length findings) *glime-findings-most*))))))))
 
 (defun entries-schema ()
   "The schema of a batch of entries for add_slot and new_object_def."

@@ -1458,11 +1458,13 @@ for a caller with more to send (run-prompt's stages)."
                                                    ;; the author-view-edit loop (tools.lisp): an edit
                                                    ;; that compiled shows the house model what it built
                                                    ;; and, on the :findings rail, what the
-                                                   ;; completion check finds in it now
+                                                   ;; completion check finds in it now; on
+                                                   ;; the :glime rail, Gendl's reference check
                                                    (unless error?
                                                      (setq blocks (append blocks
                                                                           (auto-view-blocks session name)
-                                                                          (edit-findings-blocks session name))))
+                                                                          (edit-findings-blocks session name)
+                                                                          (glime-findings-blocks session name))))
                                                    (when error?
                                                      (log-event session :tool-error "~a: ~a" name
                                                                 (or (cdr (assoc "text" (first blocks)
