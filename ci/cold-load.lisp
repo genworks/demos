@@ -1810,6 +1810,27 @@ loaded) its page too."
                                 (error "a model added to the pool was not seen"))
                               (unless (null (uiop:symbol-call :prompt-lab :nearest-examples nil request :pool nil))
                                 (error "examples were chosen with no pool"))
+                              ;; the weakest model first in the directory: the count of
+                              ;; candidates must be taken before the sort takes the list
+                              ;; apart (it was not, at first, and such a pool gave one)
+                              (entry "aaa-weak" "A steel post.")
+                              (progv (list (lab '#:*examples-most*) (lab '#:*examples-least-score*)) (list 3 0.0001)
+                                (let ((answer (chosen request)))
+                                  (unless (= 3 (length answer))
+                                    (error "three examples asked for and above the floor, ~d given: ~s"
+                                           (length answer) answer))))
+                              ;; the weights from a reference set: a pool of one is
+                              ;; weighed by the requests of the larger pool
+                              (let ((one (merge-pathnames "one/" pool)))
+                                (ensure-directories-exist one)
+                                (dolist (type '("lisp" "txt"))
+                                  (uiop:copy-file (merge-pathnames (format nil "near.~a" type) pool)
+                                                  (merge-pathnames (format nil "near.~a" type) one)))
+                                (unless (null (uiop:symbol-call :prompt-lab :nearest-examples nil request :pool one))
+                                  (error "a pool of one weighed by itself gave an example"))
+                                (progv (list (lab '#:*examples-reference*)) (list pool)
+                                  (unless (equal '("near") (mapcar #'car (uiop:symbol-call :prompt-lab :nearest-examples nil request :pool one)))
+                                    (error "a pool of one weighed by a reference gave no example"))))
                               t))
                          (uiop:delete-directory-tree pool :validate t))))))
           ;; NAMED RESULTS, DECLARED FIRST: with *house-named-results* on, one

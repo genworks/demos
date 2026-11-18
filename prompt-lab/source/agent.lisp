@@ -1212,6 +1212,13 @@ that builds a model."
 (defparameter *examples-pool* nil
   "Nil, or the directory of the pool `nearest-examples' chooses from.")
 
+(defparameter *examples-reference* nil
+  "Nil, or a directory of requests (<name>.txt) that sets how much each
+word weighs.  A small pool weighs words badly: in a pool of one, every
+word the request shares with the model counts for nothing.  So a lab
+whose pool is a few approved models points this at the larger set of
+requests the floor was chosen on; nil weighs by the pool itself.")
+
 (defparameter *examples-most* 2
   "Integer.  At most this many examples go with one request.")
 
@@ -1252,39 +1259,46 @@ lower case, letters only, three or more, none of *examples-stop-words*."
       (flush))
     (nreverse out)))
 
-(defvar *examples-pool-cache* nil
-  "(directory write-date entries): the pool as last read, each entry
-(name model-file words).")
+(defvar *examples-pool-cache* (make-hash-table :test #'equal)
+  "Directory -> (write-date entries): a pool or reference as last read,
+each entry (name model-file words).")
 
-(defun examples-pool (directory)
-  "The pool in DIRECTORY, each (name model-file words), read again when a
-file there changed."
-  (let* ((models (directory (merge-pathnames "*.lisp" directory)))
-         (stamp (reduce #'max models :key #'file-write-date :initial-value 0)))
-    (if (and *examples-pool-cache*
-             (equal (first *examples-pool-cache*) (namestring directory))
-             (eql (second *examples-pool-cache*) stamp))
-        (third *examples-pool-cache*)
-        (let ((entries (loop for model in models
-                             for about = (make-pathname :type "txt" :defaults model)
+(defun examples-pool (directory &key (type "lisp"))
+  "The pool in DIRECTORY, each (name file words): for every <name>.TYPE
+with a <name>.txt beside it (TYPE \"txt\": every request alone), the words
+of the .txt.  Read again when a file there changed."
+  (let* ((files (directory (merge-pathnames (format nil "*.~a" type) directory)))
+         ;; how many and the newest: a file added within the second of the
+         ;; last change leaves the newest date as it was
+         (stamp (list (length files) (reduce #'max files :key #'file-write-date :initial-value 0)))
+         (key (format nil "~a ~a" type (namestring directory)))
+         (kept (gethash key *examples-pool-cache*)))
+    (if (and kept (equal (first kept) stamp))
+        (second kept)
+        (let ((entries (loop for file in files
+                             for about = (make-pathname :type "txt" :defaults file)
                              when (probe-file about)
-                               collect (list (pathname-name model) model
+                               collect (list (pathname-name file) file
                                              (request-words (uiop:read-file-string about :external-format :utf-8))))))
-          (setq *examples-pool-cache* (list (namestring directory) stamp entries))
+          (setf (gethash key *examples-pool-cache*) (list stamp entries))
           entries))))
 
-(defun word-weights (word-lists)
-  "A tf-idf table (word -> weight) for each of WORD-LISTS."
-  (let ((df (make-hash-table :test #'equal)) (n (length word-lists)))
+(defun word-idf (word-lists)
+  "How much each word of WORD-LISTS weighs: the log of how rare it is
+among them."
+  (let ((df (make-hash-table :test #'equal)) (n (length word-lists)) (out (make-hash-table :test #'equal)))
     (dolist (words word-lists)
       (dolist (w (remove-duplicates words :test #'string=)) (incf (gethash w df 0))))
-    (loop for words in word-lists
-          collect (let ((out (make-hash-table :test #'equal)))
-                    (dolist (w words) (incf (gethash w out 0)))
-                    (maphash #'(lambda (w count)
-                                 (setf (gethash w out) (* count (log (/ (+ 1 n) (+ 1 (gethash w df 0)))))))
-                             out)
-                    out))))
+    (maphash #'(lambda (w count) (setf (gethash w out) (log (/ (+ 1 n) (+ 1 count))))) df)
+    (values out (log (+ 1 n)))))
+
+(defun word-weights (words idf unseen)
+  "WORDS as a table (word -> count times IDF's weight, UNSEEN for a word
+IDF lacks)."
+  (let ((out (make-hash-table :test #'equal)))
+    (dolist (w words) (incf (gethash w out 0)))
+    (maphash #'(lambda (w count) (setf (gethash w out) (* count (gethash w idf unseen)))) out)
+    out))
 
 (defun weights-cosine (a b)
   (let ((dot 0) (na 0) (nb 0))
@@ -1303,18 +1317,24 @@ SOURCE), nearest first: at most *examples-most*, none below
     (let* ((entries (examples-pool pool))
            (words (request-words prompt))
            (distinct (remove-duplicates words :test #'string=))
-           (tables (word-weights (cons words (mapcar #'third entries))))
-           (scored (loop for (name file their-words) in entries
-                         for table in (rest tables)
+           (reference (if (and *examples-reference* (probe-file *examples-reference*))
+                          (mapcar #'third (examples-pool *examples-reference* :type "txt"))
+                          (mapcar #'third entries))))
+      (multiple-value-bind (idf unseen) (word-idf (cons words reference))
+        (let* ((mine (word-weights words idf unseen))
+               (scored (loop for (name file their-words) in entries
+                         for table = (word-weights their-words idf unseen)
                          for share = (if distinct
                                          (/ (count-if #'(lambda (w) (member w their-words :test #'string=)) distinct)
                                             (length distinct))
                                          0)
                          unless (>= share *examples-leak-share*)
-                           collect (list (weights-cosine (first tables) table) name file))))
-      (loop for (score name file) in (subseq (sort scored #'> :key #'first) 0 (min *examples-most* (length scored)))
-            when (>= score *examples-least-score*)
-              collect (cons name (uiop:read-file-string file :external-format :utf-8))))))
+                           collect (list (weights-cosine mine table) name file))))
+          ;; (the count before the sort, which takes the list apart)
+          (let ((most (min *examples-most* (length scored))))
+            (loop for (score name file) in (subseq (sort scored #'> :key #'first) 0 most)
+                  when (>= score *examples-least-score*)
+                    collect (cons name (uiop:read-file-string file :external-format :utf-8)))))))))
 
 (defun with-examples (session prompt text)
   "TEXT, the request PROMPT as the agent is to get it, preceded by the
