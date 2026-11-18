@@ -859,6 +859,37 @@ loaded) its page too."
                                 t)
                            (ignore-errors (pl :delete-session s))
                            (pl :funnel-count! "sessions" -1)))))))
+          ;; CONSTRUCTED GEOMETRY (agent.lisp, primers/constructing.md): a
+          ;; session on the lab's own model is told to build, intersect and
+          ;; measure, a house session is not, and the worked example compiles
+          ;; and builds through write_model and check_model
+          (smoke "prompt-lab constructed geometry: who is told, and the worked example builds"
+                 (lambda ()
+                   (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
+                     (let* ((text (pl :constructing-text))
+                            (start (and text (search (format nil "```lisp~%") text)))
+                            (example (and start (subseq text (+ start 8) (search (format nil "~%```") text :start2 (+ start 8)))))
+                            (s (pl :open-session! "10.9.8.14" nil)))
+                       (unwind-protect
+                            (progn
+                              (unless example (error "primers/constructing.md has no worked example"))
+                              (unless (search "inter-circle-sphere" (pl :model-system-text s))
+                                (error "a session on the lab's own model is not told of constructed geometry"))
+                              (pl :set-session-model! s "house-1")
+                              (when (search "inter-circle-sphere" (pl :model-system-text s))
+                                (error "a house session is told of constructed geometry"))
+                              (pl :set-session-model! s nil)
+                              (multiple-value-bind (blocks error?) (pl :write-model s example)
+                                (when error? (error "the worked example does not compile: ~s" blocks)))
+                              (let ((check (format nil "~{~a~}" (mapcar (lambda (b) (or (cdr (assoc "text" b :test #'string=)) ""))
+                                                                        (pl :check-model s :expected-size '(720 40 235))))))
+                                (format t "~&CONSTRUCTED GEOMETRY EXAMPLE:~%~a~%" check)
+                                (when (or (search "rror" check) (search "ERROR" check)
+                                          (not (search "Expected size matched" check)))
+                                  (error "the worked example does not build to its size: ~a" check)))
+                              t)
+                         (ignore-errors (pl :delete-session s))
+                         (pl :funnel-count! "sessions" -1))))))
           ;; STRUCTURE AND SIGHT for a house model (tools.lisp): slots edited by
           ;; name with the parentheses written for it, an unbalanced value
           ;; refused before anything is written, and the model seen in words
