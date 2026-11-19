@@ -787,7 +787,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; and of its last staged hosting (hosting.lisp)
-            (js-string-literal (or (and (the session) (car (gethash (session-id (the session)) *session-hostings*))) ""))
+            (js-string-literal (or (and (the session) (session-hosting-url (the session))) ""))
             ;; whether what the session built charges for anything yet: the
             ;; Monetize button is greyed until it does (deploy.lisp)
             (json-boolean (let ((session (the session)))

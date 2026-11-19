@@ -386,6 +386,13 @@ verdict, the address once it is up."
 (defvar *session-hostings* (make-hash-table :test #'equal)
   "Session id -> (approve-url . time) of its last staged hosting.")
 
+;; locked as *session-pushes* is (project.lisp), for the same reason
+(defvar *session-hostings-lock* (bt:make-lock "prompt-lab session hostings"))
+
+(defun session-hosting-url (session)
+  (bt:with-lock-held (*session-hostings-lock*)
+    (car (gethash (session-id session) *session-hostings*))))
+
 (defun stage-deploy! (session)
   "Ask the gate to host SESSION's project: the gate keeps the request for
 the visitor's consent, signed in with the forge, and on it hands this lab
@@ -408,7 +415,8 @@ nil and the reason."
                    (values nil (format nil "The gate would not take the request (~a)~@[: ~a~]."
                                        status (and (hash-table-p answer) (gethash "message" answer))))
                    (let ((url (format nil "~a/approve?push=~a" *git-approve-base* staged)))
-                     (setf (gethash (session-id session) *session-hostings*) (cons url (get-universal-time)))
+                     (bt:with-lock-held (*session-hostings-lock*)
+                       (setf (gethash (session-id session) *session-hostings*) (cons url (get-universal-time))))
                      (log-event session :note "Asked to host ~a: approve it on GitLab." (gethash "path" record))
                      (values url nil)))))))))
 

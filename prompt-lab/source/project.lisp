@@ -391,8 +391,14 @@ can tell: a list of (ok? text), one per rule."
 (defvar *session-pushes* (make-hash-table :test #'equal)
   "Session id -> (approve-url . time) of its last staged push.")
 
+;; request threads store here: on CCL an unlocked concurrent store can pair
+;; one session's key with another's value, and show an author someone
+;; else's approval link
+(defvar *session-pushes-lock* (bt:make-lock "prompt-lab session pushes"))
+
 (defun session-push-url (session)
-  (car (gethash (session-id session) *session-pushes*)))
+  (bt:with-lock-held (*session-pushes-lock*)
+    (car (gethash (session-id session) *session-pushes*))))
 
 (defun stage-push! (session &key title)
   "Stage SESSION's changed files at the git gate.  Values: the address
@@ -423,7 +429,8 @@ and the reason."
                                             status (and (hash-table-p answer) (gethash "message" answer)))))
                        (t
                         (let ((url (format nil "~a/approve?push=~a" *git-approve-base* push)))
-                          (setf (gethash (session-id session) *session-pushes*) (cons url (get-universal-time)))
+                          (bt:with-lock-held (*session-pushes-lock*)
+                            (setf (gethash (session-id session) *session-pushes*) (cons url (get-universal-time))))
                           (log-event session :note "Staged ~d changed file~:p for ~a: approve the push on GitLab."
                                      (length changes) (gethash "path" record))
                           (values url nil)))))))))))
