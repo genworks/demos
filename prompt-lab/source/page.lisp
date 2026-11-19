@@ -575,6 +575,11 @@ opens it closed-source (deploy.lisp), where the lab allows.  Values:
 the session, or nil, the reason and the response to refuse with.  One
 address opens at most *max-sessions-per-address* a day, unless its wallet
 has credit or has put more into the pot than it has drawn."
+  ;; a one-shot lab serves its one session and no other (worker.lisp)
+  (when (and *one-session?* (funcall 'one-session-taken?))
+    (return-from open-session!
+      (values nil "This lab serves one session at a time and is busy; try again in a few minutes."
+              net.aserve:*response-service-unavailable*)))
   (if (and (address-over-limit? address :sessions)
            (not (and (wallet-id? wallet)
                      (let ((balance (ignore-errors (gate-post "balance" (h "wallet" wallet)))))
@@ -588,6 +593,7 @@ has credit or has put more into the pot than it has drawn."
                       *max-sessions-per-address*)
               *response-too-many-requests*)
       (let ((session (make-session :address address :wallet (and (wallet-id? wallet) wallet))))
+        (when *one-session?* (funcall 'note-one-session! session))
         (count-address! address :sessions)
         (funnel-count! "sessions")
         (watch-event! :session-open session :address address :detail (session-id session))

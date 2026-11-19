@@ -451,7 +451,11 @@ a no-op when one is running."
                                                          ;; and those their dues kept paused too long, taken down
                                                          (sweep-unpaid-dues!)
                                                          ;; the authors paid their month, from $25 (deploy.lisp)
-                                                         (ask-gate-payouts!))
+                                                         (ask-gate-payouts!)
+                                                         ;; one-shot labs' sessions into this archive, and a
+                                                         ;; one-shot lab whose session is done quits (worker.lisp)
+                                                         (funcall 'import-archives!)
+                                                         (funcall 'one-session-check!))
                                       ;; serious-condition, as every lab thread (agent.lisp)
                                       (serious-condition (condition)
                                         (format *error-output* "~&prompt-lab reaper: ~a~%" condition)))))

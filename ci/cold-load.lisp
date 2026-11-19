@@ -404,6 +404,53 @@ loaded) its page too."
                            (error "model door ~a, reload door ~a" model reload))
                          t)
                        (setf (symbol-value switch) t)))))
+          ;; a one-shot lab (worker.lisp) opens one session and no other
+          (smoke "prompt-lab one-shot lab refuses a second session"
+                 (lambda ()
+                   (let ((switch (find-symbol "*ONE-SESSION?*" :prompt-lab))
+                         (opened (find-symbol "*ONE-SESSION-OPENED*" :prompt-lab)))
+                     (setf (symbol-value switch) t (symbol-value opened) session)
+                     (unwind-protect
+                          (let ((status (nth-value 1 (http :post (door "session") :json (table)))))
+                            (or (eql status 503) (error "the session door answered ~a" status)))
+                       (setf (symbol-value switch) nil (symbol-value opened) nil)))))
+          ;; and the public lab copies a one-shot lab's archive into its own,
+          ;; marked, refusing a session of the same id from elsewhere
+          (smoke "prompt-lab imports a one-shot lab's archive"
+                 (lambda ()
+                   (let* ((pl (find-package :prompt-lab))
+                          (root-var (find-symbol "*ARCHIVE-ROOT*" pl))
+                          (imports-var (find-symbol "*ARCHIVE-IMPORTS*" pl))
+                          (kept-root (symbol-value root-var))
+                          (base (uiop:ensure-directory-pathname
+                                 (format nil "/tmp/import-smoke-~d/" (get-universal-time))))
+                          (archive (merge-pathnames "archive/" base))
+                          (w1 (merge-pathnames "w1/" base))
+                          (w2 (merge-pathnames "w2/" base))
+                          (id "ab12cd34ef56"))
+                     (flet ((record (root)
+                              (let ((file (merge-pathnames (format nil "2026-11-18/~a/session.json" id) root)))
+                                (ensure-directories-exist file)
+                                (with-open-file (out file :direction :output :if-exists :supersede)
+                                  (format out "{\"id\": ~s, \"log\": []}" id))
+                                (with-open-file (out (merge-pathnames "model.lisp" file) :direction :output :if-exists :supersede)
+                                  (write-line "(define-object model (base-object))" out)))))
+                       (record w1) (record w2)
+                       (ensure-directories-exist archive)
+                       (setf (symbol-value root-var) (namestring archive)
+                             (symbol-value imports-var) (list (namestring w1) (namestring w2)))
+                       (unwind-protect
+                            (let* ((copied (funcall (find-symbol "IMPORT-ARCHIVES!" pl)))
+                                   (target (merge-pathnames (format nil "2026-11-18/~a/" id) archive))
+                                   (mark (ignore-errors (uiop:read-file-string (merge-pathnames ".imported-from" target)))))
+                              (unless (and (= (length copied) 1)
+                                           (probe-file (merge-pathnames "model.lisp" target))
+                                           (search "/w1/" (or mark "")))
+                                (error "copied ~a, mark ~s" copied mark))
+                              t)
+                         (setf (symbol-value root-var) kept-root
+                               (symbol-value imports-var) nil)
+                         (ignore-errors (uiop:delete-directory-tree base :validate t)))))))
           (smoke "prompt-lab state door reads the model back"
                  (lambda ()
                    (let ((state (json-of :get (format nil "~a?session=~a" (door "state") session)

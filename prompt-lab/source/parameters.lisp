@@ -407,6 +407,18 @@ source compiled is what the agent writes.  For a lab that runs every
 visitor's session in one shared image, until each session has a process
 of its own.")
 
+(defparameter *one-session?* nil
+  "Boolean. A ONE-SHOT LAB (worker.lisp): the process serves exactly one
+session -- a second is refused while it lives -- and quits once that
+session has been reaped, so that the container it runs in starts again
+from its image and the next visitor meets a fresh Lisp.  What one visitor
+did to the image goes with their session.")
+
+(defparameter *archive-imports* nil
+  "List of directories. Archives written by one-shot labs (worker.lisp),
+each laid out as *archive-root* is; the reaper copies their sessions into
+this lab's own archive, so the public listing shows them.  Nil: none.")
+
 (defparameter *free-lab?* nil
   "Boolean. A FREE PUBLIC LAB: nothing for sale and nothing private, the
 first rungs of the trust ladder.  Its builds draw on the house's pot at
