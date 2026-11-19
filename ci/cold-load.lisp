@@ -393,7 +393,7 @@ loaded) its page too."
           (smoke "prompt-lab takes no hand edits when visitor edits are off"
                  (lambda ()
                    ;; set, not bound: the doors run on the server's threads
-                   (let ((switch (find-symbol "*VISITOR-EDITS?*" :prompt-lab)))
+                   (let ((switch (find-symbol (string '#:*visitor-edits?*) :prompt-lab)))
                      (setf (symbol-value switch) nil)
                      (unwind-protect
                        (let ((model (nth-value 1 (http :post (door "model") :headers (owner-headers)
@@ -407,8 +407,8 @@ loaded) its page too."
           ;; a one-shot lab (worker.lisp) opens one session and no other
           (smoke "prompt-lab one-shot lab refuses a second session"
                  (lambda ()
-                   (let ((switch (find-symbol "*ONE-SESSION?*" :prompt-lab))
-                         (opened (find-symbol "*ONE-SESSION-OPENED*" :prompt-lab)))
+                   (let ((switch (find-symbol (string '#:*one-session?*) :prompt-lab))
+                         (opened (find-symbol (string '#:*one-session-opened*) :prompt-lab)))
                      (setf (symbol-value switch) t (symbol-value opened) session)
                      (unwind-protect
                           (let ((status (nth-value 1 (http :post (door "session") :json (table)))))
@@ -419,8 +419,8 @@ loaded) its page too."
           (smoke "prompt-lab imports a one-shot lab's archive"
                  (lambda ()
                    (let* ((pl (find-package :prompt-lab))
-                          (root-var (find-symbol "*ARCHIVE-ROOT*" pl))
-                          (imports-var (find-symbol "*ARCHIVE-IMPORTS*" pl))
+                          (root-var (find-symbol (string '#:*archive-root*) pl))
+                          (imports-var (find-symbol (string '#:*archive-imports*) pl))
                           (kept-root (symbol-value root-var))
                           (base (uiop:ensure-directory-pathname
                                  (format nil "/tmp/import-smoke-~d/" (get-universal-time))))
@@ -440,7 +440,7 @@ loaded) its page too."
                        (setf (symbol-value root-var) (namestring archive)
                              (symbol-value imports-var) (list (namestring w1) (namestring w2)))
                        (unwind-protect
-                            (let* ((copied (funcall (find-symbol "IMPORT-ARCHIVES!" pl)))
+                            (let* ((copied (funcall (find-symbol (string '#:import-archives!) pl)))
                                    (target (merge-pathnames (format nil "2026-11-18/~a/" id) archive))
                                    (mark (ignore-errors (uiop:read-file-string (merge-pathnames ".imported-from" target)))))
                               (unless (and (= (length copied) 1)
@@ -2226,10 +2226,10 @@ loaded) its page too."
                                        (unless (pl :session-accepted? s :build) (error "the agent door's acceptance was not noted"))
                                        (unless (eql 200 (ping)) (error "the MCP door refused an accepted session")))
                                      ;; accepted, the build goes on to the next check (busy here)
-                                     (funcall (fdefinition (list 'setf (find-symbol "SESSION-BUSY?" :prompt-lab))) t s)
+                                     (funcall (fdefinition (list 'setf (find-symbol (string '#:session-busy?) :prompt-lab))) t s)
                                      (when (refused? (nth-value 1 (pl :begin-prompt! s "a box" "10.9.8.6" nil :route? nil)))
                                        (error "an accepted session was still asked to accept"))
-                                     (funcall (fdefinition (list 'setf (find-symbol "SESSION-BUSY?" :prompt-lab))) nil s)
+                                     (funcall (fdefinition (list 'setf (find-symbol (string '#:session-busy?) :prompt-lab))) nil s)
                                      ;; a new version of a text asks again
                                      (with-open-file (out (merge-pathnames "terms.md" root) :direction :output :if-exists :supersede)
                                        (format out "Version: ci-2~%~%The terms, changed.~%"))
