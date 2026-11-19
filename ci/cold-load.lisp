@@ -945,11 +945,14 @@ loaded) its page too."
                               (multiple-value-bind (blocks error?) (pl :write-model s example)
                                 (when error? (error "the worked example does not compile: ~s" blocks)))
                               (let ((check (format nil "~{~a~}" (mapcar (lambda (b) (or (cdr (assoc "text" b :test #'string=)) ""))
-                                                                        (pl :check-model s :expected-size '(720 40 235))))))
+                                                                        (pl :check-model s :expected-size '(825.996944 40 275.996944))))))
                                 (format t "~&CONSTRUCTED GEOMETRY EXAMPLE:~%~a~%" check)
                                 (when (or (search "rror" check) (search "ERROR" check)
-                                          (not (search "Expected size matched" check)))
-                                  (error "the worked example does not build to its size: ~a" check)))
+                                          (not (search "Expected size matched" check))
+                                          ;; seven leaves: the guard's four boxes on
+                                          ;; its hidden arc among them
+                                          (not (search "Leaves: 7 " check)))
+                                  (error "the worked example does not build to its size and parts: ~a" check)))
                               t)
                          (ignore-errors (pl :delete-session s))
                          (pl :funnel-count! "sessions" -1))))))

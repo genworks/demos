@@ -27,11 +27,26 @@ be inspected.
 - A `circle` or an `arc` lies in its own right/rear plane: its `:top` is
   its axis.  Give it `:orientation (alignment :top AXIS)` unless its
   parent's `:top` is already that axis.
-- A curved member is an `arc` (`:center`, `:radius`, `:start-angle`,
-  `:end-angle`, radians counterclockwise from its `:right`).  Pieces sit on
-  it at `(the curve (point-on-arc ANGLE))`, ANGLE from the arc's start,
-  and turn with `(the curve (tangent POINT))`; its length is `(the curve
-  total-length)`.
+- A curved member is an `arc` object (`:center`, `:radius`,
+  `:start-angle`, `:end-angle`, radians counterclockwise from its
+  `:right`), hidden when it is there only to build on, and everything on
+  the curve is read from it: `(the curve (point-on-arc ANGLE))` is the
+  point ANGLE along it from its start, `(the curve (tangent POINT))` the
+  direction it runs at POINT (a vector one radius long, which
+  `alignment` takes as it is), `(the curve start-to-end-angle)` the angle
+  it spans and `(the curve total-length)` its length.
+- A row of pieces along a curve -- the boxes of a bent strap, the links
+  of a chain -- is a child `:sequence` whose members take `:center` from
+  `point-on-arc` and `:orientation` from `tangent`, one hidden arc for
+  each row, as the guard does below; rows that nest are arcs with the
+  same center and different radii.  A point on a curve written as
+  `(* r (sin a))` and `(* r (cos a))`, in a loop or anywhere else, is
+  the arc worked out by hand: build the arc.
+- An arc's angles are measured, not solved.  Find its center as a point
+  (from the crown, one radius toward the chord); its half angle is then
+  `(angle-between-vectors (subtract-vectors crown center)
+  (subtract-vectors end center))`.  `asin`, `acos` and `atan` belong only
+  in the numeric `defun` below.
 - A part that must be measured before it can be placed -- its span
   decides where its far end goes -- is measured on a second, hidden copy
   of it left at the model's center.
@@ -39,10 +54,20 @@ be inspected.
   whole models, one per value, never made with `set-slot!`.
 - A value with no closed form is solved numerically in a `defun` whose
   doc string says so.  That is the one place for trigonometry.
+- A list of values is made with `mapcar` over a list; for an index,
+  `(mapcar #'(lambda (n) ...) (list-of-numbers 0 (1- count)))`.  No
+  `loop`, and no `push` with `nreverse`.
+- A slot cannot be defined from itself.  Inside a part's own definition
+  `(the center)` IS the slot `center`, so a computed slot `(center
+  (translate (the center) :up 10))` asks for itself without end, and the
+  same goes for an `orientation` built from the part's own
+  `face-normal-vector`.  A part does not compute its own `center` or
+  `orientation`: its parent gives them, in the child's entry under
+  `:objects`, where `(the center)` is the parent's.
 - `leaves`, `children`, `index` and `parent` are every object's own
   messages: name no slot or child so.
 
-### A worked example: a bar on a swinging link
+### A worked example: a bar on a swinging link, with a bent guard
 
 ```lisp
 (define-object model (base-object)
@@ -78,13 +103,31 @@ be inspected.
 
    ("List of link angles, degrees: one for each bar length in samples"
     link-angle-table
-    (mapsend (list-elements (the samples)) :link-angle)))
+    (mapsend (list-elements (the samples)) :link-angle))
+
+   ;; The guard's four pieces share its curve: each has a quarter of the
+   ;; angle it spans and a quarter of its length.
+   (guard-step (/ (the guard-curve start-to-end-angle) 4))
+   (guard-piece-length (/ (the guard-curve total-length) 4)))
 
   :hidden-objects
   (;; Everywhere the free end can be, as far as the bar is concerned.
    (reach :type 'sphere
           :center (the fixed-pin)
           :radius (the bar-length))
+
+   ;; The guard's center line: an arc about the frame pin, a clearance
+   ;; outside the link's swing, a quarter turn from level on the side
+   ;; away from the bar round to straight down.  An arc lies in its own
+   ;; right/rear plane, so its :top is the axis the link swings about,
+   ;; and its angles run from its :right.
+   (guard-curve :type 'arc
+                :center (the frame-pin)
+                :radius (+ (the link-length) 40)
+                :orientation (alignment :top (the (face-normal-vector :rear))
+                                        :right (the (face-normal-vector :right)))
+                :start-angle 0
+                :end-angle (/ pi 2))
 
    ;; One whole model for each bar length.  Each computes only what is
    ;; asked of it.
@@ -105,6 +148,19 @@ be inspected.
          :free-end (the free-pin)
          :swing-axis (the (face-normal-vector :rear))
          :pass-down (link-length))
+
+   ;; Each piece sits on the guard's curve at the middle of its own
+   ;; quarter and lies along the curve there.
+   (guard :type 'box
+          :sequence (:size 4)
+          :center (the guard-curve (point-on-arc (* (+ (the-child index) 1/2)
+                                                    (the guard-step))))
+          :orientation (alignment :right (the guard-curve (tangent (the-child center)))
+                                  :rear (the (face-normal-vector :rear)))
+          :width (the guard-piece-length)
+          :length 40
+          :height 6
+          :display-controls (list :color :goldenrod))
 
    (frame :type 'box
           :center (translate (the center) :up 200)

@@ -67,6 +67,12 @@ draws nothing, when it is broken:
 - In a child's inputs `(the ...)` is still the object being defined
   (the parent).  The child itself, for instance its place in a
   sequence, is `(the-child index)`.
+- A slot cannot be defined from itself.  `(center (translate (the
+  center) :up 10))` under a helper object's `:computed-slots` asks for
+  `center` without end and fails with "Stack overflow"; so does
+  `(depth (the depth))`.  A helper object does not compute its own
+  `center` or `orientation`: give them where the helper is used, in the
+  child's entry under `:objects`, where `(the center)` is the parent's.
 - A child is `(name :type 'TYPE :input value :input value ...)`.  The
   type is a quoted symbol; its inputs are keyword and value pairs.
   Spell input names exactly: describe_object lists a type's inputs.
@@ -118,6 +124,11 @@ draws nothing, when it is broken:
 `(the-child index)`.  Use it for any repeat; never write `leg-0`,
 `leg-1` ... by hand.  For a grid, one sequence of rows times columns,
 with `(floor i columns)` and `(mod i columns)`.
+
+A list of VALUES (the points of an outline, say) is made with `mapcar`
+over a list; for an index,
+`(mapcar #'(lambda (n) ...) (list-of-numbers 0 (1- count)))`.  No
+`loop`, and no `push` with `nreverse`.
 
 ### 4. Inputs a person can change
 
