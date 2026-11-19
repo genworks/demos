@@ -399,6 +399,14 @@ from check_model's numbers -- the visitor has the live viewer anyway.")
 page's Monetize button, the deploy door).  Nil shuts the doors; what is
 already deployed stays on disk and is not served.")
 
+(defparameter *visitor-edits?* t
+  "Boolean. Whether a session's owner may change the model file by hand:
+the sheet's Save and Review my edits, and the model and reload doors.
+Nil leaves the editor read-only and refuses those doors, so the only
+source compiled is what the agent writes.  For a lab that runs every
+visitor's session in one shared image, until each session has a process
+of its own.")
+
 (defparameter *free-lab?* nil
   "Boolean. A FREE PUBLIC LAB: nothing for sale and nothing private, the
 first rungs of the trust ladder.  Its builds draw on the house's pot at

@@ -967,13 +967,6 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               (when (uploads-offered?)
                                 (let ((caps (getf *upload-caps* :free)))
                                   (htm (:div :class "pl-upload"
-                                             ;; a file is public with its session: said and
-                                             ;; acknowledged, except where the session is not
-                                             ;; public -- closed source, or a trusted author's
-                                             (:label :class "pl-rights" :|data-show| "!($closed || $closedPick || $paidUp)"
-                                                     :title "A file you upload is public with this session, here and in the archive, and you have the right to share it"
-                                                     (:input :type "checkbox" :id "pl-rights")
-                                                     " I acknowledge this file will be shared")
                                              ;; the files of a session in the sibling lab,
                                              ;; offered here (routing.lisp)
                                              (when (and (the adopt-id) (the adopt-from))
@@ -1000,6 +993,15 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                    (:input :type "file" :id "pl-file"
                                                            :accept (format nil ".pdf,.png,.jpg,.jpeg,.gif,.webp~{,.~a~}" *upload-text-types*)
                                                            :|data-on:change| "plUpload(el, $owner, $wallet, $turnstile)"))
+                                             ;; a file is public with its session: said and
+                                             ;; acknowledged, except where the session is not
+                                             ;; public -- closed source, or a trusted author's.
+                                             ;; Under the upload link, which it qualifies, and
+                                             ;; said as the step it is: tick, then choose
+                                             (:label :class "pl-rights" :|data-show| "!($closed || $closedPick || $paidUp)"
+                                                     :title "A file you upload is public with this session, here and in the archive, and you have the right to share it"
+                                                     (:input :type "checkbox" :id "pl-rights")
+                                                     " Tick before uploading: the file will be public, and I have the right to share it")
                                              (:p :id "pl-upload-note" :class "pl-line"
                                                  (fmt "Build from a drawing: a PDF of up to ~d pages, an image or a text file (DXF, SVG, CSV, STEP), ~a at most."
                                                       (getf caps :pages) (size-label (getf caps :bytes)))))))))
@@ -1301,14 +1303,20 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     :inner-html (let ((session (the session)))
                   (with-lhtml-string ()
                     (:div :class "pl-card pl-source" :|data-ignore-morph| ""
-                          :|data-effect| "window.plLock && plLock(!$editable || $busy)"
+                          ;; *visitor-edits?* nil: read-only for everyone, and no
+                          ;; Save or Review (the doors refuse them too)
+                          :|data-effect| (if *visitor-edits?*
+                                             "window.plLock && plLock(!$editable || $busy)"
+                                             "window.plLock && plLock(true)")
                           (:div :class "pl-source-head"
                                 (:h2 "Model file")
                                 (:span :id "pl-source-state" :class "pl-source-state")
                                 (:button :type "button" :|data-on:click| "plFold(true)" "fold all")
                                 (:button :type "button" :|data-on:click| "plFold(false)" "unfold all")
+                                (unless *visitor-edits?*
+                                  (htm (:span :class "pl-line pl-dim" "Read-only: ask the agent for changes.")))
                                 (:button :type "button" :class "pl-save"
-                                         :|data-show| "$editable"
+                                         :|data-show| (if *visitor-edits?* "$editable" "false")
                                          :|data-indicator:saving| ""
                                          :|data-attr:disabled| "$busy || $saving"
                                          :|data-on:click|
@@ -1318,7 +1326,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                 ;; the author's own edits -- saved here, or made in the
                                 ;; console -- put to the agent to review (export.lisp)
                                 (:button :type "button" :class "pl-review"
-                                         :|data-show| "$editable && $built"
+                                         :|data-show| (if *visitor-edits?* "$editable && $built" "false")
                                          :|data-attr:disabled| (format nil "$busy || $saving~@[ || !$turnstile~]"
                                                                        *turnstile-site-key*)
                                          :title "Have the agent look at what you changed by hand, here or in the console, and say whether it is sound.  Save first."
@@ -1346,6 +1354,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                   (and (the session) (session-log (the session)))))
                          (kind-of #'(lambda (entry) (string-downcase (string (second entry)))))
                          (asked (find "prompt" log :key kind-of :test #'string= :from-end t))
+                         ;; a later request alone reads as the middle of the story:
+                         ;; the first is named too
+                         (began (let ((first (find "prompt" log :key kind-of :test #'string=)))
+                                  (and first (not (eq first asked)) first)))
                          (answer (and asked
                                       (find-if #'(lambda (entry) (member (funcall kind-of entry) '("done" "stopped") :test #'string=))
                                                (rest (member asked log)) :from-end t))))
@@ -1358,6 +1370,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                       (with-lhtml-string ()
                         (when asked
                           (htm (:div :class "pl-card pl-reply"
+                                     (when began
+                                       (htm (:p :class "pl-line pl-dim" :style "white-space:pre-wrap;max-height:7rem;overflow:auto"
+                                                "It began: " (esc (third began)))))
                                      ;; line breaks kept: a request to review edits
                                      ;; carries the changed lines, one a line
                                      (:p :class "pl-line pl-dim" :style "white-space:pre-wrap;max-height:14rem;overflow:auto"
@@ -1895,7 +1910,8 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
       (flet ((saved (ok? text)
                (sheet-send! self (datastar-script-event
                                   (format nil "plSaved(~a,~a)" (json-boolean ok?) (js-string-literal text))))))
-        (cond ((not (the owner?)) (the (tell-error! "Only the session's owner may save the model file.")))
+        (cond ((not *visitor-edits?*) (the (tell-error! *visitor-edits-text*)))
+              ((not (the owner?)) (the (tell-error! "Only the session's owner may save the model file.")))
               ((not (stringp source)) (the (tell-error! "No source given.")))
               ((not (claim! session)) (the (tell-error! "Wait for the agent to finish first.")))
               (t (multiple-value-bind (blocks error?)
@@ -2200,7 +2216,8 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     (let ((session (the session))
           (address (client-address *datastar-request*))
           (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
-      (cond ((or (null session) (not (the owner?)))
+      (cond ((not *visitor-edits?*) (the (tell-error! *visitor-edits-text*)))
+            ((or (null session) (not (the owner?)))
              (the (tell-error! "Only the session's owner may ask for a review of its edits.")))
             ((session-busy? session)
              (the (tell-error! "Wait for the agent to finish first.")))
@@ -2605,7 +2622,10 @@ var n=name(q||s||house);if(skins[n])l.setAttribute('href',skins[n])})();"
               (:header :class "pl-head"
                        (:h1 (esc (lab-title)))
                        (:span :class "pl-engine" (esc (engine-label)))
+                       ;; the lab's own header's links, and the way back to it
                        (:nav (str (browse-links))
+                             (when *sibling-lab*
+                               (htm (:a :href (car *sibling-lab*) (esc (cdr *sibling-lab*)))))
                              (:a :href *url-prefix* "start your own")))
               (:main :class "pl-list"
                      (:h2 (str (if archive? "Archived sessions" "Live sessions")))

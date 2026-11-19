@@ -977,13 +977,22 @@ prompt in a thread of its own; the page follows along through the state door."
                                     response))
                      (t (refuse req ent response "~a" reason))))))))
 
+(defparameter *visitor-edits-text*
+  "This lab does not take edits to the model file by hand: describe the change in a prompt and the agent makes it."
+  "String. What the model and reload doors, and the sheet's Save, answer
+while *visitor-edits?* is nil.")
+
+(defun visitor-edits-refusal (req ent)
+  (refuse req ent net.aserve:*response-forbidden* "~a" *visitor-edits-text*))
+
 (defun model-door (req ent)
   "POST <prefix>/api/model {session, source}: the visitor's own edit of the
 model file, written, compiled and loaded like the agent's."
   (let* ((json (request-json req))
          (session (requested-session req json))
          (source (and json (gethash "source" json))))
-    (cond ((null session) (no-such-session req ent))
+    (cond ((not *visitor-edits?*) (visitor-edits-refusal req ent))
+          ((null session) (no-such-session req ent))
           ((not (owner-request? req session json)) (not-yours req ent))
           ((not (stringp source)) (refuse req ent "No source given."))
           ;; claimed, not merely checked: a prompt starting in the gap
@@ -1003,7 +1012,8 @@ model file, written, compiled and loaded like the agent's."
 it is on disk, after an edit made in the terminal."
   (let* ((json (request-json req))
          (session (requested-session req json)))
-    (cond ((null session) (no-such-session req ent))
+    (cond ((not *visitor-edits?*) (visitor-edits-refusal req ent))
+          ((null session) (no-such-session req ent))
           ((not (owner-request? req session json)) (not-yours req ent))
           ((not (probe-file (session-model-file session))) (refuse req ent "There is no model file yet."))
           ((not (claim! session)) (refuse req ent "Wait for the agent to finish first."))

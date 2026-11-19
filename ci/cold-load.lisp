@@ -388,6 +388,22 @@ loaded) its page too."
                                           :json (table "session" session "source" *smoke-model*))))
                      (or (eq (gethash "ok" answer) t)
                          (error "the model door refused it: ~a" (gethash "text" answer))))))
+          ;; a lab that takes no hand edits (*visitor-edits?* nil): the model
+          ;; and reload doors refuse the owner too, and the file is unchanged
+          (smoke "prompt-lab takes no hand edits when visitor edits are off"
+                 (lambda ()
+                   ;; set, not bound: the doors run on the server's threads
+                   (let ((switch (find-symbol "*VISITOR-EDITS?*" :prompt-lab)))
+                     (setf (symbol-value switch) nil)
+                     (unwind-protect
+                       (let ((model (nth-value 1 (http :post (door "model") :headers (owner-headers)
+                                                       :json (table "session" session "source" "(define-object model (base-object))"))))
+                             (reload (nth-value 1 (http :post (door "reload") :headers (owner-headers)
+                                                        :json (table "session" session)))))
+                         (unless (and (eql model 403) (eql reload 403))
+                           (error "model door ~a, reload door ~a" model reload))
+                         t)
+                       (setf (symbol-value switch) t)))))
           (smoke "prompt-lab state door reads the model back"
                  (lambda ()
                    (let ((state (json-of :get (format nil "~a?session=~a" (door "state") session)
