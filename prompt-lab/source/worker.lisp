@@ -73,7 +73,8 @@ it installed."
                  (call-next-method))))
     (let ((render (find-symbol "%COLLECT-STALE!" :gwl)))
       (when (and render (fboundp render))
-        (eval `(ccl:advise ,render (call-with-model-shared #'(lambda () (:do-it)))
+        ;; barging: requests in hand wait on this render (gate.lisp)
+        (eval `(ccl:advise ,render (call-with-model-shared #'(lambda () (:do-it)) *model-gate* t)
                            :when :around :name load-gate))))
     (list :handle-request :stream-render))
   #-ccl

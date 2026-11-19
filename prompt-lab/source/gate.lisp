@@ -44,9 +44,14 @@ Set by a one-shot lab's init; nil elsewhere.")
 (defvar *gate-hold* nil
   "This thread's hold on the gate: nil, :shared or :exclusive.")
 
-(defun gate-acquire-shared (gate)
+(defun gate-acquire-shared (gate &key barge?)
+  "Take a share.  A waiting writer keeps new readers out -- except one that
+BARGE?s: the sheet's stream render, which requests in hand wait on (gwl's
+await-sheet-flush), so keeping it out behind a writer that waits on those
+requests would hold the lot for the flush's timeout."
   (bt2:with-lock-held ((model-gate-lock gate))
-    (loop while (or (model-gate-writer gate) (plusp (model-gate-writers-waiting gate)))
+    (loop while (or (model-gate-writer gate)
+                    (and (not barge?) (plusp (model-gate-writers-waiting gate))))
           do (bt2:condition-wait (model-gate-cv gate) (model-gate-lock gate)))
     (incf (model-gate-readers gate))))
 
@@ -59,9 +64,14 @@ Set by a one-shot lab's init; nil elsewhere.")
 (defun gate-acquire-exclusive (gate)
   (bt2:with-lock-held ((model-gate-lock gate))
     (incf (model-gate-writers-waiting gate))
-    (loop while (or (model-gate-writer gate) (plusp (model-gate-readers gate)))
-          do (bt2:condition-wait (model-gate-cv gate) (model-gate-lock gate)))
-    (decf (model-gate-writers-waiting gate))
+    ;; however the wait ends -- an interrupt, a time limit -- the count is
+    ;; given back and the readers woken: a count left behind kept every
+    ;; reader out for good (a worker hung at no CPU, 2026-11-19)
+    (unwind-protect
+         (loop while (or (model-gate-writer gate) (plusp (model-gate-readers gate)))
+               do (bt2:condition-wait (model-gate-cv gate) (model-gate-lock gate)))
+      (decf (model-gate-writers-waiting gate))
+      (bt2:condition-broadcast (model-gate-cv gate)))
     (setf (model-gate-writer gate) (bt2:current-thread))))
 
 (defun gate-release-exclusive (gate)
@@ -69,11 +79,11 @@ Set by a one-shot lab's init; nil elsewhere.")
     (setf (model-gate-writer gate) nil)
     (bt2:condition-broadcast (model-gate-cv gate))))
 
-(defun call-with-model-shared (thunk &optional (gate *model-gate*))
+(defun call-with-model-shared (thunk &optional (gate *model-gate*) barge?)
   (if (or (not *load-gate?*) *gate-hold*)
       (funcall thunk)
       (progn
-        (gate-acquire-shared gate)
+        (gate-acquire-shared gate :barge? barge?)
         (unwind-protect (let ((*gate-hold* :shared)) (funcall thunk))
           (gate-release-shared gate)))))
 

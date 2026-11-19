@@ -233,11 +233,13 @@ version that fails to compile is kept too."
         ;; completion check reads this, model-load-failure)
         (note-model-load! session "the compile was refused, so the file was not loaded")
         (return-from load-model-file (meter-refusal reason))))
+    ;; no instance made while the definition goes in (gate.lisp): the
+    ;; compile as well as the load, since define-object defines its class
+    ;; at compile time too.  The gate is taken OUTSIDE the time limit, so
+    ;; the limit can never fire while the gate is being waited for
+    (with-model-exclusive
     (handler-case
         (with-time-limit (*load-seconds* "compile and load")
-          ;; no instance made while the definition goes in (gate.lisp): the
-          ;; compile as well as the load, since define-object defines its
-          ;; class at compile time too
           (let ((fasl (with-model-exclusive
                         (handler-bind ((warning #'(lambda (w)
                                                     (push (princ-to-string w) warnings)
@@ -276,7 +278,7 @@ version that fails to compile is kept too."
                                   ;; 'unexpected end of file' does not
                                   (and (house-model? session)
                                        (ignore-errors (paren-report (file-model-body file))))))
-                t)))))
+                t))))))
 
 (defvar *rewrite-advice* "Write the whole file again with write_model"
   "What a refusal for unbalanced or unreadable text tells the model to do,
@@ -371,9 +373,11 @@ Wrap several forms in progn, or put definitions in the model with write_model.")
                (let (result)
                  (handler-case
                      (let ((output (with-output-to-string (*standard-output*)
-                                     (with-time-limit (*eval-seconds* "evaluation")
-                                       ;; an expression may define a class too (gate.lisp)
-                                       (setq result (with-model-exclusive (eval form)))))))
+                                     ;; an expression may define a class too (gate.lisp);
+                                     ;; the gate outside the time limit, as for a load
+                                     (with-model-exclusive
+                                       (with-time-limit (*eval-seconds* "evaluation")
+                                         (setq result (eval form)))))))
                        (values (list (let ((*print-length* 50) (*print-level* 6))
                                        (text-result "~s~@[~%Output:~%~a~]"
                                                    result (when (plusp (length output)) output))))
