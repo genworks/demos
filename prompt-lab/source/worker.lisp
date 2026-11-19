@@ -46,6 +46,40 @@ quit: the container's restart brings a fresh image."
     (uiop:quit 0)))
 
 ;;
+;; The load gate's request side (gate.lisp), for a one-shot lab on CCL:
+;; every request the web server handles holds the gate shared -- except
+;; the sheet's event stream, which stays open for hours and would hold
+;; every load off; its renders (gwl's %collect-stale!, once a pass) hold
+;; it instead.  Installed at run time by install-load-gate!, from a
+;; one-shot lab's init, so a shared lab's image never carries either.
+;;
+
+(defun stream-request? (req)
+  (search "/gdlStream" (princ-to-string (net.aserve:request-uri req))))
+
+(defun install-load-gate! ()
+  "Turn the load gate on (*load-gate?*) and put its request side in:
+a method around the web server's handle-request (specialized on T, so
+it runs inside the server's own around methods and replaces none of
+them), and advice around gwl's stream render.  CCL only; elsewhere the
+gate holds loads apart from the agent's own tools alone.  Returns what
+it installed."
+  (setf *load-gate?* t)
+  #+ccl
+  (progn
+    (eval `(defmethod net.aserve::handle-request :around ((req t))
+             (if (and *load-gate?* (not (stream-request? req)))
+                 (call-with-model-shared #'(lambda () (call-next-method)))
+                 (call-next-method))))
+    (let ((render (find-symbol "%COLLECT-STALE!" :gwl)))
+      (when (and render (fboundp render))
+        (eval `(ccl:advise ,render (call-with-model-shared #'(lambda () (:do-it)))
+                           :when :around :name load-gate))))
+    (list :handle-request :stream-render))
+  #-ccl
+  (list :tools-only))
+
+;;
 ;; Importing one-shot labs' archives.
 ;;
 

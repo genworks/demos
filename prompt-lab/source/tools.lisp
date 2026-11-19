@@ -235,15 +235,28 @@ version that fails to compile is kept too."
         (return-from load-model-file (meter-refusal reason))))
     (handler-case
         (with-time-limit (*load-seconds* "compile and load")
-          (let ((fasl (handler-bind ((warning #'(lambda (w)
-                                                  (push (princ-to-string w) warnings)
-                                                  (muffle-warning w))))
-                        (let ((*package* (session-package session)))
-                          (compile-file file :output-file (make-pathname :type "fasl"
-                                                                         :defaults file))))))
+          ;; no instance made while the definition goes in (gate.lisp): the
+          ;; compile as well as the load, since define-object defines its
+          ;; class at compile time too
+          (let ((fasl (with-model-exclusive
+                        (handler-bind ((warning #'(lambda (w)
+                                                    (push (princ-to-string w) warnings)
+                                                    (muffle-warning w))))
+                          (let ((*package* (session-package session)))
+                            (compile-file file :output-file (make-pathname :type "fasl"
+                                                                           :defaults file)))))))
             (unless fasl (error "The compiler produced no output file."))
-            (let ((*package* (session-package session)))
-              (load fasl))
+            (with-model-exclusive
+              (let ((*package* (session-package session)))
+                (load fasl))
+              ;; and the new class's first dispatches made here, one thread,
+              ;; before the gate lets readers in: several threads filling a
+              ;; class's dispatch caches at once is the same fault's other
+              ;; door ("Generic-function dispatch bug!", 1 in 2,000 without)
+              (when *load-gate?*
+                (let ((symbol (built-symbol session)))
+                  (when (and symbol (find-class symbol nil))
+                    (ignore-errors (the-object (make-object symbol) children))))))
             ;; the file as it stands is what is loaded
             (note-model-load! session nil)
             ;; MODEL, or for a session that builds a web app, APP (kinds.lisp)
@@ -359,7 +372,8 @@ Wrap several forms in progn, or put definitions in the model with write_model.")
                  (handler-case
                      (let ((output (with-output-to-string (*standard-output*)
                                      (with-time-limit (*eval-seconds* "evaluation")
-                                       (setq result (eval form))))))
+                                       ;; an expression may define a class too (gate.lisp)
+                                       (setq result (with-model-exclusive (eval form)))))))
                        (values (list (let ((*print-length* 50) (*print-level* 6))
                                        (text-result "~s~@[~%Output:~%~a~]"
                                                    result (when (plusp (length output)) output))))
