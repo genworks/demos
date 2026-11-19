@@ -1566,6 +1566,8 @@ sweep tries again."
 (defvar *registered-at* (make-hash-table :test #'equal)
   "Lab name -> when its whole set of terms was last registered.")
 
+(defvar *registered-at-lock* (bt:make-lock "prompt-lab terms registered"))
+
 (defun register-deployments! (&key force?)
   "Register the terms of every deployment of this lab (the house as it
 stands: the private front binds its own) at the gate, replacing what the
@@ -1573,9 +1575,10 @@ gate held for it, when *register-sweep-seconds* have passed since the last
 time or FORCE?.  Answers the number registered, or nil."
   (when (registers?)
     (let ((lab (deployment-lab-name)) (now (get-universal-time)))
-      (when (or force? (>= (- now (gethash lab *registered-at* 0)) *register-sweep-seconds*))
+      (when (or force? (>= (- now (bt:with-lock-held (*registered-at-lock*) (gethash lab *registered-at* 0)))
+                                 *register-sweep-seconds*))
         (multiple-value-bind (count why) (ignore-errors (monocle:register-deployments! (lab-house)))
-          (cond (count (setf (gethash lab *registered-at*) now))
+          (cond (count (bt:with-lock-held (*registered-at-lock*) (setf (gethash lab *registered-at*) now)))
                 (t (format *error-output* "~&prompt-lab: terms of ~a not registered: ~a~%" lab why)))
           count)))))
 
@@ -1863,6 +1866,15 @@ file's text, with the stamp."
   "Deployment name -> the gate's hosting answer when it last refused, so
 the page can say what is left; cleared when it serves again.")
 
+;; deployed apps' request threads store here: locked, as every table a
+;; request thread changes
+(defvar *stopped-lock* (bt:make-lock "prompt-lab stopped deployments"))
+
+(defun note-stopped! (name answer)
+  "Deployment NAME refused by the gate with ANSWER, or (ANSWER nil) served again."
+  (bt:with-lock-held (*stopped-lock*)
+    (if answer (setf (gethash name *stopped*) answer) (remhash name *stopped*))))
+
 (defun deployment-lab-name () (monocle:house-lab-name (lab-house)))
 
 (defun hosting-ask (door name &rest plist)
@@ -1887,12 +1899,12 @@ so the caller pauses the deployment."
                            "kind" (string-downcase (symbol-name kind))
                            "symbols" symbols "engine" (engine-name))
             (cond ((eql status 429)
-                   (setf (gethash name *stopped*) (or json (h)))
+                   (note-stopped! name (or json (h)))
                    (values nil json))
-                  (t (remhash name *stopped*) t)))
+                  (t (note-stopped! name nil) t)))
         (error () t))))
 
-(defun deployment-stopped? (name) (gethash name *stopped*))
+(defun deployment-stopped? (name) (bt:with-lock-held (*stopped-lock*) (gethash name *stopped*)))
 
 (defun deployment-volume (name)
   "The symbol volume of the running deployment NAME's model file: what a
@@ -2026,7 +2038,7 @@ unpaid minimums -- once, and the deployment runs again."
                (hosting-ask "host-confirm" name "checkout" checkout)
              (let ((outcome (and answer (gethash "outcome" answer))))
                (when (member outcome '("credited" "already") :test #'equal)
-                 (remhash name *stopped*))
+                 (note-stopped! name nil))
                ;; the sale into the books: hosting bought on a licensed
                ;; runtime counts toward the licensor's base
                (when (equal outcome "credited")
@@ -2264,7 +2276,7 @@ door, or a runtime without books."
               (multiple-value-bind (confirm status)
                   (hosting-ask "host-confirm" name "checkout" checkout)
                 (when (and (eql status 200) (hash-table-p confirm) (equal (gethash "outcome" confirm) "credited"))
-                  (remhash name *stopped*)
+                  (note-stopped! name nil)
                   (book-hosting-line! name checkout confirm))))))
         ;; credited elsewhere, booked here
         (dolist (row (coerce (or (gethash "unbooked" answer) #()) 'list))

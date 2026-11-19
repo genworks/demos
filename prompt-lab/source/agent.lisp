@@ -1263,6 +1263,10 @@ lower case, letters only, three or more, none of *examples-stop-words*."
   "Directory -> (write-date entries): a pool or reference as last read,
 each entry (name model-file words).")
 
+;; the agents' threads read and store here at once (the files are read
+;; outside it)
+(defvar *examples-pool-lock* (bt:make-lock "prompt-lab examples pools"))
+
 (defun examples-pool (directory &key (type "lisp"))
   "The pool in DIRECTORY, each (name file words): for every <name>.TYPE
 with a <name>.txt beside it (TYPE \"txt\": every request alone), the words
@@ -1272,7 +1276,7 @@ of the .txt.  Read again when a file there changed."
          ;; last change leaves the newest date as it was
          (stamp (list (length files) (reduce #'max files :key #'file-write-date :initial-value 0)))
          (key (format nil "~a ~a" type (namestring directory)))
-         (kept (gethash key *examples-pool-cache*)))
+         (kept (bt:with-lock-held (*examples-pool-lock*) (gethash key *examples-pool-cache*))))
     (if (and kept (equal (first kept) stamp))
         (second kept)
         (let ((entries (loop for file in files
@@ -1280,7 +1284,8 @@ of the .txt.  Read again when a file there changed."
                              when (probe-file about)
                                collect (list (pathname-name file) file
                                              (request-words (uiop:read-file-string about :external-format :utf-8))))))
-          (setf (gethash key *examples-pool-cache*) (list stamp entries))
+          (bt:with-lock-held (*examples-pool-lock*)
+            (setf (gethash key *examples-pool-cache*) (list stamp entries)))
           entries))))
 
 (defun word-idf (word-lists)

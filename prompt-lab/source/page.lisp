@@ -720,6 +720,10 @@ One address opens at most *max-sessions-per-address* a day."
 (defvar *topup-checked* (make-hash-table :test #'equal)
   "session id -> universal time its last top-up passed the human check.")
 
+;; request threads read, sweep and store here: on CCL an unlocked store can
+;; pair one session's key with another's time
+(defvar *topup-checked-lock* (bt:make-lock "prompt-lab topup checks"))
+
 (defparameter *topup-check-seconds* 300
   "Integer. How long a passed human check covers the session's next top-up
 request: the card line first, then 'more payment options' if the payer
@@ -729,7 +733,7 @@ wants them, is one purchase and one check.")
   "Whether SESSION passed the human check in the last
 *topup-check-seconds*: what lets one check cover a purchase's two steps,
 or the several files of one upload (the upload door)."
-  (let ((checked (gethash (session-id session) *topup-checked*)))
+  (let ((checked (bt:with-lock-held (*topup-checked-lock*) (gethash (session-id session) *topup-checked*))))
     (and checked (< (- (get-universal-time) checked) *topup-check-seconds*) t)))
 
 (defun topup-check! (session token address)
@@ -742,11 +746,12 @@ once, a token is single-use.  Values: true, or nil and the reason."
       (multiple-value-bind (ok? reason) (verify-turnstile token address)
         (cond (ok?
                (let ((now (get-universal-time)))
-                 ;; the old ones go as a new one comes: the table stays small
-                 (maphash #'(lambda (id at) (when (> (- now at) *topup-check-seconds*)
-                                              (remhash id *topup-checked*)))
-                          *topup-checked*)
-                 (setf (gethash (session-id session) *topup-checked*) now))
+                 (bt:with-lock-held (*topup-checked-lock*)
+                   ;; the old ones go as a new one comes: the table stays small
+                   (maphash #'(lambda (id at) (when (> (- now at) *topup-check-seconds*)
+                                                (remhash id *topup-checked*)))
+                            *topup-checked*)
+                   (setf (gethash (session-id session) *topup-checked*) now)))
                t)
               (t (values nil (or reason "Complete the human check first.")))))))
 
