@@ -1149,8 +1149,7 @@ has paid it, and spends a use of the payment."
                                         (deployment-volume (the-object app deployment-name)))))
            (refuse req ent net.aserve:*response-service-unavailable* "This app is paused: its hosting is spent."))
           (t
-           (let ((file (merge-pathnames (format nil "download-~a.~a" (random 1000000000) (third entry))
-                                        (uiop:temporary-directory))))
+           (let ((file (download-file-name (uiop:temporary-directory) (third entry))))
              (unwind-protect
                   (multiple-value-bind (ok? note)
                       (handler-case

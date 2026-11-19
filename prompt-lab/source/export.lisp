@@ -50,6 +50,15 @@ extension, and the label the page shows.")
 (defparameter *download-pdf-views* :standard-4view
   "Keyword. The drawing system's views-config for the PDF sheet.")
 
+(defparameter *hidden-lines-seconds* 20
+  "Number. How long a downloaded drawing may spend removing hidden lines;
+past it the drawing is written as the wireframe instead, with a note,
+rather than holding the visitor and a worker.")
+
+(defparameter *hidden-lines-gave-up-text*
+  "Hidden lines are not removed in this drawing: removing them was taking too long for this model, so this is the wireframe."
+  "The note a drawing carries when hidden-line removal ran past its time.")
+
 (defun solids-available? ()
   "Whether this engine writes solids: the solids engine (*engine* :solid,
 which has a solid modeller aboard) with a brep type defined.  A brep type
@@ -193,6 +202,20 @@ the image has it (gendl since 2026-09-30), its root-path printed otherwise."
 ;; Writing.
 ;;
 
+(defun drawn-within-time (draw hidden-lines file)
+  "Call DRAW, a function of the hidden-lines setting that writes FILE, with
+HIDDEN-LINES; when removing them runs past *hidden-lines-seconds*, call it
+again with none, the wireframe, over what the first call began (a format
+opens its file before it draws, and will not open one that exists).
+Value: nil, or the note that says so."
+  (if (null hidden-lines)
+      (progn (funcall draw nil) nil)
+      (handler-case (progn (with-deadline (*hidden-lines-seconds*) (funcall draw hidden-lines)) nil)
+        (bt2:timeout ()
+          (when (probe-file file) (ignore-errors (delete-file file)))
+          (funcall draw nil)
+          *hidden-lines-gave-up-text*))))
+
 (defun write-download (kind model file)
   "MODEL written in KIND (a name from *download-formats*) to FILE.
 Values: true, and a note for the visitor or nil; nil and a reason when
@@ -200,26 +223,30 @@ there is nothing to write."
   (let ((hidden-lines (when (<= (length (the-object model leaves)) *hidden-lines-max-leaves*)
                         :remove)))
     (cond ((string= kind "pdf")
-           (apply 'gdl-user::generate-multi-view-drawing
-                  :format :pdf :output-file file :object-roots (list model)
-                  :views-config *download-pdf-views*
-                  (when hidden-lines (list :hidden-lines hidden-lines)))
-           t)
+           (values t (drawn-within-time
+                      #'(lambda (hidden-lines)
+                          (apply 'gdl-user::generate-multi-view-drawing
+                                 :format :pdf :output-file file :object-roots (list model)
+                                 :views-config *download-pdf-views*
+                                 (when hidden-lines (list :hidden-lines hidden-lines))))
+                      hidden-lines file)))
           ((member kind '("svg" "png") :test #'string=)
            (let ((svg (if (string= kind "svg") file (make-pathname :type "svg" :defaults file))))
              (unwind-protect
-                  (progn
-                    (apply 'gdl-user::generate-single-view-drawing
-                           :format :svg :output-file svg :object-roots (list model)
-                           :projection-vector :trimetric
-                           (when hidden-lines (list :hidden-lines hidden-lines)))
+                  (let ((note (drawn-within-time
+                               #'(lambda (hidden-lines)
+                                   (apply 'gdl-user::generate-single-view-drawing
+                                          :format :svg :output-file svg :object-roots (list model)
+                                          :projection-vector :trimetric
+                                          (when hidden-lines (list :hidden-lines hidden-lines))))
+                               hidden-lines svg)))
                     (when (string= kind "png")
                       (let ((png (render-svg-to-png (uiop:read-file-string svg :external-format :utf-8)
                                                     :max-pixels *download-png-pixels*)))
                         (with-open-file (out file :direction :output :if-exists :supersede
                                                   :element-type '(unsigned-byte 8))
                           (write-sequence png out))))
-                    t)
+                    (values t note))
                (when (and (string= kind "png") (probe-file svg))
                  (ignore-errors (delete-file svg))))))
           (t
@@ -505,6 +532,65 @@ no such session."
           (t (respond-deployment req ent (authorship-text (session-id session) directory)
                                  :attachment (format nil "authorship-~a.md" (session-id session)))))))
 
+;;
+;; THE DOWNLOAD CACHE (2026-11-19): a drawing with its hidden lines removed
+;; can take seconds, and a second click on the same download paid them
+;; again.  The door builds the model at its file's defaults, so the file
+;; is the same while the model file is: kept by the session's package,
+;; the format and when the model was last compiled, at most
+;; *download-cache-size* of them, the oldest dropped.
+;;
+
+(defparameter *download-cache-size* 32
+  "Integer.  How many downloaded files are kept for the next asker of the
+same model in the same format.")
+
+(defvar *download-cache* nil "Newest first: (key file note).")
+(defvar *download-cache-lock* (bt:make-lock "prompt-lab download cache"))
+
+(defvar *download-files* 0 "How many download files this Lisp has named.")
+
+(defun download-file-name (directory type)
+  "A file of TYPE in DIRECTORY that no other download of this Lisp's has
+named.  Not RANDOM: on CCL each new thread starts from the same random
+state, so two web workers draw the same numbers."
+  (merge-pathnames (format nil "download-~d-~d.~a" (get-universal-time)
+                           (bt:with-lock-held (*download-cache-lock*) (incf *download-files*))
+                           type)
+                   directory))
+
+(defun download-cache-key (session kind)
+  "What a download of SESSION's model in KIND depends on: its package, the
+format, and when its model file was last compiled; nil when that is not
+known."
+  (let ((stamp (ignore-errors (file-write-date (make-pathname :type "fasl" :defaults (session-model-file session))))))
+    (and stamp (list (package-name (session-package session)) kind stamp))))
+
+(defun cached-download (key)
+  "The file kept for KEY and its note, as (file note), or nil."
+  (when key
+    (bt:with-lock-held (*download-cache-lock*)
+      (let ((entry (find key *download-cache* :key #'first :test #'equal)))
+        (when (and entry (probe-file (second entry)))
+          (setf *download-cache* (cons entry (remove entry *download-cache*)))
+          (rest entry))))))
+
+(defun keep-download! (key file note)
+  "FILE, just written for KEY with NOTE, kept for the next asker: moved
+among the kept files.  Value: where it is now."
+  (let ((kept (download-file-name (merge-pathnames "prompt-lab-downloads/" (uiop:temporary-directory))
+                                  (pathname-type file)))
+        gone)
+    (ensure-directories-exist kept)
+    (rename-file file kept)
+    (bt:with-lock-held (*download-cache-lock*)
+      (push (list key kept note) *download-cache*)
+      (when (> (length *download-cache*) *download-cache-size*)
+        (setf gone (nthcdr *download-cache-size* *download-cache*)
+              *download-cache* (subseq *download-cache* 0 *download-cache-size*))))
+    (dolist (entry gone) (ignore-errors (delete-file (second entry))))
+    kept))
+
 (defun download-door (req ent)
   "GET <prefix>/api/download?session=<id>&format=<name> (or replay=<id>
 for an archived session's replay; owner=<key> for a private one; or
@@ -513,7 +599,9 @@ cookie for a file that was paid for): the model as a file.  400 for a
 format not offered, 402 for a deployed model's priced file without a
 grant, 404 for no such session or no model, 422 when the format has
 nothing to write (STEP of a model with no solids), 429 when the owner's
-credits are spent.  A grant is spent when its file is served."
+credits are spent.  A grant is spent when its file is served.  The same
+model file in the same format is served from the file kept last time
+(*download-cache*): nothing is built, so nothing is metered."
   (let* ((id (query-value req "session"))
          (replay (query-value req "replay"))
          (key (request-owner-key req))
@@ -545,44 +633,59 @@ credits are spent.  A grant is spent when its file is served."
                    (money-text (* (deployment-file-price record kind) *unit-cents*))))
           ((not (model-defined? session)) (refuse req ent "No model has been built in this session yet."))
           (t
-           ;; a deployed model's file is its author's compute (deploy.lisp, the hosting meter)
-           (when (and record (not (meter-deployment! deployed :run (model-volume session))))
-             (return-from download-door
-               (refuse req ent net.aserve:*response-service-unavailable* "~a is paused: its hosting is spent." deployed)))
-           (when (owner? session key)
-             (multiple-value-bind (ok? reason) (meter! session :run (model-volume session))
-               (unless ok?
-                 (return-from download-door
-                   (refuse req ent *response-too-many-requests* "~a" reason)))))
-           (let ((file (merge-pathnames (format nil "download-~a.~a" (random 1000000000) (third entry))
-                                        (uiop:temporary-directory))))
-             (unwind-protect
-                  (multiple-value-bind (ok? note)
-                      (handler-case
-                          (with-time-limit (*render-seconds* "download")
-                            (let ((*package* (session-package session)))
-                              (write-download kind (make-model session) file)))
-                        ;; a stack overflow too, answered as a 422 (agent.lisp)
-                        (serious-condition (condition) (values nil (format nil "The model did not write: ~a" condition))))
-                    (if (not ok?)
-                        (refuse req ent (net.aserve::make-resp 422 "Unprocessable Entity") "~a" note)
-                        (progn
-                          (when on-grant? (spend-grant! grant))
-                          (net.aserve:with-http-response (req ent :content-type (second entry) :format :binary)
-                            (setf (net.aserve:reply-header-slot-value req :content-disposition)
-                                  ;; a deployment's file is named for it, nothing of the lab's
-                                  (format nil "attachment; filename=\"~a.~a\""
-                                          (if record deployed (format nil "prompt-lab-~a" (session-id session)))
-                                          (third entry)))
-                            (setf (net.aserve:reply-header-slot-value req :cache-control) "no-store")
-                            (when note
-                              (setf (net.aserve:reply-header-slot-value req :x-prompt-lab-note)
-                                    (remove-if-not #'(lambda (c) (< 31 (char-code c) 127)) note)))
-                            (net.aserve:with-http-body (req ent)
-                              (with-open-file (in file :element-type '(unsigned-byte 8))
-                                (let ((buffer (make-array 4096 :element-type '(unsigned-byte 8)))
-                                      (out (net.aserve:request-reply-stream req)))
-                                  (loop for count = (read-sequence buffer in)
-                                        while (plusp count)
-                                        do (write-sequence buffer out :end count)))))))))
-               (when (probe-file file) (ignore-errors (delete-file file)))))))))
+           (let* ((cache-key (download-cache-key session kind))
+                  (hit (cached-download cache-key)))
+             (cond (hit
+                    ;; a kept file costs nothing to serve, but a paused
+                    ;; deployment serves nothing
+                    (when (and record (deployment-stopped? deployed))
+                      (return-from download-door
+                        (refuse req ent net.aserve:*response-service-unavailable* "~a is paused: its hosting is spent." deployed))))
+                   (t
+                    ;; a deployed model's file is its author's compute (deploy.lisp, the hosting meter)
+                    (when (and record (not (meter-deployment! deployed :run (model-volume session))))
+                      (return-from download-door
+                        (refuse req ent net.aserve:*response-service-unavailable* "~a is paused: its hosting is spent." deployed)))
+                    (when (owner? session key)
+                      (multiple-value-bind (ok? reason) (meter! session :run (model-volume session))
+                        (unless ok?
+                          (return-from download-door
+                            (refuse req ent *response-too-many-requests* "~a" reason)))))))
+             (let ((file (or (first hit) (download-file-name (uiop:temporary-directory) (third entry))))
+                   (fresh? (not hit)))
+               (unwind-protect
+                    (multiple-value-bind (ok? note)
+                        (if hit
+                            (values t (second hit))
+                            (handler-case
+                                (with-time-limit (*render-seconds* "download")
+                                  (let ((*package* (session-package session)))
+                                    (write-download kind (make-model session) file)))
+                              ;; a stack overflow too, answered as a 422 (agent.lisp)
+                              (serious-condition (condition) (values nil (format nil "The model did not write: ~a" condition)))))
+                      (if (not ok?)
+                          (refuse req ent (net.aserve::make-resp 422 "Unprocessable Entity") "~a" note)
+                          (progn
+                            ;; kept for the next asker of the same file
+                            (when (and fresh? cache-key)
+                              (setf file (keep-download! cache-key file note)
+                                    fresh? nil))
+                            (when on-grant? (spend-grant! grant))
+                            (net.aserve:with-http-response (req ent :content-type (second entry) :format :binary)
+                              (setf (net.aserve:reply-header-slot-value req :content-disposition)
+                                    ;; a deployment's file is named for it, nothing of the lab's
+                                    (format nil "attachment; filename=\"~a.~a\""
+                                            (if record deployed (format nil "prompt-lab-~a" (session-id session)))
+                                            (third entry)))
+                              (setf (net.aserve:reply-header-slot-value req :cache-control) "no-store")
+                              (when note
+                                (setf (net.aserve:reply-header-slot-value req :x-prompt-lab-note)
+                                      (remove-if-not #'(lambda (c) (< 31 (char-code c) 127)) note)))
+                              (net.aserve:with-http-body (req ent)
+                                (with-open-file (in file :element-type '(unsigned-byte 8))
+                                  (let ((buffer (make-array 4096 :element-type '(unsigned-byte 8)))
+                                        (out (net.aserve:request-reply-stream req)))
+                                    (loop for count = (read-sequence buffer in)
+                                          while (plusp count)
+                                          do (write-sequence buffer out :end count)))))))))
+                 (when (and fresh? (probe-file file)) (ignore-errors (delete-file file))))))))))
