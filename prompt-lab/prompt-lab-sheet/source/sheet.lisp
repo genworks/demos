@@ -2155,6 +2155,44 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                  session)
                 (t (the (tell-error! reason)) nil)))))
 
+   (send-to-ship!
+    (prompt address token kind)
+    ;; on the front of a fleet of session ships (ships.lisp): the human
+    ;; check and the day's cap here, where every ship's session starts;
+    ;; then a ship from the pool, the browser sent there with the prompt
+    ;; (plRoute, as for the sibling lab), or a place in line, the page
+    ;; moved on by itself when a ship comes free
+    (let ((prompt (string-trim '(#\space #\tab #\newline #\return) (or prompt ""))))
+      (cond ((zerop (length prompt))
+             (the (tell-error! "Describe what to build first.")))
+            ((address-over-limit? address :sessions)
+             (the (tell-error! (format nil "This address has opened its ~a free sessions for today.  Come back tomorrow."
+                                      *max-sessions-per-address*))))
+            (t
+             (multiple-value-bind (human? reason) (verify-turnstile token address)
+               (the spent-token!)
+               (if (not human?)
+                   (the (tell-error! reason))
+                   (let* ((sheet self)
+                          (kind-name (let ((kind (parse-kind kind))) (if kind (kind-name kind) "")))
+                          (tell #'(lambda (text)
+                                    (sheet-send! sheet (datastar-signals-event
+                                                        (with-output-to-string (s)
+                                                          (yason:encode (h "notice" text "error" "") s))))))
+                          (deliver #'(lambda (ship)
+                                       (sheet-send! sheet (datastar-script-event
+                                                           (format nil "plRoute(~a,~a,~a,~a)"
+                                                                   (js-string-literal (format nil "~a?routed=1" (ship-url ship)))
+                                                                   (js-string-literal prompt)
+                                                                   (js-string-literal *ship-ready-text*)
+                                                                   (js-string-literal kind-name))))))
+                          (alive #'(lambda () (and (sheet-alive? sheet) (sheet-streaming-p sheet)))))
+                     (multiple-value-bind (outcome detail) (request-ship! address deliver alive tell)
+                       (case outcome
+                         (:sent nil)
+                         (:queued (funcall tell (ships-line-text detail)))
+                         (t (the (tell-error! detail))))))))))))
+
    (spent-token!
     ()
     ;; a Turnstile token is single-use
@@ -2174,6 +2212,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
             ((and (terms-required? :build) (not (eq (gethash "tagree" signals) t))
                   (not (and (the session) (session-accepted? (the session) :build))))
              (the (tell-error! (terms-refusal :build))))
+            ;; the front of a fleet of session ships (ships.lisp): a new
+            ;; visitor's build is taken to a ship of its own
+            ((and (null (the session)) (ships-front?))
+             (the (send-to-ship! prompt address token (gethash "kind" signals))))
             ((the (own-session! address (gethash "wallet" signals) (eq (gethash "closedPick" signals) t)))
              (multiple-value-bind (started reason response route)
                  (begin-prompt! (the session) prompt address token

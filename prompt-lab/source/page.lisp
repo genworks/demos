@@ -575,6 +575,12 @@ opens it closed-source (deploy.lisp), where the lab allows.  Values:
 the session, or nil, the reason and the response to refuse with.  One
 address opens at most *max-sessions-per-address* a day, unless its wallet
 has credit or has put more into the pot than it has drawn."
+  ;; the front of a fleet of session ships opens none itself: each runs
+  ;; in a ship of its own, which the page's first Build claims (ships.lisp)
+  (when (funcall 'ships-front?)
+    (return-from open-session!
+      (values nil "Sessions here run in labs of their own: describe what to build on the lab's page and press Build."
+              net.aserve:*response-service-unavailable*)))
   ;; a one-shot lab serves its one session and no other (worker.lisp)
   (when (and *one-session?* (funcall 'one-session-taken?))
     (return-from open-session!

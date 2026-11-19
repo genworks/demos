@@ -451,6 +451,56 @@ loaded) its page too."
                          (setf (symbol-value root-var) kept-root
                                (symbol-value imports-var) nil)
                          (ignore-errors (uiop:delete-directory-tree base :validate t)))))))
+          ;; the front of a fleet of session ships (ships.lisp): no session
+          ;; of its own, a claim is a rename out of the pool, the second
+          ;; visitor waits in line, a ship that comes free goes to them
+          (smoke "prompt-lab front: a ship claimed from the pool, the line, a freed ship to the first in line"
+                 (lambda ()
+                   (let* ((pl (find-package :prompt-lab))
+                          (home-var (find-symbol (string '#:*ships-home*) pl))
+                          (line-var (find-symbol (string '#:*ships-line*) pl))
+                          (base (uiop:ensure-directory-pathname
+                                 (format nil "/tmp/ships-smoke-~d/" (get-universal-time))))
+                          (ready (merge-pathnames "ready/" base))
+                          (live (merge-pathnames "live/" base))
+                          (addresses '("192.0.2.1" "192.0.2.2"))
+                          got told)
+                     (flet ((pool! (name)
+                              (with-open-file (out (merge-pathnames name ready) :direction :output :if-exists :supersede)
+                                (declare (ignore out))))
+                            (ask (address)
+                              (funcall (find-symbol (string '#:request-ship!) pl) address
+                                       (lambda (ship) (push (cons address ship) got))
+                                       (lambda () t)
+                                       (lambda (text) (push (cons address text) told)))))
+                       (ensure-directories-exist ready) (ensure-directories-exist live)
+                       (pool! "sa1")
+                       (setf (symbol-value home-var) (namestring base))
+                       (unwind-protect
+                            (let ((door-status (nth-value 1 (http :post (door "session") :json (table)))))
+                              (unless (eql door-status 503) (error "the front's session door answered ~a" door-status))
+                              (multiple-value-bind (outcome ship) (ask (first addresses))
+                                (unless (and (eq outcome :sent) (equal ship "sa1")
+                                             (probe-file (merge-pathnames "sa1" live))
+                                             (not (probe-file (merge-pathnames "sa1" ready))))
+                                  (error "the first claim: ~a ~a" outcome ship)))
+                              (multiple-value-bind (outcome place) (ask (second addresses))
+                                (unless (and (eq outcome :queued) (eql place 1))
+                                  (error "the second visitor: ~a ~a" outcome place)))
+                              (when (ask (second addresses)) (error "one address took two places in line"))
+                              (pool! "sb2")
+                              (funcall (find-symbol (string '#:dispatch-ships!) pl))
+                              (unless (equal (assoc (second addresses) got :test #'equal) (cons (second addresses) "sb2"))
+                                (error "the freed ship went to ~s" got))
+                              t)
+                         ;; the day's counts are given back, which later smokes count exactly
+                         (dolist (address addresses)
+                           (bt:with-lock-held ((symbol-value (find-symbol (string '#:*address-lock*) pl)))
+                             (remhash (funcall (find-symbol (string '#:address-key) pl) address)
+                                      (symbol-value (find-symbol (string '#:*address-counts*) pl)))))
+                         (funcall (find-symbol (string '#:funnel-count!) pl) "ships" (- (length got)))
+                         (setf (symbol-value home-var) nil (symbol-value line-var) nil)
+                         (ignore-errors (uiop:delete-directory-tree base :validate t)))))))
           (smoke "prompt-lab state door reads the model back"
                  (lambda ()
                    (let ((state (json-of :get (format nil "~a?session=~a" (door "state") session)
