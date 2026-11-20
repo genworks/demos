@@ -145,14 +145,35 @@ imported from ROOT before.  Values: the target directory or nil, and why."
              (write-line root-name out))
            (values target "imported")))))
 
+(defun import-spool! ()
+  "Each ship's subdirectory of *archive-spool*: its sessions imported
+(import-session-directory), then the subdirectory removed once every one
+of them is here.  One that would not import (too big, not well formed, an
+id already here from elsewhere) stays in the spool, and is said so on the
+error output, rather than lost.  Returns the directories copied."
+  (let ((copied nil))
+    (dolist (ship (ignore-errors (uiop:subdirectories (uiop:ensure-directory-pathname *archive-spool*))))
+      (let ((left nil))
+        (dolist (record (ignore-errors (directory (merge-pathnames "*/*/session.json" ship))))
+          (multiple-value-bind (target why)
+              (ignore-errors (import-session-directory (uiop:pathname-directory-pathname record) ship))
+            (cond (target (push target copied))
+                  ((equal why "up to date"))
+                  (t (push (format nil "~a (~a)" (namestring record) why) left)))))
+        (if left
+            (format *error-output* "~&prompt-lab: kept in the spool, not imported: ~{~a~^; ~}~%" left)
+            (ignore-errors (uiop:delete-directory-tree ship :validate t)))))
+    (nreverse copied)))
+
 (defun import-archives! ()
-  "Copy every session of each *archive-imports* directory into this lab's
-archive (import-session-directory).  Returns the directories copied."
-  (when (and *archive-root* *archive-imports*)
+  "Copy every session of each *archive-imports* directory, and of each
+ship in *archive-spool* (import-spool!), into this lab's archive
+(import-session-directory).  Returns the directories copied."
+  (when *archive-root*
     (let ((copied nil))
       (dolist (root *archive-imports*)
         (dolist (record (ignore-errors
                          (directory (merge-pathnames "*/*/session.json" (uiop:ensure-directory-pathname root)))))
           (let ((target (ignore-errors (import-session-directory (uiop:pathname-directory-pathname record) root))))
             (when target (push target copied)))))
-      (nreverse copied))))
+      (nconc (nreverse copied) (and *archive-spool* (import-spool!))))))

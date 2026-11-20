@@ -19,7 +19,9 @@
 ;;;   WORKER_NAME             the ship's name (letters, digits, hyphens)
 ;;;   LAB_PREFIX              the lab's prefix, e.g. /prompt-lab/s/<ship>
 ;;;   LAB_CONSOLE             set: the ship carries a console, linked at
-;;;                           <prefix>/console
+;;;                           LAB_CONSOLE_PATH (/prompt-lab/console, the one
+;;;                           path every ship's console shares) with
+;;;                           ship=<WORKER_NAME> naming this one
 ;;;   LAB_SESSION_LIFETIME    idle seconds before the session ends (1800)
 ;;;   LAB_MESSAGES_URL        the gate's Messages door
 ;;;                           (default http://gate-relay/llm/messages)
@@ -62,9 +64,11 @@
       (flet ((set! (name value) (setf (symbol-value (read-from-string name)) value)))
         (let ((prefix (ship-env "LAB_PREFIX" (format nil "/prompt-lab/~a" *ship-name*))))
           (set! "prompt-lab::*url-prefix*" prefix)
-          ;; the ship's own console, beside the lab
-          (set! "prompt-lab:*console-base*"
-                (and (ship-env "LAB_CONSOLE") (format nil "~a/console" prefix))))
+          ;; the ship's own console, beside the lab, behind the one console
+          ;; path every ship shares (LAB_CONSOLE_PATH), named by ship=
+          (when (ship-env "LAB_CONSOLE")
+            (set! "prompt-lab:*console-base*" (ship-env "LAB_CONSOLE_PATH" "/prompt-lab/console"))
+            (set! "prompt-lab::*console-ship*" *ship-name*)))
         ;; ONE SESSION, then quit
         (set! "prompt-lab::*one-session?*" t)
         (set! "prompt-lab::*session-lifetime*"

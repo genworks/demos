@@ -378,7 +378,8 @@ the page's editor shows, and what write-model takes back."
 terminal: in a frame for a newcomer to Emacs where the host has that
 setting (*console-newcomer-arg*), or with PLAIN? in Emacs as it comes."
   (when *console-base*
-    (format nil "~a/?arg=~a~@[&arg=~a~]" *console-base* (namestring (session-model-file session))
+    (format nil "~a/?~@[ship=~a&~]arg=~a~@[&arg=~a~]" *console-base* *console-ship*
+            (namestring (session-model-file session))
             (and (not plain?) *console-newcomer-arg*))))
 
 ;;

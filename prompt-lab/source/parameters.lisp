@@ -106,6 +106,12 @@ reverse proxy): \"/console\" on the public workshop, \"/ttyd\" on a dev
 ship.  The page's editor link is <*console-base*>/?arg=<model file>, which
 the terminal's door script hands to emacsclient.  Nil: no link.")
 
+(defparameter *console-ship* nil
+  "String or nil.  Where every session runs in a ship of its own behind
+one console path (worker.lisp, ship-init.cl): this ship's name, carried
+as ship= ahead of the console link's ?arg= values, by which the reverse
+proxy picks the ship's console.  The terminal itself reads only arg=.")
+
 (defparameter *console-newcomer-arg* "newcomer"
   "String or nil.  A second ?arg= the page's main console link carries, by
 which the terminal's door script opens the file in an Emacs frame set up
@@ -418,6 +424,13 @@ did to the image goes with their session.")
   "List of directories. Archives written by one-shot labs (worker.lisp),
 each laid out as *archive-root* is; the reaper copies their sessions into
 this lab's own archive, so the public listing shows them.  Nil: none.")
+
+(defparameter *archive-spool* nil
+  "String or nil.  A directory of struck ships' archives, one subdirectory
+a ship, each laid out as *archive-root* is (the ship launcher's
+archive-spool/, worker.lisp): the reaper imports each one's sessions as
+*archive-imports* does and removes the subdirectory once all of them are
+here.  Nil: none.")
 
 (defparameter *free-lab?* nil
   "Boolean. A FREE PUBLIC LAB: nothing for sale and nothing private, the
