@@ -942,9 +942,14 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               (:textarea :id "pl-prompt" :rows "4" :|data-bind:prompt| "" :|data-show| "$agentmode != 'own'"
                                          :|data-attr:placeholder| "$kind == 'app' ? 'Describe the web app, e.g. a page that sizes a shelf bracket from its load and shows it' : 'Describe what to build, e.g. a picnic table with two benches'"
                                          :placeholder "Describe what to build, e.g. a picnic table with two benches")
-                              (when *turnstile-site-key*
-                                (htm (:div :class "cf-turnstile" :data-sitekey *turnstile-site-key* :data-callback "plTurnstile")))
-                              (:input :type "hidden" :id "pl-turnstile" :|data-bind:turnstile| "")
+                              ;; the human check, kept out of every redraw (data-ignore-morph): a
+                              ;; build redefines the model's class and the sluice redraws the page,
+                              ;; which replaced Turnstile's frame and emptied the token's field, so
+                              ;; $turnstile stayed empty and Build grey until the page was reloaded
+                              (:div :class "pl-check" :|data-ignore-morph| ""
+                                    (when *turnstile-site-key*
+                                      (htm (:div :class "cf-turnstile" :data-sitekey *turnstile-site-key* :data-callback "plTurnstile")))
+                                    (:input :type "hidden" :id "pl-turnstile" :|data-bind:turnstile| ""))
                               ;; the clickwrap (guards.lisp): the texts accepted before
                               ;; a session's first build, or before its own agent is connected
                               (when (terms-required? :build)
