@@ -3208,22 +3208,31 @@ loaded) its page too."
                    (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
                      (let ((s (pl :open-session! "10.9.8.4" nil)))
                        (unwind-protect
-                            (multiple-value-bind (blocks error?)
-                                (pl :evaluate-expression s "(labels ((deeper (n) (+ 1 (deeper n)))) (deeper 1))")
-                              (unless (and error? (search "rror" (cdr (assoc "text" (first blocks) :test #'string=))))
-                                (error "an endless recursion was not answered as an error: ~s" blocks))
+                            (progn
+                              ;; The download door FIRST, and the tools after it.  On Allegro
+                              ;; the other order (an overflow in this thread, then one in a
+                              ;; server thread) left one more overflow to arrive later, "stack
+                              ;; overflow (delayed response)", in whatever request built a
+                              ;; model next: a smoke after this one, or this one's own last
+                              ;; fetch.  In this order the door's overflow is the delayed one
+                              ;; itself, answered there, and nothing is left behind.
                               (pl :write-model s "(defun deeper (n) (+ 1 (deeper n)))
 (define-object model (base-object)
   :computed-slots ((depth (deeper 1)))
   :objects ((plate :type 'box :width (the depth) :length 10 :height 10)))")
-                              (multiple-value-bind (blocks error?) (pl :check-model s)
-                                (unless error? (error "check_model of an endless recursion did not answer an error: ~s" blocks)))
-                              ;; outside the tools: the Monetize read and the download door
-                              (when (pl :built-tolls s) (error "built-tolls read tolls from a model that cannot build"))
+                              ;; outside the tools: the download door
                               (let ((status (nth-value 1 (http :get (format nil "~a?session=~a&format=pdf" (door "download") (pl :session-id s))
                                                                :headers (list (cons "X-Prompt-Lab-Owner" (pl :session-owner s)))))))
                                 (unless (eql status 422)
                                   (error "the download door answered ~a for a model that overflows the stack" status)))
+                              (multiple-value-bind (blocks error?)
+                                  (pl :evaluate-expression s "(labels ((deeper (n) (+ 1 (deeper n)))) (deeper 1))")
+                                (unless (and error? (search "rror" (cdr (assoc "text" (first blocks) :test #'string=))))
+                                  (error "an endless recursion was not answered as an error: ~s" blocks)))
+                              (multiple-value-bind (blocks error?) (pl :check-model s)
+                                (unless error? (error "check_model of an endless recursion did not answer an error: ~s" blocks)))
+                              ;; outside the tools: the Monetize read
+                              (when (pl :built-tolls s) (error "built-tolls read tolls from a model that cannot build"))
                               (unless (page-ok? prefix) (error "the lab stopped answering after the overflows"))
                               t)
                          (ignore-errors (pl :delete-session s))
