@@ -1503,7 +1503,12 @@ itself says."
          (let* ((raw (or (word-after text "Undefined function ") ""))
                 (name (string-downcase (subseq raw (let ((colon (position #\: raw :from-end t))) (if colon (1+ colon) 0)))))
                 (right (cdr (assoc name *function-misnomers* :test #'string=))))
-           (cond ((member name names :test #'string=)
+           (cond ((search "gdl-slots::" raw :test #'char-equal)
+                  ;; a message an object was asked for, (the-object x name):
+                  ;; a slot's name gone wrong, not a function's
+                  (hint "Nothing here is named ~a.~@[  The nearest names in the file: ~{~a~^, ~}.~]  read_model shows every name as it is written."
+                        name (near name)))
+                 ((member name names :test #'string=)
                   (hint "~a is a slot, not a function: read it as (the ~a), with no parentheses of its own.  A function of the object is called as (the (~a argument))." name name name))
                  (right (hint "There is no ~a in Gendl: the function is ~a." name right))
                  (t (let ((near (nearest-names name (known-function-names))))
