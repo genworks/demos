@@ -154,10 +154,14 @@ directories a restarted Lisp has not been asked for yet."
 ;;
 
 (defun archived-directory (id)
-  "The archive directory of session ID, whatever day it opened; nil when
-the archive holds none."
+  "The archive directory of session ID, whatever day it opened, as a
+directory pathname; nil when the archive holds none.  Not DIRECTORY on a
+\"*/<id>/\" pattern: Allegro answers that with the files inside the
+directory, so its first was a file, and a caller deleting the directory
+deleted nothing."
   (when (and *archive-root* (session-id? id))
-    (first (directory (merge-pathnames (format nil "*/~a/" id) *archive-root*)))))
+    (some #'(lambda (day) (uiop:directory-exists-p (merge-pathnames (format nil "~a/" id) day)))
+          (uiop:subdirectories (uiop:ensure-directory-pathname *archive-root*)))))
 
 (defun archive-summaries ()
   "Every archived session worth listing, each with \"thumb\": the date of

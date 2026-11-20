@@ -235,7 +235,9 @@ license.  SESSION when it is live; JSON and DIRECTORY its archived record."
 (defun delete-closed-work! (id &key session directory)
   "Delete everything the lab keeps of work ID: the live session (not
 archived first), its replay, its archive directory with every version,
-upload and thumbnail.  The monitor's audit log keeps its lines."
+upload and thumbnail.  The monitor's audit log keeps its lines.  True when
+the archive holds nothing of it after; nil (and a line on the error
+output) when its directory is still there."
   (when session
     (bt:with-lock-held (*sessions-lock*)
       (remhash id *sessions*)
@@ -255,7 +257,10 @@ upload and thumbnail.  The monitor's audit log keeps its lines."
   (bt:with-lock-held (*kinds-lock*) (remhash id *closed-sessions*))
   (forget-closed-work! id)
   (ignore-errors (watch-event! :closed-deleted nil :detail id))
-  t)
+  (let ((left (archived-directory id)))
+    (when left
+      (format *error-output* "~&prompt-lab: work ~a was to be deleted but ~a is still there~%" id left))
+    (not left)))
 
 (defun valid-email? (text)
   (and (stringp text) (<= 3 (length text) 200)
@@ -294,8 +299,9 @@ Values: a notice for the author, or nil and the reason."
             ((equal action "delete")
              (if (ignore-errors (closed-deployment? id))
                  (values nil "This work is deployed: take the deployment down first.")
-                 (progn (delete-closed-work! id :session session :directory directory)
-                        "Your work is deleted: the lab keeps nothing of it.")))
+                 (if (delete-closed-work! id :session session :directory directory)
+                     "Your work is deleted: the lab keeps nothing of it."
+                     (values nil "Your work could not be deleted entirely; the lab has noted it.  Try again, or write to us."))))
             ((equal action "declare")
              ;; a choice, not a promise: nothing to tick (the user's rulings,
              ;; 2026-11-13 and 99 -- not even the clickwrap's texts); an

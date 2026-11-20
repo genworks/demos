@@ -1413,11 +1413,52 @@ punctuation an error message puts around a name; nil without MARKER."
              (word (string-trim ".,;:()'\"" (subseq text start end))))
         (and (plusp (length word)) word)))))
 
+(defun rewrite-quoted (text prefix suffix make)
+  "TEXT with every PREFIX<name>SUFFIX replaced by what MAKE answers for
+<name>, the run up to SUFFIX."
+  (with-output-to-string (out)
+    (loop with start = 0
+          for at = (search prefix text :start2 start)
+          for name-start = (and at (+ at (length prefix)))
+          for end = (and at (search suffix text :start2 name-start))
+          while end
+          do (write-string text out :start start :end at)
+             (write-string (funcall make (subseq text name-start end)) out)
+             (setq start (+ end (length suffix)))
+          finally (write-string text out :start start))))
+
+(defun ccl-wording (text)
+  "TEXT, an error's words, with Allegro's phrasings said as CCL says them,
+so that one table of hints reads both: an unbound variable, an undefined
+function and a value of the wrong type, Allegro's lower-case names between
+` and ' given CCL's upper case (a quoted string or a #<...> object as it
+is)."
+  (flet ((up (name) (if (or (zerop (length name)) (member (char name 0) '(#\" #\#))) name (string-upcase name))))
+    (let* ((text (rewrite-quoted text "Attempt to take the value of the unbound variable `" "'"
+                                 #'(lambda (name) (format nil "Unbound variable: ~a" (up name)))))
+           (text (rewrite-quoted text "attempt to call `" "' which is an undefined function"
+                                 #'(lambda (name) (format nil "Undefined function ~a" (up name))))))
+      ;; `value' is not of the expected type `type'
+      (with-output-to-string (out)
+        (loop with start = 0
+              with marker = "' is not of the expected type `"
+              for at = (search marker text :start2 start)
+              for open = (and at (position #\` text :end at :from-end t))
+              for type-end = (and at (position #\' text :start (+ at (length marker))))
+              while (and open (>= open start) type-end)
+              do (write-string text out :start start :end open)
+                 (format out "The value ~a is not of the expected type ~a"
+                         (up (subseq text (1+ open) at))
+                         (string-upcase (subseq text (+ at (length marker)) type-end)))
+                 (setq start (1+ type-end))
+              finally (write-string text out :start start))))))
+
 (defun error-hints (session text)
   "Hints for the mistake behind a tool error whose words are TEXT, a list of
 strings (at most two): the common Gendl slips, each named by what the error
 itself says."
   (let ((hints nil)
+        (text (ccl-wording text))
         (names (ignore-errors (file-slot-names (model-body-text session)))))
     (flet ((hint (control &rest args) (push (apply #'format nil control args) hints))
            (near (name) (nearest-names name names)))
@@ -1447,7 +1488,7 @@ itself says."
         ((and (search "is not of the expected type" text) (search "The value NIL" text))
          (hint "NIL reached arithmetic: a slot it reads has no value.  Check that every slot named there exists in THIS object as (the name), and that each input has a default.")))
       (cond
-        ((search "STANDARD-SEQUENCE" text)
+        ((search "STANDARD-SEQUENCE" text :test #'char-equal)
          (hint "A child with :sequence is many parts, not one: ask one element, (the (child-name 0) ...), or every one with (list-elements (the child-name))."))
         ((or (search "has no slot named " text) (search "could not handle the :" text))
          (let* ((name (string-downcase (or (word-after text "has no slot named ")
