@@ -2176,34 +2176,6 @@ loaded) its page too."
                          (pl :funnel-count! "builds-stopped" -1)
                          (ignore-errors (pl :delete-session s))
                          (pl :funnel-count! "sessions" -1))))))
-          ;; a model or an expression that recurses without end overflows the
-          ;; stack -- a storage-condition, not an error -- which took a whole
-          ;; Lisp down on 2026-11-14; the tools answer it as an error instead
-          (smoke "prompt-lab tools survive a stack overflow"
-                 (lambda ()
-                   (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
-                     (let ((s (pl :open-session! "10.9.8.4" nil)))
-                       (unwind-protect
-                            (multiple-value-bind (blocks error?)
-                                (pl :evaluate-expression s "(labels ((deeper (n) (+ 1 (deeper n)))) (deeper 1))")
-                              (unless (and error? (search "rror" (cdr (assoc "text" (first blocks) :test #'string=))))
-                                (error "an endless recursion was not answered as an error: ~s" blocks))
-                              (pl :write-model s "(defun deeper (n) (+ 1 (deeper n)))
-(define-object model (base-object)
-  :computed-slots ((depth (deeper 1)))
-  :objects ((plate :type 'box :width (the depth) :length 10 :height 10)))")
-                              (multiple-value-bind (blocks error?) (pl :check-model s)
-                                (unless error? (error "check_model of an endless recursion did not answer an error: ~s" blocks)))
-                              ;; outside the tools: the Monetize read and the download door
-                              (when (pl :built-tolls s) (error "built-tolls read tolls from a model that cannot build"))
-                              (let ((status (nth-value 1 (http :get (format nil "~a?session=~a&format=pdf" (door "download") (pl :session-id s))
-                                                               :headers (list (cons "X-Prompt-Lab-Owner" (pl :session-owner s)))))))
-                                (unless (eql status 422)
-                                  (error "the download door answered ~a for a model that overflows the stack" status)))
-                              (unless (page-ok? prefix) (error "the lab stopped answering after the overflows"))
-                              t)
-                         (ignore-errors (pl :delete-session s))
-                         (pl :funnel-count! "sessions" -1))))))
           ;; THE CLICKWRAP (ruling 94, guards.lisp): versioned texts with their
           ;; hashes; Build, the own agent, an external agent and Deploy each wait
           ;; for the tick, Declare for none (ruling 99); the acceptance log is chained, names no
@@ -3222,7 +3194,40 @@ loaded) its page too."
                               (search "prompt-lab-viewer.css" body))
                           (not (search "/sluice-static/skin-" body))
                           (not (search "prompt-lab-phone.css" body))
-                          (not (search "prompt-lab-page.css" body)))))))))))
+                          (not (search "prompt-lab-page.css" body))))))
+          ;; LAST, on purpose.  On Allegro, after a stack overflow, one more can
+          ;; arrive later ("stack overflow (delayed response)") in whatever
+          ;; builds a model next.  While this smoke stood in the middle of the
+          ;; run that one landed on a later smoke, a different one at each push;
+          ;; here nothing follows.
+          ;; a model or an expression that recurses without end overflows the
+          ;; stack -- a storage-condition, not an error -- which took a whole
+          ;; Lisp down on 2026-11-14; the tools answer it as an error instead
+          (smoke "prompt-lab tools survive a stack overflow"
+                 (lambda ()
+                   (flet ((pl (name &rest args) (apply #'uiop:symbol-call :prompt-lab name args)))
+                     (let ((s (pl :open-session! "10.9.8.4" nil)))
+                       (unwind-protect
+                            (multiple-value-bind (blocks error?)
+                                (pl :evaluate-expression s "(labels ((deeper (n) (+ 1 (deeper n)))) (deeper 1))")
+                              (unless (and error? (search "rror" (cdr (assoc "text" (first blocks) :test #'string=))))
+                                (error "an endless recursion was not answered as an error: ~s" blocks))
+                              (pl :write-model s "(defun deeper (n) (+ 1 (deeper n)))
+(define-object model (base-object)
+  :computed-slots ((depth (deeper 1)))
+  :objects ((plate :type 'box :width (the depth) :length 10 :height 10)))")
+                              (multiple-value-bind (blocks error?) (pl :check-model s)
+                                (unless error? (error "check_model of an endless recursion did not answer an error: ~s" blocks)))
+                              ;; outside the tools: the Monetize read and the download door
+                              (when (pl :built-tolls s) (error "built-tolls read tolls from a model that cannot build"))
+                              (let ((status (nth-value 1 (http :get (format nil "~a?session=~a&format=pdf" (door "download") (pl :session-id s))
+                                                               :headers (list (cons "X-Prompt-Lab-Owner" (pl :session-owner s)))))))
+                                (unless (eql status 422)
+                                  (error "the download door answered ~a for a model that overflows the stack" status)))
+                              (unless (page-ok? prefix) (error "the lab stopped answering after the overflows"))
+                              t)
+                         (ignore-errors (pl :delete-session s))
+                         (pl :funnel-count! "sessions" -1)))))))))))
 
 (let* ((all (all-system-names))
        (systems (remove-if (lambda (s) (assoc s *not-loaded*)) all)))
