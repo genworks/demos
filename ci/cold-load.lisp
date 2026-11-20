@@ -2276,10 +2276,12 @@ loaded) its page too."
                                        (unless (pl :session-accepted? s :build) (error "the agent door's acceptance was not noted"))
                                        (unless (eql 200 (ping)) (error "the MCP door refused an accepted session")))
                                      ;; accepted, the build goes on to the next check (busy here)
-                                     (funcall (fdefinition (list 'setf (find-symbol (string '#:session-busy?) :prompt-lab))) t s)
+                                     ;; through setf itself, as elsewhere in this file: a structure's
+                                     ;; accessor has a (setf name) function on CCL and none on Allegro
+                                     (eval `(setf (,(lab '#:session-busy?) ',s) t))
                                      (when (refused? (nth-value 1 (pl :begin-prompt! s "a box" "10.9.8.6" nil :route? nil)))
                                        (error "an accepted session was still asked to accept"))
-                                     (funcall (fdefinition (list 'setf (find-symbol (string '#:session-busy?) :prompt-lab))) nil s)
+                                     (eval `(setf (,(lab '#:session-busy?) ',s) nil))
                                      ;; a new version of a text asks again
                                      (with-open-file (out (merge-pathnames "terms.md" root) :direction :output :if-exists :supersede)
                                        (format out "Version: ci-2~%~%The terms, changed.~%"))
