@@ -49,13 +49,14 @@ its string later in any source or prompt is exfiltration.  Nil: none.")
                   s (concatenate 'string s "/")))))
 
 (defun watch-sha256-hex (string)
-  "SHA-256 of STRING's UTF-8 bytes as hex, or nil if ironclad is absent."
+  "SHA-256 of STRING's UTF-8 bytes as hex.  Ironclad is one of the lab's
+dependencies (depends-on.sexp): it was found at run time by upper-case
+names, which Allegro in modern mode never matches, and an image without
+it loaded answered nil -- every chain on Allegro was unchained.  Nil only
+if the digest itself fails."
   (ignore-errors
-   (let ((digest (find-symbol "DIGEST-SEQUENCE" :ironclad))
-         (hex (find-symbol "BYTE-ARRAY-TO-HEX-STRING" :ironclad)))
-     (and digest hex
-          (funcall hex (funcall digest :sha256
-                                (babel:string-to-octets string :encoding :utf-8)))))))
+   (ironclad:byte-array-to-hex-string
+    (ironclad:digest-sequence :sha256 (babel:string-to-octets string :encoding :utf-8)))))
 
 (defun watch-log-file (&optional (day (day-key)))
   (merge-pathnames (format nil "watch-~a.log" day) (watch-directory)))

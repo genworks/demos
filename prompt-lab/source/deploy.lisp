@@ -1277,7 +1277,7 @@ commit nil); else its build number as (values nil build)."
     (cond (checkout (values checkout nil))
           ((and (stringp env) (plusp (length env))) (values (string-trim '(#\Space #\Newline) env) nil))
           ((and (stringp file) (plusp (length file))) (values (string-trim '(#\Space #\Newline #\Return) file) nil))
-          (t (values nil (let ((v (find-symbol "*GENDL-VERSION*" :gendl)))
+          (t (values nil (let ((v (find-symbol (string '#:*gendl-version*) :gendl)))
                            (and v (boundp v) (princ-to-string (symbol-value v)))))))))
 
 (defparameter *image-commits-files* '("/opt/gendl/COMMITS" "/opt/genworks-gdl/COMMITS")
