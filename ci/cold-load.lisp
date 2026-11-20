@@ -54,9 +54,13 @@
 
 ;;; Systems this job does not load, each with its reason.  The first
 ;;; two need surf and SMLib: skipped on the free image, loaded on
-;;; Genworks GDL, which carries them.  The test is the SMLIB package,
-;;; aboard only on Genworks GDL (the free image has a SURF package of
-;;; its own, so that one decides nothing).  The rest are the older
+;;; Genworks GDL, which carries them.  The test is the :smlib feature,
+;;; which only Genworks GDL has.  Not the SMLIB package: Gendl's own
+;;; surf defines an empty one as a placeholder, so since 2026-10-26 the
+;;; free image has that package too (and a SURF package, and a kernel
+;;; of its own that draws neither demo), and a test on it skipped
+;;; nothing: both pages and both STEP exports failed there at every
+;;; push.  The rest are the older
 ;;; applications the repo still carries; each either cannot load on
 ;;; today's engine or warns as it loads, and a warning fails this job.
 ;;; Delete a line the day its reason is gone.
@@ -67,9 +71,9 @@
 ;;; by an upper-case string.
 (defparameter *not-loaded*
   (append
-   (unless (find-package :smlib)
-     '((:naca-nurbs . "needs surf/SMLib, which this image does not carry (the Genworks GDL job loads it)")
-       (:gear . "profile.lisp's arc-curve is surf's, which this image does not carry (the Genworks GDL job loads it)")))
+   (unless (member :smlib *features*)
+     '((:naca-nurbs . "needs SMLib, which this image does not carry: its own kernel builds no composed curve (the Genworks GDL job loads it)")
+       (:gear . "needs SMLib, which this image does not carry: its own kernel builds no composed curve (the Genworks GDL job loads it)")))
    '((:bench . "planking.gdl reads an undeclared *model-a*, and lumber.gdl defines its own package :lumber over the lumber system's")
      (:pui . "initialize.lisp warns as it loads that its images directory is missing")
      (:deck . "depends on pui and bench")
