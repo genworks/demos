@@ -65,6 +65,7 @@
              #:*turnstile-verify-url*
              #:*turnstile-secret-file*
              #:*browsing?*
+             #:*replays?*
              #:*uploads?*
              #:*upload-caps*
              #:*default-skin*))

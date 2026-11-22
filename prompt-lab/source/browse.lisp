@@ -287,7 +287,10 @@ version of its model file written under a replay header into a package
 of its own, compiled and loaded.  Values: the replay (nil when the
 archive holds no model for ID, or one the other engine built) and the
 compiler's text."
-  (or (find-replay id)
+  (and
+   ;; *replays?* nil: nothing archived is compiled in this room
+   *replays?*
+   (or (find-replay id)
       (bt:with-lock-held (*replay-build-lock*)
         (or (find-replay id)
             (let* ((directory (archived-directory id))
@@ -317,7 +320,7 @@ compiler's text."
                     (declare (ignore error?))
                     (bt:with-lock-held (*replays-lock*)
                       (setf (gethash id *replays*) replay))
-                    (values replay (or (cdr (assoc "text" (first blocks) :test #'string=)) ""))))))))))
+                    (values replay (or (cdr (assoc "text" (first blocks) :test #'string=)) "")))))))))))
 
 (defun reap-replays! (&key (lifetime *session-lifetime*) (now (get-universal-time)))
   "Drop every replay unused for LIFETIME seconds."
@@ -336,6 +339,9 @@ compiled again, if it is not already -- and answer the viewer's URL."
     (cond ((not *browsing?*) (browsing-off req ent))
           ((not (and record (record-visible? record (request-owner-key req json))))
            (refuse req ent net.aserve:*response-not-found* "No such archived session."))
+          ((not *replays?*)
+           (refuse req ent net.aserve:*response-forbidden*
+                   "Archived models are not drawn here: the session's log and its model file are."))
           ((not (equal (or (gethash "engine" record) "gendl") (engine-name)))
            (refuse req ent "This session was built in the ~a; open it there."
                    (or (cdr *sibling-lab*) "other lab")))

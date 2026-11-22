@@ -37,6 +37,16 @@ transcript and each version of its model file are kept for review
 read-only at its URL, an archived model drawn in a replay.  Nil keeps
 every session private to the browser that opened it.")
 
+(defparameter *replays?* t
+  "Boolean. Whether this room compiles an archived session's model file:
+the replay that draws an archived session's model (browse.lisp), a
+thumbnail (thumbs.lisp), and a session continued from an archived one.
+Nil shows the archive without compiling anything in it -- the listing,
+each record's log and numbers, its model file and its uploaded files --
+for a room that must not run what visitors wrote elsewhere: a front
+before session ships, which holds what the ships may not reach.  A model
+compiles into the image that loads it, with that image's reach.")
+
 (defparameter *browse-limit* 200
   "Integer. Sessions one listing shows, newest first.")
 

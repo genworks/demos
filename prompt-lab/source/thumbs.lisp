@@ -164,7 +164,8 @@ it could not be.  Values: true when drawn."
   (let* ((json (read-record (merge-pathnames "session.json" directory)))
          (id (and json (gethash "id" json)))
          (source (file-model-body (merge-pathnames "model.lisp" directory))))
-    (when (and (stringp id) (plusp (length source)))
+    ;; a thumbnail compiles the archived model: not where *replays?* is nil
+    (when (and *replays?* (stringp id) (plusp (length source)))
       (let* ((keyword (intern (string-upcase (format nil "pl-thumb-~a" id)) :keyword))
              (scratch (merge-pathnames (format nil "thumb-~a/" id) *replay-root*))
              (session nil))
@@ -216,7 +217,7 @@ model newer than the thumbnail, newest first."
   "Draw every stale thumbnail of this room's engine, one at a time.
 Values: how many were drawn and how many failed."
   (let ((drawn 0) (failed 0))
-    (dolist (directory (thumbnail-directories))
+    (dolist (directory (and *replays?* (thumbnail-directories)))
       (if (write-thumbnail! directory) (incf drawn) (incf failed))
       (sleep *thumb-pause*))
     (values drawn failed)))
