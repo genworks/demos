@@ -1017,17 +1017,22 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               (:a :href *url-prefix* "Start your own") ".")
                         (:div :class "pl-watch" :style "display:none" :|data-show| "$archived"
                               "An archived session: its log, its model file and its model, read-only.  "
-                              (:a :href *url-prefix* "Start your own") ", or carry this one on in a session of your own: "
+                              (:a :href *url-prefix* "Start your own")
                               ;; a new session of the visitor's own, seeded with this one's
-                              ;; model file and uploads (the continue action)
-                              (:button :type "button" :class "pl-build pl-continue"
-                                       :data-doc "Open a session of your own on this model file and its uploaded files, and keep refining it"
-                                       :|data-indicator:continuing| ""
-                                       :|data-attr:disabled| (concatenate 'string "$continuing"
-                                                                          (if *turnstile-site-key* " || !$turnstile" "")
-                                                                          (if (terms-required? :build) " || ($termsneed && !$tagree)" ""))
-                                       :|data-on:click| (the (datastar-action :continue :options "{filterSignals: {include: /^(turnstile|owner|wallet|tagree)$/}}"))
-                                       "Continue from this"))
+                              ;; model file and uploads (the continue action); not offered
+                              ;; where visitors' hand edits are off, since a continued
+                              ;; session compiles a file the agent did not write in it
+                              (if (not *visitor-edits?*)
+                                  (htm ".")
+                                  (htm ", or carry this one on in a session of your own: "
+                                       (:button :type "button" :class "pl-build pl-continue"
+                                                :data-doc "Open a session of your own on this model file and its uploaded files, and keep refining it"
+                                                :|data-indicator:continuing| ""
+                                                :|data-attr:disabled| (concatenate 'string "$continuing"
+                                                                                   (if *turnstile-site-key* " || !$turnstile" "")
+                                                                                   (if (terms-required? :build) " || ($termsneed && !$tagree)" ""))
+                                                :|data-on:click| (the (datastar-action :continue :options "{filterSignals: {include: /^(turnstile|owner|wallet|tagree)$/}}"))
+                                                "Continue from this"))))
                         (:p :class "pl-notice" :|data-show| "$notice" :|data-text| "$notice")
                         (:p :class "pl-error" :|data-show| "$error" :|data-text| "$error"))))
 
@@ -1969,7 +1974,8 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
            (record (the archive-record))
            (address (client-address *datastar-request*))
            (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
-      (cond ((not (and id directory record)) (the (tell-error! "There is no archived session here to continue.")))
+      (cond ((not *visitor-edits?*) (the (tell-error! *visitor-edits-text*)))
+            ((not (and id directory record)) (the (tell-error! "There is no archived session here to continue.")))
             ((not (equal (or (gethash "engine" record) "gendl") (engine-name)))
              (the (tell-error! "This session was built in the other lab: continue it there.")))
             ((and (terms-required? :build) (not (eq (gethash "tagree" signals) t)))
