@@ -118,7 +118,9 @@ front logs.  Values: the record the front kept, or nil and the reason."
                                "session" (session-id session)
                                "owner" (session-owner session)
                                "accepted_terms" (or accepted (vector))
-                               "model" (model-body session))))
+                               "model" (model-body session)
+                               ;; the session's uploaded files, which an app reads (own-file)
+                               "files" (deploy-files-payload session))))
     (cond ((and (eql status 200) answer (hash-table-p (gethash "deployment" answer)))
            (front-deployments :fresh? t)
            (gethash "deployment" answer))
@@ -387,6 +389,8 @@ and a private session's front is sent the texts accepted, to log."
                                                              (list "balance" (if balance? t 'yason:false))))))
            (ensure-directories-exist directory)
            (write-text-file (model-body session) (merge-pathnames "model.lisp" directory))
+           ;; and a copy of the session's uploaded files, which an app reads (own-file)
+           (copy-files-into! (session-files session) (merge-pathnames "files/" directory))
            (monocle:save-record! (lab-house) record)
            (register-deployment! name)
            (drop-deployed! name)
@@ -974,6 +978,132 @@ grant handed over."
                      (redirect-to req ent url)
                      (payment-not-opened req ent reason status viewer
                                          (format nil "Back to ~a" (or (gethash "title" record) name)))))))))))
+
+;;
+;; AN APP'S OWN FILES (2026-11-22).  A web app may read the files its session
+;; was given -- a corpus, a table -- and must find them wherever it runs: in
+;; its session, in a deployment (which keeps a copy of the session's files
+;; beside its model file, deploy.lisp), on a hosted VM (whose disk carries
+;; that copy), in an archived replay.  A path the agent read off list_files
+;; names the session's directory alone, and goes nowhere once deployed.  So
+;; the app names a file by (prompt-lab:own-file "name"), or the directory
+;; by (prompt-lab:own-files-directory): macros that take the package the
+;; model file is compiled in -- a session's, a deployment's, a replay's
+;; own -- and find whose it is when called.
+;;
+
+(defun own-files-session (package-name)
+  "The session, deployment or replay whose model file compiles into the
+package PACKAGE-NAME, or nil."
+  (flet ((ours (session) (and session (equal (session-package-name session) package-name) session)))
+    (or (ours *loading-session*)
+        (bt:with-lock-held (*sessions-lock*)
+          (loop for session being the hash-values of *sessions*
+                thereis (ours session)))
+        (bt:with-lock-held (*deployed-lock*)
+          (loop for session being the hash-values of *deployed*
+                thereis (ours session)))
+        (bt:with-lock-held (*replays-lock*)
+          (loop for session being the hash-values of *replays*
+                thereis (ours session))))))
+
+(defun own-files-folder (package-name)
+  "The directory, a pathname, holding the uploaded files of whatever
+compiles into PACKAGE-NAME: a deployment's copy (its package is
+pl-deployed-<name>), a replay's archive (pl-replay-<id>), else the live
+session's own; nil when the package is none of these."
+  (let ((session (own-files-session package-name)))
+    (when session
+      (flet ((prefix? (prefix) (and (>= (length package-name) (length prefix))
+                                    (string-equal prefix package-name :end2 (length prefix)))))
+        (cond ((prefix? "pl-deployed-")
+               (merge-pathnames "files/" (deployment-directory (session-id session))))
+              ((prefix? "pl-replay-")
+               (let ((directory (archived-directory (session-id session))))
+                 (and directory (merge-pathnames "files/" directory))))
+              (t (merge-pathnames "files/" (session-directory session))))))))
+
+(defun own-file-path (package-name name)
+  "The path, a string, of the uploaded file NAME of whatever compiles into
+PACKAGE-NAME (own-files-folder); nil for a name that is not a plain file
+name or a package that is no session's.  The file need not exist."
+  (let ((folder (own-files-folder package-name))
+        (safe (safe-file-name name)))
+    (and folder safe (equal safe name)
+         (namestring (merge-pathnames safe folder)))))
+
+(defmacro own-file (name)
+  "The path, a string, of the uploaded file NAME of the session, deployment
+or replay this code is compiled in: where it is now, whether the app runs
+in its session or deployed.  Nil for a name that is not a plain file name."
+  `(own-file-path ,(package-name *package*) ,name))
+
+(defmacro own-files-directory ()
+  "The directory, a string ending in a slash, of the uploaded files of the
+session, deployment or replay this code is compiled in."
+  `(let ((folder (own-files-folder ,(package-name *package*))))
+     (and folder (namestring folder))))
+
+(defun copy-files-into! (files folder)
+  "Make FOLDER hold exactly FILES (uploaded-file objects): a deployment's
+copy of its session's files, replaced whole at every deployment."
+  (when (probe-file folder)
+    (dolist (old (directory (merge-pathnames "*.*" folder)))
+      (ignore-errors (delete-file old))))
+  (when files
+    (ensure-directories-exist folder)
+    (dolist (file files)
+      (uiop:copy-file (the-object file file-path)
+                      (merge-pathnames (the-object file file-name) folder)))))
+
+(defun deploy-files-payload (session)
+  "SESSION's uploaded files as a deployment sends them to the private
+front: a vector of {name, data}, the bytes in base64."
+  (coerce (mapcar #'(lambda (file)
+                      (h "name" (the-object file file-name)
+                         "data" (uiop:symbol-call :cl-base64 :usb8-array-to-base64-string
+                                                  (alexandria:read-file-into-byte-vector (the-object file file-path)))))
+                  (session-files session))
+          'vector))
+
+(defparameter *deploy-files-caps* '(:files 10 :total 8000000)
+  "Plist. The most uploaded files a deployment carries, and their bytes in
+all: a session's paid upload caps (*upload-caps*).")
+
+(defun decode-deploy-files (files)
+  "FILES, as deploy-files-payload sends them.  Values: a list of (name .
+octets), or nil and the reason when they are not what a deployment may
+carry."
+  (let ((files (coerce (or files #()) 'list)) (total 0) (decoded nil))
+    (cond ((> (length files) (getf *deploy-files-caps* :files))
+           (values nil (format nil "A deployment carries at most ~a files." (getf *deploy-files-caps* :files))))
+          (t
+           (dolist (file files (values (nreverse decoded) nil))
+             (let* ((name (and (hash-table-p file) (gethash "name" file)))
+                    (data (and (hash-table-p file) (gethash "data" file)))
+                    (octets (and (stringp data)
+                                 (ignore-errors (uiop:symbol-call :cl-base64 :base64-string-to-usb8-array data)))))
+               (cond ((not (and (stringp name) (equal (safe-file-name name) name)))
+                      (return (values nil "A file's name is not one a deployment keeps.")))
+                     ((null octets)
+                      (return (values nil (format nil "The file ~a did not arrive whole." name))))
+                     ((> (incf total (length octets)) (getf *deploy-files-caps* :total))
+                      (return (values nil (format nil "A deployment's files may have ~a in all."
+                                                  (size-label (getf *deploy-files-caps* :total))))))
+                     (t (push (cons name octets) decoded)))))))))
+
+(defun write-deploy-files! (files folder)
+  "Make FOLDER hold exactly FILES, a list of (name . octets)."
+  (when (probe-file folder)
+    (dolist (old (directory (merge-pathnames "*.*" folder)))
+      (ignore-errors (delete-file old))))
+  (when files
+    (ensure-directories-exist folder)
+    (dolist (file files)
+      (with-open-file (out (merge-pathnames (car file) folder) :direction :output
+                                                               :if-exists :supersede
+                                                               :element-type '(unsigned-byte 8))
+        (write-sequence (cdr file) out)))))
 
 (defun deployed-for-viewer (name)
   "The running deployment NAME for the viewer: a deployed model opens to

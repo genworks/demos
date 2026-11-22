@@ -27,6 +27,8 @@
              #:start-prompt!
              #:viewer
              #:web-app
+             #:own-file
+             #:own-files-directory
              #:*kinds*
              #:*brand*
              #:*session-header*

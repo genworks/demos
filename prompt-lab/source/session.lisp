@@ -18,6 +18,11 @@
 
 (defvar *sessions-lock* (bt:make-lock "prompt-lab sessions"))
 
+(defvar *loading-session* nil
+  "The session (or replay, or deployment) whose model file is being
+compiled and loaded (load-model-file), so code in it can name its own
+files while it loads (deploy.lisp, own-file).")
+
 (defstruct (session (:constructor make-session-internal))
   id
   package-name

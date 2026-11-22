@@ -218,7 +218,9 @@ flag."
 an error flag.  The file as it is now goes to the archive first, so a
 version that fails to compile is kept too."
   (let ((file (session-model-file session))
-        (warnings nil))
+        (warnings nil)
+        ;; code in the file may name its own uploaded files as it loads (own-file)
+        (*loading-session* session))
     (archive-model! session)
     ;; what the old file charged for is no longer what this one does (deploy.lisp)
     (forget-built-tolls! session)
@@ -1032,7 +1034,7 @@ and check_app only for a SESSION that builds a web app (kinds.lisp)."
                                 '("query"))))
    ;; the visitor's uploaded files (uploads.lisp)
    `(("name" . "list_files")
-     ("description" . "List the files the visitor has uploaded to this session: each one's name, kind, size and path on the host. A PDF or an image also arrives in the conversation with the visitor's message; a text file (DXF, SVG, CSV, STEP...) is read with read_file, or by its path from the model.")
+     ("description" . "List the files the visitor has uploaded to this session: each one's name, kind, size and path on the host. A PDF or an image also arrives in the conversation with the visitor's message; a text file (DXF, SVG, CSV, STEP...) is read with read_file, or by its path from the model. In the model, never write the path itself: write (prompt-lab:own-file \"<name>\") for a file's path and (prompt-lab:own-files-directory) for the directory, which find the files wherever the model or web app runs, deployed included.")
      ("input_schema" . ,(schema nil)))
    `(("name" . "read_file")
      ("description" . "Read an uploaded file. A text file comes back as text, at most 20000 characters a call: give OFFSET to read further into a long one. An image comes back as the image. A PDF is already in the conversation, attached to the visitor's message.")

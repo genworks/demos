@@ -282,6 +282,9 @@ private session, into the private deployed root.  Answers {deployment} or
                       (mine (find session-id (private-author-deployments wallet)
                                   :key #'(lambda (record) (gethash "session" record)) :test #'equal))
                       (model (gethash "model" json))
+                      ;; the session's uploaded files, which the app reads (own-file):
+                      ;; (files . why-not)
+                      (files (multiple-value-list (decode-deploy-files (gethash "files" json))))
                       (payee (clip-line (gethash "payee" json) 200))
                       (closed? (eq (gethash "closed" json) t))
                       ;; open and charging nothing: hosted free at the house's
@@ -307,6 +310,7 @@ private session, into the private deployed root.  Answers {deployment} or
                       (refuse req ent "The private labs hold all the deployments they take."))
                      ((not (and (stringp model) (plusp (length model)) (< (length model) 1000000)))
                       (refuse req ent "There is no model file to deploy."))
+                     ((second files) (refuse req ent "~a" (second files)))
                      ((and (not free?) (not (and (find #\@ payee) (> (length payee) 5))))
                       (refuse req ent "Say where your share is to be paid: an email address we can reach you at."))
                      ((and (not free?) (not (and account ready?)))
@@ -327,6 +331,7 @@ private session, into the private deployed root.  Answers {deployment} or
                                                    "balance" (if (eq (gethash "balance" json) t) t 'yason:false)))))
                         (ensure-directories-exist (deployment-directory name))
                         (write-text-file model (merge-pathnames "model.lisp" (deployment-directory name)))
+                        (write-deploy-files! (first files) (merge-pathnames "files/" (deployment-directory name)))
                         (monocle:save-record! (lab-house) record)
                         ;; the terms just written, at the gate: the VM that will serve it cannot steer them
                         (register-deployment! name)
