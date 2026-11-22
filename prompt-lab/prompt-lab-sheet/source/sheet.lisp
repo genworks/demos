@@ -641,7 +641,7 @@ not hold."
    (user-mode?-default t)
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
-   (datastar-actions (list :build :review :claim :save :topup :topup-full :confirm :privacy :author :author-name :closed-decide :connect-agent :agent-mode :mcp-token-new :wear-skin :shade-desk :upload :adopt
+   (datastar-actions (list :build :review :claim :save :continue :topup :topup-full :confirm :privacy :author :author-name :closed-decide :connect-agent :agent-mode :mcp-token-new :wear-skin :shade-desk :upload :adopt
                            :deploy :undeploy :connect :open-project :push-project :deploy-project))
 
    ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
@@ -1017,7 +1017,17 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               (:a :href *url-prefix* "Start your own") ".")
                         (:div :class "pl-watch" :style "display:none" :|data-show| "$archived"
                               "An archived session: its log, its model file and its model, read-only.  "
-                              (:a :href *url-prefix* "Start your own") ".")
+                              (:a :href *url-prefix* "Start your own") ", or carry this one on in a session of your own: "
+                              ;; a new session of the visitor's own, seeded with this one's
+                              ;; model file and uploads (the continue action)
+                              (:button :type "button" :class "pl-build pl-continue"
+                                       :data-doc "Open a session of your own on this model file and its uploaded files, and keep refining it"
+                                       :|data-indicator:continuing| ""
+                                       :|data-attr:disabled| (concatenate 'string "$continuing"
+                                                                          (if *turnstile-site-key* " || !$turnstile" "")
+                                                                          (if (terms-required? :build) " || ($termsneed && !$tagree)" ""))
+                                       :|data-on:click| (the (datastar-action :continue :options "{filterSignals: {include: /^(turnstile|owner|wallet|tagree)$/}}"))
+                                       "Continue from this"))
                         (:p :class "pl-notice" :|data-show| "$notice" :|data-text| "$notice")
                         (:p :class "pl-error" :|data-show| "$error" :|data-text| "$error"))))
 
@@ -1944,6 +1954,59 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                        (save-session! session)
                        (the (tell-error! ""))
                        (saved (not error?) text)))))))))
+
+   (continue
+    (signals)
+    ;; 'Continue from this' on an archived session: a NEW live session of the
+    ;; visitor's own, under a first build's guards (the clickwrap, the human
+    ;; check, the address's cap), seeded with the archived model file -- the
+    ;; version shown -- and its uploaded files, compiled so it is drawn, and
+    ;; the browser sent to it with its owner key.  The archive is untouched;
+    ;; the new file and its log say which session it continued from, and keep
+    ;; the original's copyright line
+    (let* ((id (the archive-id))
+           (directory (the archive-directory))
+           (record (the archive-record))
+           (address (client-address *datastar-request*))
+           (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
+      (cond ((not (and id directory record)) (the (tell-error! "There is no archived session here to continue.")))
+            ((not (equal (or (gethash "engine" record) "gendl") (engine-name)))
+             (the (tell-error! "This session was built in the other lab: continue it there.")))
+            ((and (terms-required? :build) (not (eq (gethash "tagree" signals) t)))
+             (the (tell-error! (terms-refusal :build))))
+            (t
+             (multiple-value-bind (human? reason) (verify-turnstile token address)
+               (the spent-token!)
+               (if (not human?)
+                   (the (tell-error! reason))
+                   (multiple-value-bind (session reason) (open-session! address (and (wallet-id? (gethash "wallet" signals)) (gethash "wallet" signals)))
+                     (if (null session)
+                         (the (tell-error! reason))
+                         (let* ((original (ignore-errors
+                                           (with-open-file (in (merge-pathnames "model.lisp" directory) :external-format :utf-8)
+                                             (loop repeat 8 for line = (read-line in nil) while line
+                                                   when (search "Copyright (C)" line)
+                                                     return (string-right-trim "." (string-trim '(#\; #\Space) line))))))
+                                (body (format nil ";; Continued from prompt-lab session ~a~@[ (~a)~].~%~%~a"
+                                              id original (or (the archive-source) "")))
+                                (kind (parse-kind (gethash "kind" record)))
+                                (from (merge-pathnames "files/" directory))
+                                (to (merge-pathnames "files/" (uiop:ensure-directory-pathname (session-directory session))))
+                                (files (and (uiop:directory-exists-p from) (uiop:directory-files from))))
+                           (when (terms-required? :build)
+                             (accept-terms! :build :session session :address address :via "sheet, continue"))
+                           (when (and kind (member kind *kinds*))
+                             (ignore-errors (set-session-kind! session kind)))
+                           (dolist (file files)
+                             (ensure-directories-exist to)
+                             (uiop:copy-file file (merge-pathnames (file-namestring file) to)))
+                           (log-event session :note "Continued from archived session ~a: its model file~:[~; and its ~d uploaded file~:p~] brought over."
+                                      id files (length files))
+                           (let ((*model-writer* :seed)) (ignore-errors (write-model session body)))
+                           (save-session! session)
+                           (sheet-send! self (datastar-script-event
+                                              (format nil "~a;location.href=~a" (owners-script session)
+                                                      (js-string-literal (format nil "~a?session=~a" *url-prefix* (session-id session)))))))))))))))
 
    (claim
     (signals)
