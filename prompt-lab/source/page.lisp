@@ -1318,6 +1318,19 @@ gwl asks anyone (an older one sends them all to the site's front page)."
 (defun door-path (name)
   (format nil "~a/api/~a" *url-prefix* name))
 
+(defparameter *datastar-file* "vendor/datastar/datastar-1.0.4.js"
+  "String. Datastar's browser bundle under the lab's static directory
+(static/vendor/datastar/, with its licence): what every Datastar page this
+lab serves loads, from the lab's own origin.")
+
+(defun use-vendored-datastar! ()
+  "Point Gendl's *datastar-url*, which every datastar-mixin page loads, at
+the lab's own copy under its prefix, so no page the lab serves fetches a
+script from another origin.  A Gendl without Datastar is left alone."
+  (let ((symbol (find-symbol (string '#:*datastar-url*) :gwl)))
+    (when (and symbol (boundp symbol))
+      (setf (symbol-value symbol) (format nil "~a/static/~a" *url-prefix* *datastar-file*)))))
+
 (defun publish-prompt-lab! (&key host)
   "Publish the lab's stylesheets, editor and icons under <prefix>/static/,
 its manifest and retiring service worker beside the prefix, its doors
@@ -1331,6 +1344,10 @@ With a password set (guards.lisp, THE LOCK) every door of the lab's own
 is behind it -- gated -- and <prefix>/api/unlock is the way in."
   (load-password!)
   (when *free-lab?* (free-lab-settings!))
+  ;; Datastar from the lab's own static files, never a third party's
+  ;; (static/vendor/datastar/): the sheet and every app or deployment
+  ;; served from this image load it there
+  (use-vendored-datastar!)
   (gwl:with-all-servers (server)
     ;; THE PAGE IS THE SHEET (prompt-lab-sheet, publish-lab-sheet!): it
     ;; answers at the prefix.  The classic page was retired on 2026-10-02;
