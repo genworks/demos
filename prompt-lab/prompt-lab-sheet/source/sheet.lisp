@@ -1326,7 +1326,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                          :|data-attr:disabled| "$busy || $saving"
                                          :|data-on:click|
                                          (format nil "plConfirmSave() && ($source = plSourceText(), ~a)"
-                                                 (the (datastar-action :save :options "{filterSignals: {include: /^(source|owner)$/}}")))
+                                                 (the (datastar-action :save :options "{filterSignals: {include: /^(source|owner|turnstile|wallet|tagree|closedPick)$/}}")))
                                          "Save")
                                 ;; the author's own edits -- saved here, or made in the
                                 ;; console -- put to the agent to review (export.lisp)
@@ -1909,25 +1909,41 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (save
     (signals)
     ;; the visitor's own edit: written, compiled and loaded like the
-    ;; agent's, the session claimed meanwhile (as the model door does)
-    (let ((session (the session))
-          (source (gethash "source" signals)))
+    ;; agent's, the session claimed meanwhile (as the model door does).
+    ;; On a fresh page (no session yet) the first Save opens one, under the
+    ;; first build's guards -- the clickwrap, the human check, the
+    ;; address's cap -- and the pasted file is its first version
+    (let* ((source (gethash "source" signals))
+           (fresh? (and (null (the session)) (the editable?)))
+           (address (client-address *datastar-request*))
+           (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token)))
+           (human (if fresh? (multiple-value-list (verify-turnstile token address)) (list t))))
       (flet ((saved (ok? text)
                (sheet-send! self (datastar-script-event
                                   (format nil "plSaved(~a,~a)" (json-boolean ok?) (js-string-literal text))))))
         (cond ((not *visitor-edits?*) (the (tell-error! *visitor-edits-text*)))
-              ((not (the owner?)) (the (tell-error! "Only the session's owner may save the model file.")))
               ((not (stringp source)) (the (tell-error! "No source given.")))
-              ((not (claim! session)) (the (tell-error! "Wait for the agent to finish first.")))
-              (t (multiple-value-bind (blocks error?)
-                     ;; the author's own hand, for the authorship record (archive.lisp)
-                     (unwind-protect (let ((*model-writer* :author)) (write-model (touch session) source))
-                       (setf (session-busy? session) nil))
-                   (let ((text (or (cdr (assoc "text" (first blocks) :test #'string=)) "")))
-                     (log-event session :reload "Your edit: ~a" text)
-                     (save-session! session)
-                     (the (tell-error! ""))
-                     (saved (not error?) text))))))))
+              ((and fresh? (terms-required? :build) (not (eq (gethash "tagree" signals) t)))
+               (the (tell-error! (terms-refusal :build))))
+              ((not (first human)) (the (tell-error! (or (second human) "Complete the human check first."))))
+              ;; own-session! has said why, when the address is over its cap
+              ((and fresh?
+                    (prog1 (not (the (own-session! address (gethash "wallet" signals) (eq (gethash "closedPick" signals) t))))
+                      (the spent-token!)
+                      (when (and (the session) (terms-required? :build))
+                        (accept-terms! :build :session (the session) :address address :via "sheet, save")))))
+              ((not (the owner?)) (the (tell-error! "Only the session's owner may save the model file.")))
+              ((not (claim! (the session))) (the (tell-error! "Wait for the agent to finish first.")))
+              (t (let ((session (the session)))
+                   (multiple-value-bind (blocks error?)
+                       ;; the author's own hand, for the authorship record (archive.lisp)
+                       (unwind-protect (let ((*model-writer* :author)) (write-model (touch session) source))
+                         (setf (session-busy? session) nil))
+                     (let ((text (or (cdr (assoc "text" (first blocks) :test #'string=)) "")))
+                       (log-event session :reload "Your edit: ~a" text)
+                       (save-session! session)
+                       (the (tell-error! ""))
+                       (saved (not error?) text)))))))))
 
    (claim
     (signals)
