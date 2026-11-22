@@ -1351,7 +1351,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                          :|data-attr:disabled| "$busy || $saving"
                                          :|data-on:click|
                                          (format nil "plConfirmSave() && ($source = plSourceText(), ~a)"
-                                                 (the (datastar-action :save :options "{filterSignals: {include: /^(source|owner|turnstile|wallet|tagree|closedPick)$/}}")))
+                                                 (the (datastar-action :save :options "{filterSignals: {include: /^(source|owner|turnstile|wallet|tagree|closedPick|kind)$/}}")))
                                          "Save")
                                 ;; the author's own edits -- saved here, or made in the
                                 ;; console -- put to the agent to review (export.lisp)
@@ -1956,6 +1956,12 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
               ((and fresh?
                     (prog1 (not (the (own-session! address (gethash "wallet" signals) (eq (gethash "closedPick" signals) t))))
                       (the spent-token!)
+                      ;; a fresh session takes the kind the page shows, as a first
+                      ;; build does: a pasted web app opens as a web app.  A save
+                      ;; into a session that exists never changes its kind.
+                      (let ((kind (parse-kind (gethash "kind" signals))))
+                        (when (and (the session) kind (member kind *kinds*))
+                          (ignore-errors (set-session-kind! (the session) kind))))
                       (when (and (the session) (terms-required? :build))
                         (accept-terms! :build :session (the session) :address address :via "sheet, save")))))
               ((not (the owner?)) (the (tell-error! "Only the session's owner may save the model file.")))
