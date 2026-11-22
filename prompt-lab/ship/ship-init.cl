@@ -24,7 +24,11 @@
 ;;;                           ship=<WORKER_NAME> naming this one
 ;;;   LAB_SESSION_LIFETIME    idle seconds before the session ends (1800)
 ;;;   LAB_MESSAGES_URL        the gate's Messages door
-;;;                           (default http://gate-relay/llm/messages)
+;;;                           (default http://gate-relay/llm/messages:
+;;;                           gate-relay is the reverse proxy's name on the
+;;;                           ship's network, which carries the call on to
+;;;                           the gate stamped with the ship's name, and
+;;;                           carries nothing else)
 ;;;   LAB_TURNSTILE_SITE_KEY  the human check's public site key (none: off)
 ;;;   LAB_NAME                the lab's name at the gate
 ;;;
@@ -90,8 +94,8 @@
         (set! "prompt-lab::*archive-root*" "/worker-archive/")
         (when (ship-env "LAB_NAME")
           (set! "prompt-lab::*lab-name*" (ship-env "LAB_NAME")))
-        ;; no thumbnailer: its loads would go in beside the session's; the
-        ;; front draws the thumbnails of what it imports
+        ;; no thumbnailer: its loads would go in beside the session's (and
+        ;; the front compiles nothing, so an imported session has none)
         (set! "prompt-lab::*thumbnails?*" nil))
       ;; THE LOAD GATE (source/gate.lisp): no request runs while a model file
       ;; loads.  One line to drop once Gendl closes CCL's redefinition race.
