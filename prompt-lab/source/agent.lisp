@@ -367,7 +367,7 @@ goes here when it is.")
   - keeping some elements: remove-if or remove-if-not; changing and keeping some in one pass: mapcan with (when test (list value))
   - a running value: reduce (#'+, #'max, or a lambda); neighboring pairs: (mapcar #'f (butlast xs) (rest xs)); anything else running: do with one variable per value it carries
   - the first match, or a test over the list: find, find-if, position, member, assoc, some, every -- they stop at the match; or do with (return value)
-  - collecting a list whose length is known only as it is walked: do, its accumulator reversed once at the end with reverse -- never push with nreverse
+  - collecting a list whose length is known only as it is walked: dolist or do with push, the list reversed once at the end with nreverse (or reverse).  nreverse is DESTRUCTIVE: it rearranges the list's own cells, so any other holder of that list is left with a wrecked one.  Use it only on a list this code has just built itself; on a list from elsewhere (a slot's value, an argument, a quoted constant) use reverse
   Two traps that turn a linear walk quadratic: append inside a do (each append copies the list so far) and nth inside dotimes over a list (each nth walks from the head) -- walk the list itself with dolist, or carry its tail in the do.
   Repeated parts are a :sequence (:size n), never a list of objects made by iteration."
           *loop-shapes*)

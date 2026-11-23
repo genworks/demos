@@ -130,7 +130,7 @@ over a list; for an index,
 `(mapcar #'(lambda (n) ...) (list-of-numbers 0 (1- count)))`.  Lean on
 the do and map families (the iteration rule in your instructions names
 the form for each use, at the same cost); `loop` (in the shapes the rule
-lists) or iterate only where none of them fits well.  No `push` with `nreverse`.
+lists) or iterate only where none of them fits well.
 
 A mixin list names only what the object needs from it: `(base-object)`
 for a part, `()` for an object that only holds values.  Never name
