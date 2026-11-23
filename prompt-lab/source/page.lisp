@@ -810,10 +810,15 @@ nil and the reason."
         (t (multiple-value-bind (ok? reason) (verify-turnstile token address)
              (if (not ok?)
                  (values nil (or reason "Complete the human check first."))
-                 (let* ((answer (ignore-errors (gate-post "author" (h))))
-                        (id (and (hash-table-p answer) (gethash "wallet" answer))))
-                   (cond ((wallet-id? id) (count-address! address :authors) (funnel-count! "author-keys") id)
-                         (t (values nil "No author key could be made just now; try again in a moment.")))))))))
+                 (multiple-value-bind (answer status) (ignore-errors (gate-post "author" (h)))
+                   (let* ((id (and (hash-table-p answer) (gethash "wallet" answer)))
+                          ;; a refusal in the gate's error shape says why (a
+                          ;; ship's lab has had its mints, say)
+                          (refusal (and (eql status 429) (hash-table-p answer) (gethash "error" answer)))
+                          (why (and (hash-table-p refusal) (stringp (gethash "message" refusal)) (gethash "message" refusal))))
+                     (cond ((wallet-id? id) (count-address! address :authors) (funnel-count! "author-keys") id)
+                           (why (values nil why))
+                           (t (values nil "No author key could be made just now; try again in a moment."))))))))))
 
 (defun author-door (req ent)
   "POST <prefix>/api/author {session?, turnstile?}: an author key minted for
