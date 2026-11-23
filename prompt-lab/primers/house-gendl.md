@@ -127,9 +127,10 @@ with `(floor i columns)` and `(mod i columns)`.
 
 A list of VALUES (the points of an outline, say) is made with `mapcar`
 over a list; for an index,
-`(mapcar #'(lambda (n) ...) (list-of-numbers 0 (1- count)))`.  No
-`loop` (the iteration rule in your instructions names the form for each
-use, at the same cost), and no `push` with `nreverse`.
+`(mapcar #'(lambda (n) ...) (list-of-numbers 0 (1- count)))`.  Lean on
+the do and map families (the iteration rule in your instructions names
+the form for each use, at the same cost); `loop` (in the shapes the rule
+lists) or iterate only where none of them fits well.  No `push` with `nreverse`.
 
 A mixin list names only what the object needs from it: `(base-object)`
 for a part, `()` for an object that only holds values.  Never name

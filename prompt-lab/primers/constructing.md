@@ -55,8 +55,10 @@ be inspected.
 - A value with no closed form is solved numerically in a `defun` whose
   doc string says so.  That is the one place for trigonometry.
 - A list of values is made with `mapcar` over a list; for an index,
-  `(mapcar #'(lambda (n) ...) (list-of-numbers 0 (1- count)))`.  No
-  `loop` (the iteration rule above names the form for each use), and no
+  `(mapcar #'(lambda (n) ...) (list-of-numbers 0 (1- count)))`.  Lean on
+  the do and map families (the iteration rule above names the form for
+  each use); `loop` (in the shapes the rule lists) or iterate only where
+  none of them fits well.  No
   `push` with `nreverse`.
 - A mixin list names only what the object needs from it: `(base-object)`
   for a part, `()` for an object that only holds values.  Never name

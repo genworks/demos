@@ -351,21 +351,33 @@ named mixin already is it or inherits it).  Beside *iteration-rule* in the
 model and web-app system prompts; write-model notes a vanilla-mixin in a
 file an agent wrote (tools.lisp, *vanilla-note*).")
 
+(defparameter *loop-shapes*
+  "A `loop` keeps, where it can, to the house's familiar shapes, which a reader learns once: for ... do; for ... collect (or repeat n collect); for ... when or unless ... collect; for ... append; for ... when ... return; for ... thereis, or always; while ... do; for x = (next) while x do; and a bare (loop ... (return)) -- stepping with for x in a list, for tail on a list (a plist: for (k v) on plist by #'cddr), for x = expr, for x = first then next, for i from a below b, for i below n, for c across a vector."
+  "String.  The shapes a `loop` an agent writes keeps to where it can (the
+user, 2026-11-23: 'we keep our uses according to certain familiar patterns
+(if possible), and I'll learn those patterns'): the nine patterns and six
+stepping forms that cover most of the loops in Gendl's own source.  Part of
+*iteration-rule*; what a loop outside them should do is not settled, and
+goes here when it is.")
+
 (defparameter *iteration-rule*
-  "NO `loop`, in any file you write.  Write iteration in Lisp's plain forms, which anyone reviewing the code reads at a glance, and keep each one's cost what a loop's would be -- time and space of the same order: never build a list only to walk it in a hot path, never walk a whole list to find one element.  For each thing a `loop` is reached for:
+  (format nil "Iteration: lean on the do and map families for whatever they do perfectly well -- anyone reviewing the code reads them at a glance; the form for each use is below.  Where none of them fits well (several lists stepped together with running state and an early exit, say), write `loop` or iterate, your choice.  ~a  Iterate is loaded but your package does not use it: put the iter: prefix on the macro and on every clause head, and write such-that and previous as keywords, (iter:iter (iter:for x in xs) (iter:for i from 0) (iter:finding i :such-that (> x 3))); the other words inside a clause (in, on, from, below, by) stay bare.  Never :use the iterate package.  Whatever you write, keep its cost what a loop's would be -- time and space of the same order: never build a list only to walk it in a hot path, never walk a whole list to find one element.  The do and map forms, for each use:
   - each element, for its effect: dolist; a count or an index: dotimes; a numeric range with its own step: (do ((x start (+ x step))) ((> x end)) ...)
   - a new list, one value per element: mapcar; two or more lists stepped together: (mapcar #'f xs ys); by index: (mapcar #'(lambda (n) ...) (list-of-numbers 0 (1- count))), whose list costs what the result does
   - keeping some elements: remove-if or remove-if-not; changing and keeping some in one pass: mapcan with (when test (list value))
   - a running value: reduce (#'+, #'max, or a lambda); neighboring pairs: (mapcar #'f (butlast xs) (rest xs)); anything else running: do with one variable per value it carries
   - the first match, or a test over the list: find, find-if, position, member, assoc, some, every -- they stop at the match; or do with (return value)
-  - collecting where none of these fits (a list whose length is known only as it is walked): do, its accumulator reversed once at the end with reverse -- never push with nreverse
+  - collecting a list whose length is known only as it is walked: do, its accumulator reversed once at the end with reverse -- never push with nreverse
   Two traps that turn a linear walk quadratic: append inside a do (each append copies the list so far) and nth inside dotimes over a list (each nth walks from the head) -- walk the list itself with dolist, or carry its tail in the do.
   Repeated parts are a :sequence (:size n), never a list of objects made by iteration."
-  "String.  The rule on iteration in what the agents write (the user, 2026-11-23:
-'our generators and primers are supposed to guide agents away from loop';
-a replacement keeps time and space of the same order).  Put in the rules of
-the model and web-app system prompts; write-model notes a loop in a file an
-agent wrote (tools.lisp, *loop-note*).")
+          *loop-shapes*)
+  "String.  The rule on iteration in what the agents write (the user,
+2026-11-23): a lean, not a ban -- the do and map families for whatever they
+do perfectly well; where they do not fit, loop (in the house's shapes,
+*loop-shapes*) or iterate, the agent's choice (the two are in every image;
+series is not); and whatever is written keeps time and space of the same
+order.  In the rules of the model and web-app system prompts.  Existing
+loops are left as they are.")
 
 (defun system-text (&optional session)
   "The system prompt for SESSION by what it builds (kinds.lisp): a geometry
