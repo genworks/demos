@@ -759,9 +759,20 @@ not hold."
     (with-lhtml-string ()
       (:meta :name "viewport" :content "width=device-width, initial-scale=1")
       (when (the lab-robots) (htm (:meta :name "robots" :content (the lab-robots))))
+      ;; the human check's script is NOT loaded with the page: plLoadCheck
+      ;; fetches it when a check can be asked -- the page turning editable
+      ;; (a new visitor's, or the owner's once claimed), or Continue pressed
+      ;; on an archived session -- and never for a watcher or a reader
       (when *turnstile-site-key*
-        (htm (:script :src "https://challenges.cloudflare.com/turnstile/v0/api.js" :async "async" :defer "defer")
-             (:script "window.plTurnstile=function(t){var e=document.getElementById('pl-turnstile');if(e){e.value=t;e.dispatchEvent(new Event('input',{bubbles:true}))}};")))
+        (htm (:script "window.plTurnstile=function(t){var e=document.getElementById('pl-turnstile');if(e){e.value=t;e.dispatchEvent(new Event('input',{bubbles:true}))}};
+(function(){var asked=[],loading=false;
+function render(){asked.forEach(function(id){var el=document.getElementById(id);
+ if(el&&!el.getAttribute('data-rendered')){el.setAttribute('data-rendered','1');el.style.display='';
+  window.turnstile.render(el,{sitekey:el.getAttribute('data-sitekey'),callback:plTurnstile})}})}
+window.plCheckReady=render;
+window.plLoadCheck=function(id){if(asked.indexOf(id)<0)asked.push(id);
+ if(window.turnstile)return render();if(loading)return;loading=true;
+ var s=document.createElement('script');s.src='https://challenges.cloudflare.com/turnstile/v0/api.js?onload=plCheckReady&render=explicit';s.async=true;document.head.appendChild(s)};})();")))
       ;; the lab as an installable app (app.lisp)
       (:link :rel "manifest" :href (format nil "~a/manifest.webmanifest" *url-prefix*))
       (:meta :name "theme-color" :content (app-color "--pl-label-bg" "#101010"))
@@ -997,8 +1008,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                               ;; which replaced Turnstile's frame and emptied the token's field, so
                               ;; $turnstile stayed empty and Build grey until the page was reloaded
                               (:div :class "pl-check" :|data-ignore-morph| ""
+                                    ;; rendered (and its script fetched) once the page is editable
                                     (when *turnstile-site-key*
-                                      (htm (:div :class "cf-turnstile" :data-sitekey *turnstile-site-key* :data-callback "plTurnstile")))
+                                      (htm (:div :id "pl-cf-main" :data-sitekey *turnstile-site-key*
+                                                 :|data-effect| "$editable && plLoadCheck('pl-cf-main')")))
                                     (:input :type "hidden" :id "pl-turnstile" :|data-bind:turnstile| ""))
                               ;; the clickwrap (guards.lisp): the texts accepted before
                               ;; a session's first build, or before its own agent is connected
@@ -1085,10 +1098,19 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                 :data-doc "Open a session of your own on this model file and its uploaded files, and keep refining it"
                                                 :|data-indicator:continuing| ""
                                                 :|data-attr:disabled| (concatenate 'string "$continuing"
-                                                                                   (if *turnstile-site-key* " || !$turnstile" "")
                                                                                    (if (terms-required? :build) " || ($termsneed && !$tagree)" ""))
-                                                :|data-on:click| (the (datastar-action :continue :options "{filterSignals: {include: /^(turnstile|owner|wallet|tagree)$/}}"))
-                                                "Continue from this"))))
+                                                ;; with a human check: the first press fetches it and
+                                                ;; shows it here; the press after it passes continues
+                                                :|data-on:click| (let ((action (the (datastar-action :continue :options "{filterSignals: {include: /^(turnstile|owner|wallet|tagree)$/}}"))))
+                                                                   (if *turnstile-site-key*
+                                                                       (format nil "$turnstile ? (~a) : plLoadCheck('pl-cf-archive')" action)
+                                                                       action))
+                                                "Continue from this")
+                                       (when *turnstile-site-key*
+                                         (htm (:div :id "pl-cf-archive" :class "pl-check" :style "display:none" :|data-ignore-morph| ""
+                                                    :data-sitekey *turnstile-site-key*)
+                                              (:span :class "pl-line" :style "display:none" :|data-show| "!$turnstile && !$editable"
+                                                     " The human check appears when you press it; press again once it passes."))))))
                         (:p :class "pl-notice" :|data-show| "$notice" :|data-text| "$notice")
                         (:p :class "pl-error" :|data-show| "$error" :|data-text| "$error"))))
 
@@ -1646,7 +1668,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                         "Keep my name"))
                                          (:p :class "pl-line" :style "display:none" :|data-show| "!$wallet"
                                              "An author key gathers your sessions into one public record: the way up to a private lab of your own.")
-                                         (:div :class "pl-row" :style "display:none" :|data-show| "!$wallet"
+                                         ;; minted on the visitor's own page only, where the human
+                                         ;; check is loaded: a watcher or a reader starts their own
+                                         (:div :class "pl-row" :style "display:none" :|data-show| "!$wallet && $editable"
                                                (:button :type "button" :class "pl-download"
                                                         :|data-attr:disabled| (if *turnstile-site-key* "!$turnstile" "false")
                                                         :|data-on:click| (the (datastar-action :author :options "{filterSignals: {include: /^(turnstile|owner)$/}}"))
