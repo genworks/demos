@@ -114,16 +114,19 @@ else nil and the reason in words."
           (t (values nil (format nil "Your author key is at the ~a rung.  Private labs open at the trusted rung, granted on review of the work you make in the public lab."
                                  (gethash "standing" answer)))))))
 
-(defun write-private-request! (id wallet token &key monetize)
+(defun write-private-request! (id wallet token &key monetize standing)
   "File request ID in the spool.  MONETIZE t (the author's standing is the
 monetizing rung) has the hangar open the session with Monetize; :FREE (a
 trusted author, the user's ruling 50) with deploys of open work that
 charges nothing only.  Either only where this front keeps a private
-deployed root."
+deployed root.  STANDING is the author's standing as the gate gave it
+here; the hangar hands it to the session's VM with the key (Ruling 449),
+since the gate answers no session machine."
   (let ((final (private-file "requests" id))
         (tmp (format nil "~a/requests/.~a.json" (string-right-trim "/" *private-spool*) id)))
     (with-open-file (out tmp :direction :output :if-exists :supersede :if-does-not-exist :create)
       (write-string (encode (h "id" id "wallet" wallet "token" token "created" (get-universal-time)
+                               "standing" (if (member standing '("trusted" "monetizing") :test #'equal) standing nil)
                                "monetize" (cond ((not *private-deployed-root*) 'yason:false)
                                                  ((eq monetize t) t)
                                                  ((eq monetize :free) "free")
@@ -157,7 +160,8 @@ yes.  Answers {id, token, unlock, next} or {error}."
                      (count-address! address :private-opens)
                      ;; a monetizing author's session sells; a trusted author's may
                      ;; deploy open work that charges nothing (ruling 50)
-                     (write-private-request! id wallet token :monetize (if (eq (gethash "monetize" answer) t) t :free)))
+                     (write-private-request! id wallet token :monetize (if (eq (gethash "monetize" answer) t) t :free)
+                                             :standing (gethash "standing" answer)))
                    (respond-json req ent (h "id" id "token" token
                                             "unlock" (format nil "~a/api/unlock" (private-session-url id))
                                             "next" (format nil "~a?wallet=~a" *private-session-prefix* wallet))))))))))

@@ -153,6 +153,16 @@ may make a session private and are indexed by search engines.")
 
 (defvar *standings-lock* (bt:make-lock "prompt-lab standings"))
 
+(defvar *activation-author* nil
+  "List (KEY STANDING) or nil.  In a private session's VM: the author key the
+session was opened for and the standing the private front read from the gate
+when it opened it (\"trusted\" or \"monetizing\"), handed over at activation.
+The gate answers no session machine's question about a key (its author door
+admits the registrar and listed labs alone), so wallet-standing answers this
+one key from here; any other key named in the VM is asked of the gate as
+before, and has no standing there.  Fixed for the VM's life: a standing the
+house lowers after the session opened holds in the VM until it ends.")
+
 (defun wallet-standing (wallet)
   "WALLET's standing at the gate (author, trusted, monetizing, frozen), a
 string, or nil when WALLET is no key or the gate does not say; kept
@@ -160,6 +170,9 @@ string, or nil when WALLET is no key or the gate does not say; kept
   (when (wallet-id? wallet)
     (let ((now (get-universal-time))
           (kept (bt:with-lock-held (*standings-lock*) (gethash wallet *standings*))))
+      ;; a private session's own author: the standing it was opened with
+      (when (and (consp *activation-author*) (equal wallet (first *activation-author*)))
+        (return-from wallet-standing (second *activation-author*)))
       (if (and kept (< (- now (car kept)) *standing-seconds*))
           (cdr kept)
           (let ((answer (ignore-errors (gate-post "author" (h "wallet" wallet)))))
