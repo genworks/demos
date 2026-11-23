@@ -248,6 +248,11 @@ MCP tool).  Named through the reader so the symbol wears the image's case."
   (let ((symbol (find-symbol (symbol-name :describe-object-type) :gendl-lisply)))
     (and symbol (fboundp symbol) t)))
 
+(defun vanilla-mixin-name-p (mixin)
+  "Whether MIXIN, an entry of a type's mixins, is vanilla-mixin, which
+every object carries whether it names it or not."
+  (and (symbolp mixin) (string-equal (symbol-name mixin) "VANILLA-MIXIN")))
+
 (defun describe-type (session name)
   "Describe object type NAME for the agent.  Values: content blocks and
 an error flag.  Delegates to the Lisply backend's describe-object-type
@@ -275,13 +280,17 @@ images built before it moved (drop it when every image carries gendl's)."
                (let* ((type (class-name class))
                       (object (make-object type))
                       (description (ignore-errors (getf (the-object object documentation) :description)))
-                      (mixins (ignore-errors (the-object object mixins))))
+                      ;; vanilla-mixin is in every object, named or not: shown,
+                      ;; it taught agents to name it (gendl's describe leaves it
+                      ;; out the same way)
+                      (mixins (let ((named (ignore-errors (the-object object mixins))))
+                                (and (listp named) (remove-if #'vanilla-mixin-name-p named)))))
                  (multiple-value-bind (base sentence) (describe-base type)
                    (values
                     (list (text-result "~a"
                                        (with-output-to-string (out)
                                          (format out "~(~s~)~@[ (mixins: ~{~(~a~)~^, ~})~]~%~@[~a~%~]"
-                                                 type (and (listp mixins) mixins)
+                                                 type mixins
                                                  (and (stringp description) (collapse-whitespace description)))
                                          (describe-category out object base "Required inputs" '(:required-input-slots))
                                          (describe-category out object base "Optional inputs"
