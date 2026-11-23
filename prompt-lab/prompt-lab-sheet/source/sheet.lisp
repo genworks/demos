@@ -843,8 +843,19 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (query-wallet (let ((w (cdr (assoc "wallet" (the query-toplevel) :test #'string-equal)))) (and (wallet-id? w) w)))
    (cancelled? (equal (cdr (assoc "topup" (the query-toplevel) :test #'string-equal)) "cancelled"))
 
+   ;; whether this page's uploads take the larger caps: its session's
+   ;; author is trusted, or -- on a fresh page -- the key on the address is
+   ;; (a private lab's front sends its author in with ?wallet=).  Read
+   ;; only by the signals, written once with the page: the prompt tile
+   ;; must not hear the session, or a push would redraw what is typed
+   (page-paid? (let ((session (the session)))
+                 (if session
+                     (and (ignore-errors (paid? session)) t)
+                     (and (the query-wallet) (ignore-errors (trusted-wallet? (the query-wallet))) t))))
+   (page-upload-caps (getf *upload-caps* (if (the page-paid?) :paid :free)))
+
    (initial-signals
-    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, modelnow: ~a, agentmode: ~a, ownagent: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', tagree: false, termsneed: ~a, dagree: false, private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a}"
+    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, modelnow: ~a, agentmode: ~a, ownagent: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', tagree: false, termsneed: ~a, dagree: false, private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a, capbytes: ~d, capfiles: ~d, cappages: ~d}"
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; and of its last staged hosting (hosting.lisp)
@@ -855,8 +866,8 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                             (and session (not (session-replay? session)) (not (session-busy? session))
                                  (ignore-errors (monetizable? session)))))
             ;; a trusted author's session is not public unless it says
-            ;; so: its uploads want no acknowledgement
-            (json-boolean (and (the session) (ignore-errors (paid? (the session)))))
+            ;; so: its uploads want no acknowledgement, and take the larger caps
+            (json-boolean (the page-paid?))
             ;; Monetize (deploy.lisp): whether there is something to deploy,
             ;; and where this session is deployed already
             (json-boolean (let ((session (the session)))
@@ -903,7 +914,12 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
             (if (the query-wallet)
                 (format nil "(function(){try{localStorage.setItem('prompt-lab-wallet',~a)}catch(e){};return ~a})()"
                         (js-string-literal (the query-wallet)) (js-string-literal (the query-wallet)))
-                "(function(){try{return localStorage.getItem('prompt-lab-wallet')||''}catch(e){return ''}})()"))))
+                "(function(){try{return localStorage.getItem('prompt-lab-wallet')||''}catch(e){return ''}})()")
+            ;; the upload caps this page's session has (or will have): the
+            ;; upload line says them
+            (getf (the page-upload-caps) :bytes)
+            (getf (the page-upload-caps) :files)
+            (getf (the page-upload-caps) :pages))))
 
   :objects
   (;; The prompt, as a tile that never goes stale (it reads nothing that
@@ -1073,9 +1089,13 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                      :title "A file you upload is public with this session, here and in the archive, and you have the right to share it"
                                                      (:input :type "checkbox" :id "pl-rights")
                                                      " Tick before uploading: the file will be public, and I have the right to share it")
+                                             ;; the caps of THIS session (the cap signals, written
+                                             ;; with the page); the free caps until Datastar has
+                                             ;; read them -- the tile itself hears no session
                                              (:p :id "pl-upload-note" :class "pl-line"
-                                                 (fmt "Build from a drawing: a PDF of up to ~d pages, an image or a text file (DXF, SVG, CSV, STEP), ~a at most; a larger photo is made smaller first."
-                                                      (getf caps :pages) (size-label (getf caps :bytes)))))))))
+                                                 :|data-text| "'Build from a drawing: up to ' + $capfiles + ' files -- a PDF of up to ' + $cappages + ' pages, an image or a text file (DXF, SVG, CSV, STEP), ' + ($capbytes >= 1000000 ? ($capbytes / 1000000).toFixed(1) + ' MB' : Math.round($capbytes / 1000) + ' KB') + ' each at most; a larger photo is made smaller first.'"
+                                                 (fmt "Build from a drawing: up to ~d files -- a PDF of up to ~d pages, an image or a text file (DXF, SVG, CSV, STEP), ~a each at most; a larger photo is made smaller first."
+                                                      (getf caps :files) (getf caps :pages) (size-label (getf caps :bytes)))))))))
                         ;; hidden until Datastar has read the signals: no
                         ;; banner flashes at an owner while the script loads
                         (:div :class "pl-watch" :style "display:none" :|data-show| "!$editable && !$archived"
