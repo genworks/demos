@@ -56,7 +56,11 @@ be inspected.
   doc string says so.  That is the one place for trigonometry.
 - A list of values is made with `mapcar` over a list; for an index,
   `(mapcar #'(lambda (n) ...) (list-of-numbers 0 (1- count)))`.  No
-  `loop`, and no `push` with `nreverse`.
+  `loop` (the iteration rule above names the form for each use), and no
+  `push` with `nreverse`.
+- A mixin list names only what the object needs from it: `(base-object)`
+  for a part, `()` for an object that only holds values.  Never name
+  `vanilla-mixin`; every object has it already.
 - A slot cannot be defined from itself.  Inside a part's own definition
   `(the center)` IS the slot `center`, so a computed slot `(center
   (translate (the center) :up 10))` asks for itself without end, and the

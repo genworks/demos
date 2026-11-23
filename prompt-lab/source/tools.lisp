@@ -177,7 +177,66 @@ The file's header already sets the session package.")) t)))
 (in-package ~s)~%~%~a~%"
               (session-id session) (eq (session-kind session) :app)
               (license-header session) package-name source))
-    (load-model-file session)))
+    (multiple-value-bind (blocks error?) (load-model-file session)
+      ;; an agent's file that iterates with loop, or names vanilla-mixin, is
+      ;; told so, with the lines (the iteration and mixin rules, agent.lisp);
+      ;; a person's own edit is not
+      (values (if (member *model-writer* '(:agent :own-agent))
+                  (append blocks (house-notes source))
+                  blocks)
+              error?))))
+
+(defparameter *loop-note*
+  "NOTE: this file uses `loop` (line~p ~{~a~^, ~}).  The house writes no `loop` (the iteration rule in your instructions): rewrite each one in the plain forms, keeping its time and space of the same order."
+  "String, a format control taking the count and the line numbers.  What write_model and
+edit_model add to their result when an agent's file uses loop.")
+
+(defparameter *vanilla-note*
+  "NOTE: this file names `vanilla-mixin` (line~p ~{~a~^, ~}).  Every object has it already (the mixin rule in your instructions): drop it from the mixin list; a plain object is (define-object name () ...)."
+  "String, a format control taking the count and the line numbers.  What
+write_model and edit_model add to their result when an agent's file names
+vanilla-mixin.")
+
+(defun house-notes (source)
+  "The notes on SOURCE for the agent that wrote it: one text block per
+house rule it breaks (*loop-note*, *vanilla-note*), naming the lines."
+  (mapcan #'(lambda (note)
+              (let ((lines (code-lines source (rest note))))
+                (when lines
+                  (list (text-result (first note) (length lines) lines)))))
+          (list (cons *loop-note* #'loop-form-p)
+                (cons *vanilla-note* #'vanilla-mixin-p))))
+
+(defun code-lines (source test)
+  "The lines of SOURCE (1 the first) whose code -- the part before any `;`
+-- satisfies TEST: a hint for the agent, not a parse (a match in a string
+counts)."
+  (do* ((n 1 (1+ n))
+        (start 0 (1+ end))
+        (end (position #\Newline source :start start)
+             (position #\Newline source :start start))
+        (hits nil))
+       (nil)
+    (let* ((line (subseq source start (or end (length source))))
+           (code (subseq line 0 (or (position #\; line) (length line)))))
+      (when (funcall test code) (push n hits)))
+    (unless end (return (reverse hits)))))
+
+(defun loop-form-p (code)
+  "True when CODE holds a (loop form: (loop then a space, a tab, ) or the
+end."
+  (let ((pos (search "(loop" code)))
+    (and pos
+         (let ((after (+ pos 5)))
+           (or (>= after (length code))
+               (member (char code after) '(#\Space #\Tab #\) #\Return)))))))
+
+(defun vanilla-mixin-p (code)
+  (search "vanilla-mixin" code :test #'char-equal))
+
+(defun loop-lines (source)
+  "The lines of SOURCE holding a (loop form outside a line comment."
+  (code-lines source #'loop-form-p))
 
 (defun edit-model (session old new)
   "Replace OLD, which must occur exactly once in the model file's body

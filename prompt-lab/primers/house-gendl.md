@@ -128,7 +128,12 @@ with `(floor i columns)` and `(mod i columns)`.
 A list of VALUES (the points of an outline, say) is made with `mapcar`
 over a list; for an index,
 `(mapcar #'(lambda (n) ...) (list-of-numbers 0 (1- count)))`.  No
-`loop`, and no `push` with `nreverse`.
+`loop` (the iteration rule in your instructions names the form for each
+use, at the same cost), and no `push` with `nreverse`.
+
+A mixin list names only what the object needs from it: `(base-object)`
+for a part, `()` for an object that only holds values.  Never name
+`vanilla-mixin`; every object has it already.
 
 ### 4. Inputs a person can change
 
