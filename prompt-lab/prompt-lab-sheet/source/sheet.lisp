@@ -442,7 +442,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 var timer=null;
 window.plToast=function(text,kind){if(!text)return;var t=document.getElementById('pl-toast');if(!t)return;
  t.textContent=text;t.className='pl-toast pl-toast-'+(kind||'note');t.style.display='block';
- if(timer)clearTimeout(timer);timer=setTimeout(function(){t.style.display='none'},kind==='error'?7000:4500)};
+ if(timer)clearTimeout(timer);timer=setTimeout(function(){t.style.display='none'},Math.max(kind==='error'?7000:4500,text.length*70))};
 // the documentation line: what the thing under the pointer is or does,
 // from its data-doc or its title (the sluice's controls carry titles)
 document.addEventListener('mouseover',function(e){var d=document.getElementById('pl-doc');if(!d||!e.target.closest)return;
@@ -457,30 +457,73 @@ function uploadNote(){var n=document.getElementById('pl-upload-note');if(n&&!n.h
  return function(t){if(n)n.textContent=t||n.hint||''}}
 // called by the sheet: with a door, the held files go to it; with none
 // (the action refused, and has said why) they are let go
-window.plSendFiles=function(door,id,key){var say=uploadNote(),files=held,rights=heldRights,kept=[],bad=[];held=[];
+window.plSendFiles=function(door,id,key){var say=uploadNote(),files=held,rights=heldRights,kept=[],bad=[],notes=[];held=[];
  if(!door||!files.length){say('');return}
- function done(){say('');
-  var k=kept.length?kept.join(', ')+(kept.length>1?' are uploaded; they go':' is uploaded; it goes')+' to the agent with your next prompt.':'';
+ // a photo made smaller says so, in the toast and on the upload line
+ function done(){say(notes.join('  '));
+  var k=notes.concat(kept.length?[kept.join(', ')+(kept.length>1?' are uploaded; they go':' is uploaded; it goes')+' to the agent with your next prompt.']:[]).join('  ');
   if(bad.length)plToast((k?k+'  ':'')+bad.join('  '),'error');else plToast(k,'note')}
  function send(i){if(i>=files.length)return done();var f=files[i];
   say('Uploading '+f.name+(files.length>1?' ('+(i+1)+' of '+files.length+')':'')+'...');
   fetch(door,{method:'POST',headers:{'Content-Type':'application/json','X-Prompt-Lab-Owner':key||''},body:JSON.stringify({session:id,name:f.name,data:f.data,rights:rights})})
    .then(function(x){return x.json().then(function(j){return j||{}},function(){return {}}).then(function(j){
-     if(x.ok)kept.push(j.name||f.name);else bad.push(j.error||(x.status===413?f.name+' is too large for this lab.':f.name+' did not go through ('+x.status+').'))})},
+     if(x.ok){kept.push(j.name||f.name);if(f.note)notes.push(f.note)}else bad.push(j.error||(x.status===413?f.name+' is too large for this lab.':f.name+' did not go through ('+x.status+').'))})},
     function(e){bad.push(f.name+' did not go through: '+(e.message||e))})
    .then(function(){send(i+1)})}
  send(0)};
-// an upload: the chosen file read here and held, then the sheet asked
-window.plUpload=function(el,owner,wallet,token){var f=el.files&&el.files[0],r=document.getElementById('pl-rights'),say=uploadNote();
+// a photo over the session's cap is drawn again, smaller, as a JPEG,
+// before it leaves the browser, so the caps behind it stay as they are.
+// Any other file, and a photo within the cap, goes as it is, byte for
+// byte.  Drawing applies the photo's EXIF orientation, and the copy
+// carries none of its EXIF block (the location included)
+var formats={jpg:'JPEG',jpeg:'JPEG',png:'PNG',webp:'WebP',gif:'GIF',heic:'HEIC',heif:'HEIF',avif:'AVIF',bmp:'BMP',tif:'TIFF',tiff:'TIFF'};
+function sizeLabel(b){return b<1000?b+' bytes':b<1000000?Math.round(b/1000)+' KB':(b/1000000).toFixed(1)+' MB'}
+function ending(n){var i=(n||'').lastIndexOf('.');return i<0?'':n.slice(i+1).toLowerCase()}
+// the image format a file is, by its type or else its name; '' for none
+function imageFormat(f){var t=(f.type||'').toLowerCase();
+ if(t.indexOf('image/')===0)return t.indexOf('svg')>=0?'':formats[t.slice(6)]||t.slice(6).toUpperCase();
+ return t&&t!=='application/octet-stream'?'':formats[ending(f.name)]||''}
+function decode(f){function img(){return new Promise(function(ok,no){var u=URL.createObjectURL(f),i=new Image();
+  i.onload=function(){URL.revokeObjectURL(u);ok({src:i,w:i.naturalWidth,h:i.naturalHeight})};
+  i.onerror=function(){URL.revokeObjectURL(u);no(new Error('undecodable'))};i.src=u})}
+ if(!window.createImageBitmap)return img();
+ return createImageBitmap(f,{imageOrientation:'from-image'}).then(function(b){return {src:b,w:b.width,h:b.height}},img)}
+// scaled down in steps (4096 pixels on the long side at most to begin
+// with) until the JPEG fits CAP
+function shrink(f,cap){return decode(f).then(function(d){var w=d.w,h=d.h,s=Math.min(1,4096/Math.max(w,h)),q=0.85,n=0;
+ function round(){var cw=Math.max(1,Math.round(w*s)),ch=Math.max(1,Math.round(h*s)),c=document.createElement('canvas'),g;
+  c.width=cw;c.height=ch;g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,cw,ch);g.imageSmoothingQuality='high';g.drawImage(d.src,0,0,cw,ch);
+  return new Promise(function(ok){c.toBlob(ok,'image/jpeg',q)}).then(function(b){c.width=c.height=0;
+   if(b&&b.size<=cap)return {blob:b,w:cw,h:ch,ow:w,oh:h};
+   if(!b||++n>=12||Math.max(cw,ch)<=320)throw new Error('small');
+   s*=Math.max(0.5,Math.min(0.9,0.95*Math.sqrt(cap/b.size)));if(q>0.7)q-=0.05;return round()})}
+ function free(){if(d.src.close)d.src.close()}
+ return round().then(function(r){free();return r},function(e){free();throw e})})}
+// the file to send: F itself, or its smaller copy, with a note saying so
+function fitted(f,cap,say){var fmt=imageFormat(f);
+ if(!cap||f.size<=cap||!fmt)return Promise.resolve({file:f,name:f.name});
+ say('Making '+f.name+' smaller: it has '+sizeLabel(f.size)+', and a file may have '+sizeLabel(cap)+' here...');
+ return shrink(f,cap).then(function(r){var i=f.name.lastIndexOf('.'),name=(i>0?f.name.slice(0,i):f.name||'photo')+'.jpg';
+   return {file:r.blob,name:name,note:f.name+' ('+sizeLabel(f.size)+', '+r.ow+' \\u00d7 '+r.oh+') was made smaller to fit: '+name+' ('+sizeLabel(r.blob.size)+', '+r.w+' \\u00d7 '+r.h+'), a JPEG without the camera data or location.'}},
+  function(e){throw new Error(e.message==='small'
+   ?f.name+' could not be made small enough to send ('+sizeLabel(cap)+' at most here).'
+   :f.name+' has '+sizeLabel(f.size)+', more than the '+sizeLabel(cap)+' a file may have here, and this browser cannot open a '+fmt+' image to make it smaller.  Save it as a JPEG and upload that.')})}
+// an upload: the chosen file read here (made smaller first if it is a
+// photo over the cap) and held, then the sheet asked.  PAID: the session
+// takes the larger caps
+window.plUpload=function(el,owner,wallet,token,paid){var f=el.files&&el.files[0],r=document.getElementById('pl-rights'),say=uploadNote();
  if(!f)return;
  if(r&&r.offsetParent!==null&&!r.checked){say('Tick the box first: the file will be shared with this session.');el.value='';return}
- say('Reading '+f.name+'...');var fr=new FileReader();
- fr.onload=function(){var s=String(fr.result);held=[{name:f.name,data:s.slice(s.indexOf(',')+1)}];heldRights=!!(r&&r.checked);el.value='';
-  say('Uploading '+f.name+'...');
-  plAction('upload',{rights:heldRights,owner:owner||'',wallet:wallet||'',turnstile:token||'',closedPick:!!(document.getElementById('pl-closed')||{}).checked})
-   .then(function(x){if(!x.ok){held=[];say('The upload did not go through ('+x.status+').')}},function(e){held=[];say('The upload did not go through: '+e)})};
- fr.onerror=function(){say('The file could not be read.');el.value=''};
- fr.readAsDataURL(f)};
+ var cap=Number((paid&&el.getAttribute('data-cap-paid'))||el.getAttribute('data-cap'))||0;
+ fitted(f,cap,say).then(function(g){
+  say('Reading '+g.name+'...');var fr=new FileReader();
+  fr.onload=function(){var s=String(fr.result);held=[{name:g.name,data:s.slice(s.indexOf(',')+1),note:g.note}];heldRights=!!(r&&r.checked);el.value='';
+   say('Uploading '+g.name+'...');
+   plAction('upload',{rights:heldRights,owner:owner||'',wallet:wallet||'',turnstile:token||'',closedPick:!!(document.getElementById('pl-closed')||{}).checked})
+    .then(function(x){if(!x.ok){held=[];say('The upload did not go through ('+x.status+').')}},function(e){held=[];say('The upload did not go through: '+e)})};
+  fr.onerror=function(){say('The file could not be read.');el.value=''};
+  fr.readAsDataURL(g.file)},
+ function(e){el.value='';say(e.message);plToast(e.message,'error')})};
 // a request that wants the other lab's engine: the browser goes there,
 // carrying the prompt and the reason, which the page there takes up
 window.plRoute=function(url,prompt,reason,kind){try{sessionStorage.setItem('prompt-lab-carry',JSON.stringify({prompt:prompt,reason:reason,kind:kind||''}))}catch(e){}
@@ -1004,7 +1047,10 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                            "Upload a drawing or file")
                                                    (:input :type "file" :id "pl-file"
                                                            :accept (format nil ".pdf,.png,.jpg,.jpeg,.gif,.webp~{,.~a~}" *upload-text-types*)
-                                                           :|data-on:change| "plUpload(el, $owner, $wallet, $turnstile)"))
+                                                           ;; the caps a photo is made to fit (plUpload)
+                                                           :data-cap (getf caps :bytes)
+                                                           :data-cap-paid (getf (getf *upload-caps* :paid) :bytes)
+                                                           :|data-on:change| "plUpload(el, $owner, $wallet, $turnstile, $paidUp)"))
                                              ;; a file is public with its session: said and
                                              ;; acknowledged, except where the session is not
                                              ;; public -- closed source, or a trusted author's.
@@ -1015,7 +1061,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                      (:input :type "checkbox" :id "pl-rights")
                                                      " Tick before uploading: the file will be public, and I have the right to share it")
                                              (:p :id "pl-upload-note" :class "pl-line"
-                                                 (fmt "Build from a drawing: a PDF of up to ~d pages, an image or a text file (DXF, SVG, CSV, STEP), ~a at most."
+                                                 (fmt "Build from a drawing: a PDF of up to ~d pages, an image or a text file (DXF, SVG, CSV, STEP), ~a at most; a larger photo is made smaller first."
                                                       (getf caps :pages) (size-label (getf caps :bytes)))))))))
                         ;; hidden until Datastar has read the signals: no
                         ;; banner flashes at an owner while the script loads
