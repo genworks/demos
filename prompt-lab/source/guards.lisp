@@ -331,6 +331,54 @@ admitted visitor; anyone else gets the unlock form."
                                  (gwl:gwl-make-object req ent (format nil "~s" class))))
          (and host (list :host host))))
 
+(defparameter *form-door-paths* '("/answer")
+  "Paths of gwl's form door that the lab puts its own door in front of
+(publish-form-door!).")
+
+(defun lab-page-p (object)
+  "True for a page the lab makes: the sheet, its listing, the viewer, and
+a session's or a deployment's web app."
+  (some #'(lambda (type) (and (find-class type nil) (typep object type)))
+        '(lab-sheet lab-listing viewer web-app)))
+
+(defun multipart-request-p (req)
+  (search "multipart/form-data" (or (net.aserve:header-slot-value req :content-type) "")))
+
+(defun refuse-form-door (req ent)
+  (net.aserve:with-http-response (req ent :response net.aserve:*response-forbidden*)
+    (net.aserve:with-http-body (req ent))))
+
+(defun form-door (req ent)
+  "gwl's form door, which sets a page's slots from the fields of a classic
+form post, for every page but the lab's own: those take no form posts
+(the lab's pages talk only through their own doors and gdlAjax), and a
+post naming one is answered 403 with nothing set.  A multipart post is
+read here to find its page, and handed on read."
+  (let ((query (net.aserve:request-query req))
+        (uploads nil))
+    (when (and (null query) (multipart-request-p req))
+      (when (and (fboundp 'gwl::multipart-body-admissible?)
+                 (not (funcall 'gwl::multipart-body-admissible? req ent)))
+        (return-from form-door nil))
+      (multiple-value-setq (query uploads) (gwl::process-multipart-submission req))
+      ;; gwl's door asks request-query again, and takes these fields
+      (setf (net.aserve::request-query-alist req) query))
+    (let* ((iid (cdr (assoc "iid" query :test #'string-equal)))
+           (root (and (stringp iid) (plusp (length iid)) (<= (length iid) 128)
+                      (first (gethash (gwl::instance-key iid) gwl::*instance-hash-table*)))))
+      (cond ((and root (lab-page-p root))
+             (dolist (directory uploads)
+               (ignore-errors (uiop:delete-directory-tree (uiop:ensure-directory-pathname directory) :validate t)))
+             (refuse-form-door req ent))
+            (t (gwl::answer req ent))))))
+
+(defun publish-form-door! ()
+  "Put the lab's form door (form-door) in front of gwl's at each of
+*form-door-paths*, on every server."
+  (gwl:with-all-servers (server)
+    (dolist (path *form-door-paths*)
+      (net.aserve:publish :path path :server server :content-type "text/html" :function #'form-door))))
+
 (defun unlock-escape (string)
   (with-output-to-string (out)
     (loop for char across string

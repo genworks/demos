@@ -1463,6 +1463,8 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
                                   :server server :host (app-doors-host host)
                                   :destination (namestring *demos-css-directory*)))
   (publish-gated-gwl-app (format nil "~a/viewer" *url-prefix*) 'viewer :host host)
+  ;; gwl's form door, for every page but the lab's own (guards.lisp)
+  (publish-form-door!)
   ;; hosting a project on the apps host (hosting.lisp): the worker's doors
   ;; answer only with *hosting-secret*
   (publish-hosting! :host host)
