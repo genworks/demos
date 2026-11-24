@@ -343,7 +343,11 @@ and a private session's front is sent the texts accepted, to log."
              ;; a private session's host is pl-<id> under the same domain (private.lisp)
              (and (>= (length name) 3) (string= "pl-" name :end2 3)))
          (values nil (format nil "The name ~a is reserved; choose another." name)))
-        ((and existing (not (equal (gethash "owner" existing) (session-owner session))))
+        ;; a name is the session's that took it -- except through the
+        ;; private front, which answers only this author's deployments
+        ;; (deployment-record) and checks the author itself: there any
+        ;; session of the author's, a Continue or a fresh one, replaces it
+        ((and existing (not *deploy-front*) (not (equal (gethash "owner" existing) (session-owner session))))
          (values nil (format nil "The name ~a is taken; choose another." name)))
         ((and mine (not (equal (gethash "name" mine) name)))
          (values nil (format nil "This session is deployed as ~a: deploy under that name again, or take it down first."
