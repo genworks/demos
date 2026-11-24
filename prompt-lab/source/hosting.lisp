@@ -565,8 +565,13 @@ claimed again, by any project.  What runs under it stays up."
 
 (defun hosting-admin-page-door (req ent)
   "GET <prefix>/hosting-admin: the admins' page (static/hosting-admin.html).
-It holds no data and works only with the admin secret."
+It holds no data and works only with the admin secret; where no secret is
+set there is no admin, and the page is not there either (404)."
   (let ((file (merge-pathnames "hosting-admin.html" *static-directory*)))
+    (unless (and (stringp *hosting-admin-secret*) (plusp (length *hosting-admin-secret*)))
+      (return-from hosting-admin-page-door
+        (net.aserve:with-http-response (req ent :response net.aserve:*response-not-found*)
+          (net.aserve:with-http-body (req ent)))))
     (net.aserve:with-http-response (req ent :content-type "text/html; charset=utf-8")
       (setf (net.aserve:reply-header-slot-value req :cache-control) "no-store")
       (net.aserve:with-http-body (req ent :external-format :utf-8)
