@@ -136,6 +136,15 @@ compiled again with the new meaning, and GDL's messages are keywords."
 (defun built-name (session)
   (if (eq (session-kind session) :app) "APP" "MODEL"))
 
+(defparameter *form-submit-script*
+  "<script>document.addEventListener('submit',function(e){var f=e.target,a=(f&&f.getAttribute&&f.getAttribute('action'))||'';if(/(^|\\/)answer(\\?|$)/.test(a)){e.preventDefault();var el=document.activeElement;if(el&&f.contains(el)&&el.blur){el.blur();}}},true);</script>"
+  "String.  What every web app's page carries in its head: a form of gwl's
+(with-form-string, whose action is the classic form door) is never
+submitted by the browser itself -- Enter in a lone field would post it --
+since its fields already go by gdlAjax as they change; the field in hand
+is let go (blur) so a value not yet sent goes now.  The lab's own forms,
+which post to the lab's doors (a toll's pay button), are not touched.")
+
 (define-object web-app (demos-common:demo-ui-mixin session-control-mixin base-html-page)
 
   :documentation
@@ -197,7 +206,9 @@ again when they buy a pack."
     (string-append
      (let ((demos-common:*url-prefix* (format nil "~a/app-static" *url-prefix*)))
        (call-next-method))
-     (or (and (the deployment-name) (source-offer-script (the deployment-name))) ""))))
+     (or (and (the deployment-name) (source-offer-script (the deployment-name))) "")
+     ;; a gwl form never posts by itself (Enter in a lone field)
+     *form-submit-script*)))
 
   :functions
   (;; Tollbooths.  The app says what is paid for (tolls) and where the
@@ -692,6 +703,7 @@ Rules for the page:
 - A change must show at once: every form control carries :ajax-submit-on-change? t, and there is no submit button.  Read a control with (the <control> value).
 - What changes with the inputs lives in a section: a child of type 'base-html-div whose :inner-html is the html, put on the page with (str (the <section> div)).  Html written straight into body is rendered once and never again.
 - The control types: number-form-control (:domain :number, :min :max :step), text-form-control, menu-form-control (:choice-plist or :choice-list, :size 1 for a drop-down), checkbox-form-control, radio-form-control.  describe_object names their inputs.
+- A form never posts by itself here: its fields go by gdlAjax as they change, and Enter in a field submits nothing, so give the page no submit button and do the work when a field's value changes.
 - The mixin gives (the (card :title .. :subtitle .. :content <html string>)), (the (param-field <label> <control>)) and, for geometry, (the viewport-area div) on the list in objects, with its own Shaded / Wireframe / Hidden line switch and View menu.  Do not call page-intro.
 - Html is cl-who: (str <string>) puts a string in, (fmt ..) a formatted one, (esc <string>) one that came from the visitor, and htm goes back to html inside a Lisp form.  Each of str, fmt and esc WRITES to the page itself, so never put one inside another: (fmt \"Hi ~~a\" (esc name)) and (str (esc name)) write the name twice.  For the visitor's words inside a formatted line, (fmt \"Hi ~~a\" (escape-string name)).  A table of results is :table with :thead and :tbody.
 - Style with the classes the recipe uses (they are in the page's stylesheet; other utility classes may not be) and a :style attribute for anything else.
