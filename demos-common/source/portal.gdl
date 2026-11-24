@@ -96,11 +96,7 @@ The deploying stack's services-init pushes what it has published.")
            (dolist (link *portal-links*)
              (cl-who:htm
               (:p :class "note"
-                  (:a :href (cdr link) (cl-who:esc (car link))))))
-           (:p :class "note"
-               "Any Gendl object, not just a demo: "
-               (:a :href "/sluice-demo" :target "_blank" :rel "noopener" "sluice")
-               ", the object browser, with a headset button on its X_ITE pane."))))))))
+                  (:a :href (cdr link) (cl-who:esc (car link)))))))))))))
 
 (defun portal-on-page (req ent)
   "The split: the console on the demo's source, the demo's live page beside it."
