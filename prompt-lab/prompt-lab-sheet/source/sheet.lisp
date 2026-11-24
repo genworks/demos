@@ -340,7 +340,7 @@ SESSION's balance -- or nil."
 .pl-tool .pl-text{color:var(--pl-ink-dim,#555);font-family:var(--pl-font-mono,monospace);font-size:.8rem}
 .pl-source-head{display:flex;gap:.6rem;align-items:baseline;margin-bottom:.4rem}.pl-source-head h2{margin:0}
 .pl-source-state{color:var(--pl-ink-dimmer,#888);font-size:.8rem}.pl-source-state.pl-warn{color:var(--pl-status-fail,#b00)}
-.pl-source-head .pl-save{margin-left:auto}
+.pl-source-head .pl-save{margin-left:auto}.pl-source-head .pl-open{margin-left:auto}.pl-source-head .pl-open+.pl-save{margin-left:.4rem}
 #pl-source{width:100%;box-sizing:border-box;min-height:12rem;font:12px/1.4 var(--pl-font-mono,monospace)}
 .pl-source .cm-editor{font-size:12px;font-family:var(--pl-font-mono,monospace);background:var(--pl-panel,#fff);color:var(--pl-ink,#111);border:var(--pl-rule,1px) solid var(--pl-line-soft,#ddd)}
 .pl-source .cm-editor.cm-focused{outline:none;border-color:var(--pl-focus,#36c)}
@@ -412,6 +412,23 @@ window.plConfirmSave=function(){return !(dirty&&last!==base)||confirm('The model
 window.plSaved=function(ok,text){if(ok){dirty=false;base=null}state(ok?'saved and loaded':'saved; see the log',!ok)};
 window.plLock=function(flag){if(ed)ed.setReadOnly(!!flag);else if(area())area().readOnly=!!flag};
 window.plFold=function(all){if(ed){if(all)ed.foldAll();else ed.unfoldAll()}};
+// Open file...: a file of this computer's read into the editor, as a paste
+// would put it there -- nothing is sent until Save.  On a page with no
+// session yet, a file defining APP (or MODEL) picks that kind, since the
+// first Save fixes the session's kind.
+window.plOpenFile=function(input,opened){var f=input.files&&input.files[0];input.value='';if(!f)return;
+ if(f.size>3000000){state(f.name+' is too large for the editor (over 3 MB)',true);return}
+ f.arrayBuffer().then(function(buf){var text;
+  try{text=new TextDecoder('utf-8',{fatal:true}).decode(buf)}catch(e){state(f.name+' is not a text file',true);return}
+  if(text.indexOf(String.fromCharCode(0))>=0){state(f.name+' is not a text file',true);return}
+  if(dirty&&!confirm('Replace what is in the editor with '+f.name+'?'))return;
+  if(ed)ed.value=text;else if(area())area().value=text;
+  if(!dirty){dirty=true;base=last}
+  var kind=/\\(define-object\\s+app[\\s)]/i.test(text)?'app':(/\\(define-object\\s+model[\\s)]/i.test(text)?'model':'');
+  var k=kind&&!opened&&document.querySelector('input[name=\"pl-kind\"][value=\"'+kind+'\"]');
+  // a click, as a person's: the events Datastar's binding hears
+  if(k&&!k.checked)k.click();
+  state('opened '+f.name+(k?(kind==='app'?' as a web app':' as a geometry model'):'')+'; not saved yet: Save sends it')})};
 window.plDownload=function(url,owner){var n=document.getElementById('pl-download-note');function say(t,bad){if(n)n.textContent=t||'';if(bad&&window.plToast)plToast(t,'error')}
  say('Making the file...');
  fetch(url,{headers:owner?{'X-Prompt-Lab-Owner':owner}:{}}).then(function(r){
@@ -1433,6 +1450,19 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                 (:button :type "button" :|data-on:click| "plFold(false)" "unfold all")
                                 (unless *visitor-edits?*
                                   (htm (:span :class "pl-line pl-dim" "Read-only: ask the agent for changes.")))
+                                ;; a model file of the visitor's own computer into the
+                                ;; editor (plOpenFile): read here, sent only by Save
+                                (when *visitor-edits?*
+                                  (htm (:input :type "file" :id "pl-open-file" :style "display:none"
+                                               :accept ".lisp,.gdl,.gendl,.cl,.lsp,.txt,text/plain"
+                                               :|data-on:change| "plOpenFile(el, $opened)")
+                                       (:button :type "button" :class "pl-open"
+                                                :|data-show| "$editable"
+                                                :|data-attr:disabled| "$busy || $saving"
+                                                :title "Read a model file from this computer into the editor.  Nothing is sent until you press Save."
+                                                :data-doc "Read a model file from this computer into the editor; Save sends it"
+                                                :|data-on:click| "document.getElementById('pl-open-file').click()"
+                                                "Open file...")))
                                 (:button :type "button" :class "pl-save"
                                          :|data-show| (if *visitor-edits?* "$editable" "false")
                                          :|data-indicator:saving| ""
