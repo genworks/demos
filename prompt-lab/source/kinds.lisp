@@ -189,7 +189,11 @@ again when they buy a pack."
    (favicon-path "data:,"))
 
   :computed-slots
-  (;; what this visitor has paid: toll key -> (:at <time> [:uses n] [:until time])
+  (;; the page takes no classic form posts (gwl's respond-to-forms?; an
+   ;; image without the input reads this as a slot of the page's own)
+   (respond-to-forms? nil)
+
+   ;; what this visitor has paid: toll key -> (:at <time> [:uses n] [:until time])
    (payments nil :settable)
 
    ;; what their purse holds for this deployment, in cents

@@ -2838,6 +2838,8 @@ var n=name(q||s||house);if(skins[n])l.setAttribute('href',skins[n])})();"
 (define-object lab-listing (session-control-mixin base-html-page)
   :computed-slots
   ((title (format nil "~a: sessions" (lab-title)))
+   ;; the listing takes no classic form posts (gwl's respond-to-forms?)
+   (respond-to-forms? nil)
    (use-x3dom? nil)
    (browse (let ((b (cdr (assoc "browse" (the query-toplevel) :test #'string-equal))))
              (if (equal b "archive") "archive" "live")))
