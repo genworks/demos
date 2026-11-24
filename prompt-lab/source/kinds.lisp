@@ -145,6 +145,11 @@ since its fields already go by gdlAjax as they change; the field in hand
 is let go (blur) so a value not yet sent goes now.  The lab's own forms,
 which post to the lab's doors (a toll's pay button), are not touched.")
 
+(defparameter *deployed-favicon* "/static/gwl/images/favicon.ico"
+  "String. The icon a web app's page, and every page a deployment answers,
+names in its head when the app names none of its own (its favicon-path):
+the house's, the one every page of the image serves.")
+
 (define-object web-app (demos-common:demo-ui-mixin session-control-mixin base-html-page)
 
   :documentation
@@ -184,9 +189,9 @@ without money and nothing is booked."
 purse, deploy.lisp), from its cookie when the door made this page; set
 again when they buy a pack."
     purse-id nil :settable)
-   ;; the page is the author's: no icon of the house's on it (gwl's
-   ;; default is the engine's); an empty data address asks for none
-   (favicon-path "data:,"))
+   ("String. The page's icon: the house's (*deployed-favicon*) unless the
+app names its own here."
+    favicon-path *deployed-favicon*))
 
   :computed-slots
   (;; the page takes no classic form posts (gwl's respond-to-forms?; an
@@ -211,6 +216,8 @@ again when they buy a pack."
      (let ((demos-common:*url-prefix* (format nil "~a/app-static" *url-prefix*)))
        (call-next-method))
      (or (and (the deployment-name) (source-offer-script (the deployment-name))) "")
+     ;; a deployment installs on a phone's home screen (app.lisp)
+     (or (and (the deployment-name) (deployment-head-links (the deployment-name))) "")
      ;; a gwl form never posts by itself (Enter in a lone field)
      *form-submit-script*)))
 

@@ -65,6 +65,17 @@ stylesheet is read."
         (colour (static-file "prompt-lab.css"))
         fallback)))
 
+(defun manifest-icons ()
+  "Vector. The icons of *app-icons* the static directory holds, as a
+manifest lists them."
+  (map 'vector #'(lambda (icon)
+                   (destructuring-bind (file sizes purpose) icon
+                     (h "src" (static-url file)
+                        "sizes" sizes
+                        "type" "image/png"
+                        "purpose" purpose)))
+       (remove-if-not #'(lambda (icon) (static-file (first icon))) *app-icons*)))
+
 (defun manifest ()
   "Hash table. The web app manifest of this lab."
   (h "id" *url-prefix*
@@ -81,13 +92,7 @@ stylesheet is read."
      "theme_color" (app-color "--pl-label-bg" "#101010")
      "background_color" (app-color "--pl-bg" "#f7f6f2")
      "categories" (vector "productivity" "utilities")
-     "icons" (map 'vector #'(lambda (icon)
-                              (destructuring-bind (file sizes purpose) icon
-                                (h "src" (static-url file)
-                                   "sizes" sizes
-                                   "type" "image/png"
-                                   "purpose" purpose)))
-                  (remove-if-not #'(lambda (icon) (static-file (first icon))) *app-icons*))
+     "icons" (manifest-icons)
      "shortcuts" (coerce
                   (append (list (h "name" "New session" "url" *url-prefix*))
                           (when *browsing?*
@@ -100,6 +105,94 @@ stylesheet is read."
 (defun manifest-door (req ent)
   "GET <prefix>/manifest.webmanifest."
   (respond-text req ent (ascii-json (encode (manifest))) "application/manifest+json"))
+
+
+;;
+;; A deployed web app as an installable app, every one alike and nothing
+;; in its own file: its page (web-app, kinds.lisp) links a manifest of its
+;; own, <prefix>/d/<name>/manifest.webmanifest (deployed-door), named from
+;; the Deploy fields and starting at the app's own address, with the
+;; house's icons.  No service worker, as the lab keeps none: the page is
+;; live (gdlAjax and the stream) and must never be answered from a cache,
+;; and a browser installs an app without one.  Links and a manifest only,
+;; all from the app's own origin, so a strict content policy leaves them be.
+;;
+
+(defparameter *deployed-theme-color* "#4f46e5"
+  "String. The colour an installed deployment's window bar wears: the
+demos' primary colour, which a web app's page is drawn in.")
+
+(defparameter *deployed-background-color* "#f9fafb"
+  "String. The colour of an installed deployment's splash: the demos'
+page background.")
+
+(defparameter *short-name-length* 12
+  "Integer. The most characters a home screen shows under an icon.")
+
+(defparameter *short-name-trailers*
+  '("a" "an" "the" "and" "or" "of" "for" "to" "in" "on" "with" "by" "at" "&" "-")
+  "List of strings. Words a shortened name does not end on.")
+
+(defun short-app-name (title)
+  "TITLE as a home screen can show it: whole, when it fits
+*short-name-length*; else as many of its first words as fit, less any of
+*short-name-trailers* at the end; else its first characters."
+  (let ((title (string-trim " " title)))
+    (if (<= (length title) *short-name-length*)
+        title
+        (let ((words (loop with kept = nil
+                           for word in (remove "" (uiop:split-string title :separator " ") :test #'string=)
+                           for length = (length word) then (+ length 1 (length word))
+                           while (<= length *short-name-length*)
+                           do (push word kept)
+                           finally (return kept))))
+          (loop while (and (rest words) (member (first words) *short-name-trailers* :test #'string-equal))
+                do (pop words))
+          (if words
+              (format nil "~{~a~^ ~}" (reverse words))
+              (subseq title 0 *short-name-length*))))))
+
+(defun deployment-own-host? (record)
+  "True when RECORD's deployment is a web app on a host of its own
+(deployment-url), whose root is the app."
+  (and (app-origin-pattern?) (equal (gethash "kind" record) "app")))
+
+(defun deployment-manifest (name record)
+  "Hash table. The web app manifest of deployment NAME (RECORD).  Its scope
+is the whole host: the page lives at the address gwl mints for each visit
+(/sessions/<id>/), outside the deployment's path, and on a host of its own
+the host is the app's alone."
+  (let ((title (let ((title (gethash "title" record)))
+                 (if (and (stringp title) (plusp (length (string-trim " " title)))) title name)))
+        (blurb (gethash "blurb" record)))
+    (h "id" (deployment-path name)
+       "name" title
+       "short_name" (short-app-name title)
+       "description" (if (stringp blurb) blurb "")
+       "start_url" (if (deployment-own-host? record) "/" (deployment-path name))
+       "scope" "/"
+       "display" "standalone"
+       "theme_color" *deployed-theme-color*
+       "background_color" *deployed-background-color*
+       "icons" (manifest-icons))))
+
+(defun deployment-manifest-door (req ent name record)
+  "GET <prefix>/d/<name>/manifest.webmanifest."
+  (respond-text req ent (ascii-json (encode (deployment-manifest name record))) "application/manifest+json"))
+
+(defun deployment-head-links (name)
+  "String. What deployment NAME's page carries in its head to install: its
+manifest, its window colour, and the icon and name an iPhone's home screen
+takes; nil for no such deployment."
+  (let ((record (deployment-record name)))
+    (when record
+      (let ((title (gethash "name" (deployment-manifest name record))))
+        (with-lhtml-string ()
+          (:link :rel "manifest" :href (format nil "~a/manifest.webmanifest" (deployment-path name)))
+          (:meta :name "theme-color" :content *deployed-theme-color*)
+          (:meta :name "apple-mobile-web-app-title" :content (escape-string (short-app-name title)))
+          (when (static-file "icons/apple-touch-icon.png")
+            (htm (:link :rel "apple-touch-icon" :href (static-url "icons/apple-touch-icon.png")))))))))
 
 
 (defun worker-text ()

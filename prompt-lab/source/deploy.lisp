@@ -643,7 +643,7 @@ it asks again every few seconds."
      (:html (:head (:meta :charset "utf-8")
                    (:meta :name "viewport" :content "width=device-width, initial-scale=1")
                    (:meta :http-equiv "refresh" :content "4")
-                   (:link :rel "icon" :href "data:,")
+                   (:link :rel "icon" :href *deployed-favicon*)
                    (:title "Confirming your payment"))
             (:body :style "font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5"
                    (:h1 :style "font-size: 1.4rem" "Confirming your payment")
@@ -1318,12 +1318,13 @@ has paid it, and spends a use of the payment."
 (defun deployment-page (title paragraphs &key back (back-label "Back"))
   "A small page for a deployment that cannot open, or a payment that could
 not: TITLE, the PARAGRAPHS, and a way BACK (to the app itself) when
-there is one.  Nothing of the house on it: the deployment is its
-author's (the user's ruling, 2026-10-14)."
+there is one.  Nothing of the house on it but the icon (*deployed-favicon*,
+as on the app's own page): the deployment is its author's (the user's
+ruling, 2026-10-14)."
   (with-lhtml-string ()
     (:html (:head (:meta :charset "utf-8")
                   (:meta :name "viewport" :content "width=device-width, initial-scale=1")
-                  (:link :rel "icon" :href "data:,")
+                  (:link :rel "icon" :href *deployed-favicon*)
                   (:title (esc title)))
            (:body :style "font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5"
                   (:h1 :style "font-size: 1.4rem" (esc title))
@@ -1491,7 +1492,7 @@ its commit, the model file inline, and the model file as a download."
     (with-lhtml-string ()
       (:html (:head (:meta :charset "utf-8")
                     (:meta :name "viewport" :content "width=device-width, initial-scale=1")
-                    (:link :rel "icon" :href "data:,")
+                    (:link :rel "icon" :href *deployed-favicon*)
                     (:title (esc title)))
              (:body :style "font-family: system-ui, sans-serif; max-width: 52rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5"
                     (:h1 :style "font-size: 1.4rem" (esc title))
@@ -1555,6 +1556,9 @@ the same functions as <prefix>/<door>, under the deployment's address
                                                       "A fault in the service's own code can be reported on its issue tracker: github.com/genworks/demos/issues.")
                                                 :back (deployment-url name) :back-label "Back to the page")
                                :type "text/html; charset=utf-8"))
+          ;; the deployment as an installable app (app.lisp)
+          ((equal what "manifest.webmanifest")
+           (deployment-manifest-door req ent name record))
           ;; the deployment's side doors under its own address
           ((and what (assoc what *deployment-doors* :test #'string=))
            (funcall (cdr (assoc what *deployment-doors* :test #'string=)) req ent))
@@ -1866,7 +1870,7 @@ the licensor's reader."
             (with-lhtml-string ()
               (:html (:head (:meta :charset "utf-8")
                             (:meta :name "viewport" :content "width=device-width, initial-scale=1")
-                            (:link :rel "icon" :href "data:,")
+                            (:link :rel "icon" :href *deployed-favicon*)
                             (:title "Hosted applications: the royalty accruing")
                             (:style "body{font-family:system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;line-height:1.45}table{border-collapse:collapse;margin:.5rem 0 1rem}th,td{border-bottom:1px solid #ddd;padding:.3rem .6rem;text-align:right}th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}.muted{color:#666}"))
                      (:body
@@ -2066,7 +2070,7 @@ hosting for it."
      (with-lhtml-string ()
        (:html (:head (:meta :charset "utf-8")
                      (:meta :name "viewport" :content "width=device-width, initial-scale=1")
-                     (:link :rel "icon" :href "data:,")
+                     (:link :rel "icon" :href *deployed-favicon*)
                      (:title (esc (format nil "~a is paused" title))))
               (:body :style "font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5"
                      (:h1 :style "font-size: 1.4rem" (esc (format nil "~a is paused" title)))
