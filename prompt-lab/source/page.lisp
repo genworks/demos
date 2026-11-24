@@ -1289,6 +1289,11 @@ may see the session may open its app; a private session's wants owner=."
     (cond ((not (on-app-origin? req))
            ;; an app is a page a visitor's prompts wrote: never as the lab
            (to-app-origin req ent))
+          ;; a locked lab (a private session's VM) shows its apps to those
+          ;; it admits, as it does every other door of its own
+          ((not (admitted? req))
+           (refuse req ent net.aserve:*response-forbidden*
+                   "This lab is private; unlock it at ~a." *url-prefix*))
           ((or (null session) (not (visible-to? session (query-value req "owner"))))
            (no-such-session req ent))
           ((not (app-defined? session))
