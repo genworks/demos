@@ -111,42 +111,59 @@ hidden edges removed).  The toggle on the pane switches it."
        (:script (str (the busy-overlay-js))))))
 
    ;; Live-on-change UX: while a section-replacing gdlAjax round-trip
-   ;; is in flight, shade the page behind a click-blocking overlay so
-   ;; the next edit waits until this one has propagated.  Quiet
-   ;; background syncs (camera state, container size) never shade.
-   ;; Mechanics: wrap window.gdlAjax to notice non-quiet calls, count
-   ;; in-flight /gdlAjax XHRs, hide when the count drains.
+   ;; is in flight, a click-blocking overlay covers the page so the next
+   ;; edit waits until this one has propagated.  It goes up at once and
+   ;; CLEAR (the guard); only a call still unanswered after 450 ms
+   ;; (shadeMs) shades the page and shows 'Rebuilding...', so a
+   ;; quick edit never makes the page blink and a slow one still says
+   ;; what is happening.  Quiet background syncs (camera state,
+   ;; container size) neither guard nor shade.  Mechanics: wrap
+   ;; window.gdlAjax to notice non-quiet calls, count in-flight /gdlAjax
+   ;; XHRs, drop the overlay when the count drains.
    (busy-overlay-js "
 (function () {
-  var count = 0, overlay = null, nonQuiet = false;
+  var count = 0, overlay = null, pill = null, nonQuiet = false, timer = null;
+  var shadeMs = 450;
   function ensureOverlay () {
     if (overlay) return overlay;
     overlay = document.createElement('div');
     overlay.id = 'demo-busy-overlay';
     overlay.setAttribute('style',
       'position:fixed;inset:0;z-index:9999;display:none;' +
-      'background:rgba(249,250,251,0.55);backdrop-filter:blur(1px);' +
-      'transition:opacity 100ms;opacity:0;');
-    var pill = document.createElement('div');
+      'background:transparent;transition:background-color 100ms;');
+    pill = document.createElement('div');
     pill.setAttribute('style',
       'position:absolute;top:1.25rem;left:50%;transform:translateX(-50%);' +
       'background:#4f46e5;color:#fff;padding:0.4rem 1rem;' +
       'border-radius:9999px;font:500 0.875rem system-ui,sans-serif;' +
-      'box-shadow:0 2px 8px rgba(0,0,0,0.25);');
+      'box-shadow:0 2px 8px rgba(0,0,0,0.25);display:none;');
     pill.textContent = 'Rebuilding\\u2026';
     overlay.appendChild(pill);
     document.body.appendChild(overlay);
     return overlay;
+  }
+  function shade () {
+    timer = null;
+    if (!overlay || overlay.style.display !== 'block') return;
+    overlay.style.background = 'rgba(249,250,251,0.55)';
+    overlay.style.backdropFilter = 'blur(1px)';
+    pill.style.display = 'block';
   }
   function show () {
     var el = ensureOverlay();
     if (document.activeElement && document.activeElement.blur)
       document.activeElement.blur();
     el.style.display = 'block';
-    requestAnimationFrame(function () { el.style.opacity = '1'; });
+    if (!timer) timer = setTimeout(shade, shadeMs);
   }
   function hide () {
-    if (overlay) { overlay.style.opacity = '0'; overlay.style.display = 'none'; }
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (overlay) {
+      overlay.style.display = 'none';
+      overlay.style.background = 'transparent';
+      overlay.style.backdropFilter = 'none';
+      pill.style.display = 'none';
+    }
   }
   var origOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function (method, url) {
