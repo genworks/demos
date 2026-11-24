@@ -1119,6 +1119,20 @@ the model with one panel under it, the inputs or the tree."
    ;; on a phone, and for a deployed model, the inspector holds the inputs alone
    (user-mode?-default (or (the phone?) (stringp (the deployed-name))))
 
+   ;; the calls the page answers: the sluice's public ones; for a deployed
+   ;; model, less the one that turns the inputs-only inspector off, which
+   ;; is its author's to choose, not a visitor's
+   (ajax-callable-functions
+    (let ((public (ignore-errors (symbol-value (find-symbol "*PUBLIC-AJAX-FUNCTIONS*" :sluice)))))
+      (cond ((not (consp public)) :emitted)
+            ((stringp (the deployed-name))
+             (mapcar #'(lambda (entry)
+                         (if (and (consp entry) (eq (first entry) :set-slot!))
+                             (remove :user-mode? entry)
+                             entry))
+                     public))
+            (t public))))
+
    (session-id (cdr (assoc "session" (the query-toplevel) :test #'string-equal)))
 
    ;; ?replay=<id> instead: an archived session's model, compiled again
