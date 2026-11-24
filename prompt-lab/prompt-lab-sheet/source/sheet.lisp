@@ -549,7 +549,7 @@ function carried(){var c=null;try{c=JSON.parse(sessionStorage.getItem('prompt-la
  if(!c||!/[?&]routed=1/.test(location.search))return;var p=document.getElementById('pl-prompt');
  if(p&&c.prompt){p.value=c.prompt;p.dispatchEvent(new Event('input',{bubbles:true}))}
  var k=c.kind&&document.querySelector('input[name=\"pl-kind\"][value=\"'+c.kind+'\"]');
- if(k){k.checked=true;k.dispatchEvent(new Event('change',{bubbles:true}))}
+ if(k&&!k.checked)k.click()
  if(c.reason)setTimeout(function(){if(window.plToast)plToast(c.reason+'  Your prompt came along: press Build.','note')},1500)}
 // (after Datastar has bound the prompt box, which sets it from its signal)
 window.addEventListener('load',function(){setTimeout(carried,1200)});
