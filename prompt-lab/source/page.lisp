@@ -1437,6 +1437,9 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
     (net.aserve:publish :path (door-path "deploy") :server server :host host :function (gated #'deploy-door))
     (net.aserve:publish :path (door-path "undeploy") :server server :host host :function (gated #'undeploy-door))
     (net.aserve:publish :path (door-path "deployments") :server server :host host :function (gated #'deployments-door))
+    ;; the command line's one door (deploy.lisp): its own token is its key,
+    ;; checked at the private front, so it stands outside the lab's lock
+    (net.aserve:publish :path (door-path "cli/deploy") :server server :host host :function #'cli-deploy-door)
     (net.aserve:publish :path (door-path "earnings") :server server :host host :function (gated #'earnings-door))
     ;; the author's Stripe account, through the gate's Connect door (deploy.lisp)
     (net.aserve:publish :path (door-path "connect") :server server :host host :function (gated #'connect-door))

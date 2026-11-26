@@ -709,7 +709,7 @@ not hold."
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
    (datastar-actions (list :build :review :claim :save :continue :topup :topup-full :confirm :privacy :author :author-name :closed-decide :connect-agent :agent-mode :mcp-token-new :wear-skin :shade-desk :upload :adopt
-                           :deploy :undeploy :connect :open-project :push-project :deploy-project))
+                           :deploy :undeploy :cli-token :cli-revoke :connect :open-project :push-project :deploy-project))
 
    ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
    ;; sibling, on this site) whose files this lab is offered (routing.lisp)
@@ -872,7 +872,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (page-upload-caps (getf *upload-caps* (if (the page-paid?) :paid :free)))
 
    (initial-signals
-    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, modelnow: ~a, agentmode: ~a, ownagent: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', tagree: false, termsneed: ~a, dagree: false, private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a, capbytes: ~d, capfiles: ~d, cappages: ~d}"
+    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', cliname: '', clitoken: '', clinote: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, modelnow: ~a, agentmode: ~a, ownagent: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', tagree: false, termsneed: ~a, dagree: false, private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a, capbytes: ~d, capfiles: ~d, cappages: ~d}"
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; and of its last staged hosting (hosting.lisp)
@@ -1426,7 +1426,41 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                            (:button :type "button" :class "pl-download" :|data-show| "$deployed"
                                                     :|data-on:click| (format nil "confirm('Take the deployment down?') && ~a"
                                                                              (the (datastar-action :undeploy :options "{filterSignals: {include: /^(owner)$/}}")))
-                                                    "Take it down"))))))))
+                                                    "Take it down"))
+                                     ;; the command line (prompt-lab/cli/pl-deploy): a token for
+                                     ;; one deployment, made here and shown once (deploy.lisp,
+                                     ;; private.lisp); only where deploys go through a front
+                                     (when *deploy-front*
+                                       (let ((rows (ignore-errors (deployment-records))))
+                                         (when rows
+                                           (htm (:div :class "pl-cli"
+                                                      (:p :class "pl-line"
+                                                          "From the command line: a token lets prompt-lab/cli/pl-deploy save a model file and deploy it as one of these, with no clicks.  It can do nothing else, and it works only while a private session of yours is open.")
+                                                      (dolist (row rows)
+                                                        (let* ((name (gethash "name" row))
+                                                               (state (gethash "cli_token" row))
+                                                               (used (and (hash-table-p state) (gethash "used" state))))
+                                                          (htm (:div :class "pl-row"
+                                                                     (:span :class "pl-line"
+                                                                            (esc (if (hash-table-p state)
+                                                                                     (format nil "~a: a token made ~a~@[, last used ~a~]" name
+                                                                                             (day-key (gethash "made" state)) (and (integerp used) (day-key used)))
+                                                                                     (format nil "~a: no token" name))))
+                                                                     (:button :type "button" :class "pl-download"
+                                                                              :|data-on:click| (format nil "$cliname = ~a, ~a" (js-string-literal name)
+                                                                                                       (the (datastar-action :cli-token :options "{filterSignals: {include: /^(cliname|owner)$/}}")))
+                                                                              "Make a command-line token")
+                                                                     (when (hash-table-p state)
+                                                                       (htm (:button :type "button" :class "pl-download"
+                                                                                     :|data-on:click| (format nil "confirm('Revoke the command-line token of ~a?') && ($cliname = ~a, ~a)"
+                                                                                                              name (js-string-literal name)
+                                                                                                              (the (datastar-action :cli-revoke :options "{filterSignals: {include: /^(cliname|owner)$/}}")))
+                                                                                     "Revoke")))))))
+                                                      (:pre :class "pl-cli-token" :style "display:none;white-space:pre-wrap;word-break:break-all"
+                                                            :|data-show| "$clitoken" :|data-text| "$clitoken")
+                                                      (:p :class "pl-line" :style "display:none" :|data-show| "$clitoken"
+                                                          "Shown once: copy it now into a file only you can read (chmod 600), and name that file in pl-deploy's settings.  Making another replaces it.")
+                                                      (:p :class "pl-line pl-notice" :style "display:none" :|data-show| "$clinote" :|data-text| "$clinote"))))))))))))
 
    ;; The model file's editor, under the panes.  Its card is never
    ;; morphed (data-ignore-morph): CodeMirror builds its own DOM beside
@@ -2659,6 +2693,38 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                        (sheet-send! self (datastar-signals-event
                                           "{\"deployed\": \"\", \"error\": \"\", \"notice\": \"The deployment is taken down.\"}")))
                 (the (tell-error! reason)))))))
+
+   ;; a command-line token for one of the author's deployments (deploy.lisp
+   ;; cli-token-ask!, private.lisp): made at the private front, shown here once
+   (cli-token
+    (signals)
+    (let ((name (gethash "cliname" signals)))
+      (if (not (and (the session) (the owner?)))
+          (the (tell-error! "Only the session's owner may make a command-line token."))
+          (multiple-value-bind (answer status) (cli-token-ask! "make" name)
+            (if (and (eql status 200) answer (stringp (gethash "token" answer)))
+                (sheet-send! self (datastar-signals-event
+                                   (with-output-to-string (s)
+                                     (yason:encode (h "error" "" "clitoken" (gethash "token" answer)
+                                                      "clinote" (format nil "A command-line token for ~a is made; it replaces any it had." name))
+                                                   s))))
+                (the (tell-error! (or (and answer (gethash "error" answer))
+                                      "The private front did not answer; try again in a moment."))))))))
+
+   (cli-revoke
+    (signals)
+    (let ((name (gethash "cliname" signals)))
+      (if (not (and (the session) (the owner?)))
+          (the (tell-error! "Only the session's owner may revoke a command-line token."))
+          (multiple-value-bind (answer status) (cli-token-ask! "revoke" name)
+            (if (eql status 200)
+                (sheet-send! self (datastar-signals-event
+                                   (with-output-to-string (s)
+                                     (yason:encode (h "error" "" "clitoken" ""
+                                                      "clinote" (format nil "The command-line token of ~a is revoked." name))
+                                                   s))))
+                (the (tell-error! (or (and answer (gethash "error" answer))
+                                      "The private front did not answer; try again in a moment."))))))))
 
    (send-files!
     ()

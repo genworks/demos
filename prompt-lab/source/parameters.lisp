@@ -529,6 +529,11 @@ Nil: deployments are kept here (deploy.lisp).")
   "Integer. Private-session requests an address may make at the private
 front (private.lisp) in a UTC day.")
 
+(defparameter *max-cli-refusals-per-address* 30
+  "Integer. Command-line tokens an address may have refused at the private
+front (private.lisp) in a UTC day; past it, every token from there is
+refused until the next day.")
+
 (defparameter *deployed-root*
   (namestring (merge-pathnames "prompt-lab-deployed/"
                                (uiop:pathname-parent-directory-pathname (pathname *workspace-root*))))

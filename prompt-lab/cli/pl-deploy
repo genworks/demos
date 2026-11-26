@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# pl-deploy -- save a model file in your private prompt lab and deploy it,
+# from the command line: what the sheet's Save and Deploy do, with no clicks.
+#
+#   pl-deploy FILE --name NAME [--open] [--title TEXT] [--blurb TEXT]
+#             [--accept-terms] [--no-wait] [--conf FILE]
+#
+# FILE is a web app's model file (a (define-object app ...) in it).  NAME
+# is one of your deployments, and the token must be the one made for it on
+# the sheet (Monetize, "Make a command-line token").  It works through a
+# private session of yours that is open; --open opens one first when none is.
+#
+# Settings, one "key = value" a line, in ~/.config/prompt-lab/cli.conf (or
+# --conf FILE, or $PL_DEPLOY_CONF):
+#
+#   front      = https://lab.example.com/own-lab   the private front's address
+#   token-file = ~/.config/prompt-lab/NAME.token   default: that path, by NAME
+#   wait       = 120                               seconds to wait for it live
+#   connect-to = HOST:PORT:HOST2:PORT2             curl's --connect-to, for a
+#                                                  development host (optional)
+#
+# The token file must be readable by you alone (chmod 600).  The token is
+# never printed, never put on a command line and never in an address: it
+# goes to curl on its standard input, in an Authorization header.
+#
+# Exit: 0 deployed and live; 1 usage; 2 settings or token refused; 3 no
+# open private session; 4 a lab or the front not answering; 5 the file
+# is not a web app or did not compile; 6 the deploy was refused; 7 not
+# seen live in time.
+set -uo pipefail
+
+say() { printf '%-8s %s\n' "$1" "$2"; }
+die() { printf 'pl-deploy: %s\n' "$2" >&2; exit "$1"; }
+
+FILE=""; NAME=""; OPEN=0; TITLE=""; BLURB=""; ACCEPT=0; WAITLIVE=1; CONF=${PL_DEPLOY_CONF:-$HOME/.config/prompt-lab/cli.conf}
+while [ $# -gt 0 ]; do
+  case $1 in
+    --name) NAME=${2:-}; shift 2 ;;
+    --open) OPEN=1; shift ;;
+    --title) TITLE=${2:-}; shift 2 ;;
+    --blurb) BLURB=${2:-}; shift 2 ;;
+    --accept-terms) ACCEPT=1; shift ;;
+    --no-wait) WAITLIVE=0; shift ;;
+    --conf) CONF=${2:-}; shift 2 ;;
+    -h|--help) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) die 1 "unknown option $1 (see --help)" ;;
+    *) [ -z "$FILE" ] && FILE=$1 || die 1 "one file at a time"; shift ;;
+  esac
+done
+[ -n "$FILE" ] && [ -n "$NAME" ] || die 1 "usage: pl-deploy FILE --name NAME [--open] (see --help)"
+[[ $NAME =~ ^[a-z][a-z0-9-]{2,39}$ ]] || die 1 "a deployment's name is 3 to 40 lower-case letters, digits and hyphens, a letter first"
+
+# --- settings ---------------------------------------------------------------
+FRONT=""; TOKEN_FILE=""; LIVE_WAIT=120; CONNECT_TO=""
+[ -r "$CONF" ] || die 2 "no settings at $CONF (see --help)"
+while IFS= read -r line; do
+  line=${line%%#*}; [[ $line =~ ^[[:space:]]*([a-z-]+)[[:space:]]*=[[:space:]]*(.*[^[:space:]])[[:space:]]*$ ]] || continue
+  case ${BASH_REMATCH[1]} in
+    front) FRONT=${BASH_REMATCH[2]%/} ;;
+    token-file) TOKEN_FILE=${BASH_REMATCH[2]/#\~/$HOME} ;;
+    wait) LIVE_WAIT=${BASH_REMATCH[2]} ;;
+    connect-to) CONNECT_TO=${BASH_REMATCH[2]} ;;
+  esac
+done < "$CONF"
+[ -n "$FRONT" ] || die 2 "the settings name no front (front = https://.../own-lab)"
+TOKEN_FILE=${TOKEN_FILE:-$HOME/.config/prompt-lab/$NAME.token}
+[ -r "$TOKEN_FILE" ] || die 2 "no token file at $TOKEN_FILE: make a token on the sheet (Monetize) and keep it there"
+case $(stat -c %a "$TOKEN_FILE" 2>/dev/null || stat -f %Lp "$TOKEN_FILE") in
+  600|400) ;;
+  *) die 2 "$TOKEN_FILE may be read by others: chmod 600 it first" ;;
+esac
+TOKEN=$(tr -d ' \t\r\n' < "$TOKEN_FILE")
+[[ $TOKEN =~ ^pltok_[0-9a-f]{32}$ ]] || die 2 "$TOKEN_FILE does not hold a command-line token (pltok_...)"
+
+# --- the file ---------------------------------------------------------------
+[ -r "$FILE" ] || die 1 "cannot read $FILE"
+BYTES=$(wc -c < "$FILE" | tr -d ' ')
+[ "$BYTES" -gt 0 ] && [ "$BYTES" -le 3000000 ] || die 5 "$FILE is empty or over 3 MB"
+LC_ALL=C grep -q "$(printf '[\001-\010\013\014\016-\037]')" "$FILE" && die 5 "$FILE holds control characters: it is not a model file"
+grep -Eqi '\(define-object[[:space:]]+app([[:space:]]|\(|$)' "$FILE" || die 5 "not a web app: no (define-object app ...) in $FILE"
+grep -Eqi '^[[:space:]]*\(in-package' "$FILE" && die 5 "$FILE has an in-package form: the lab writes its own; take it out"
+LINES=$(wc -l < "$FILE" | tr -d ' '); [ "$(tail -c1 "$FILE" | od -An -c | tr -d ' ')" = '\n' ] || LINES=$((LINES + 1))
+SHA=$(sha256sum "$FILE" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$FILE" | cut -d' ' -f1)
+say file "$(basename "$FILE")  $BYTES bytes  $LINES lines  sha256 $SHA"
+
+# --- talking to the front and the lab -----------------------------------------
+TMP=$(mktemp -d); chmod 700 "$TMP"; trap 'rm -rf "$TMP"' EXIT
+CODE=0
+call() { # METHOD URL [BODY-FILE] -> the answer in $TMP/out, its status in $CODE
+  # (the token goes to the front and the lab only; PUBLIC=1 sends none)
+  CODE=$({ [ "${PUBLIC:-0}" = 1 ] || printf 'header = "Authorization: Bearer %s"\n' "$TOKEN"
+           [ -n "$CONNECT_TO" ] && printf 'connect-to = "%s"\n' "$CONNECT_TO"
+           printf 'request = "%s"\nurl = "%s"\n' "$1" "$2"
+           [ -n "${3:-}" ] && printf 'header = "Content-Type: application/json"\ndata-binary = "@%s"\n' "$3"
+         } | curl -sS -m 180 -o "$TMP/out" -w '%{http_code}' -K - 2>"$TMP/err" || true)
+  CODE=${CODE:-000}
+}
+call_retrying() { # as call, again twice 10 s apart while nothing answers
+  local n
+  for n in 1 2 3; do
+    call "$@"
+    case $CODE in 000|502|503|504|520|521|522|523|524) [ $n -lt 3 ] && sleep 10 ;; *) return ;; esac
+  done
+}
+jstr() { # KEY -> the first "KEY":"..." of the answer, unescaped enough to read
+  grep -o "\"$1\":\"\\(\\\\.\\|[^\"\\\\]\\)*\"" "$TMP/out" | head -1 | sed -e "s/^\"$1\":\"//" -e 's/"$//' -e 's/\\n/ /g' -e 's/\\"/"/g' -e 's/\\\\/\\/g'
+}
+jnum() { grep -o "\"$1\":[0-9]*" "$TMP/out" | head -1 | cut -d: -f2; }
+json_string() { # FILE -> its text as a JSON string
+  printf '"'
+  sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' -e 's/\r/\\r/g' "$1" | awk 'BEGIN{ORS=""} {if (NR>1) printf "\\n"; print}'
+  [ "$(tail -c1 "$1" | od -An -c | tr -d ' ')" = '\n' ] && printf '\\n'
+  printf '"'
+}
+json_text() { printf '%s' "$1" > "$TMP/t"; json_string "$TMP/t"; }
+not_answering() { die 4 "$1 is not answering (restarting?): nothing was changed; try again in a minute"; }
+
+# --- 1. the private session ---------------------------------------------------
+call_retrying GET "$FRONT/api/cli/where"
+case $CODE in
+  200) ;;
+  403) die 2 "$(jstr error)" ;;
+  404) if [ $OPEN = 1 ]; then
+         call_retrying POST "$FRONT/api/cli/open"
+         [ "$CODE" = 200 ] || { [ "$CODE" = 000 ] && not_answering "the private front"; die 3 "$(jstr error)"; }
+         say lab "opening a private session for you (about a minute)..."
+       else die 3 "$(jstr error)"; fi ;;
+  000|5*) not_answering "the private front" ;;
+  *) die 3 "the private front answered $CODE: $(jstr error)" ;;
+esac
+LAB=$(jstr url); STATE=$(jstr state); ID=$(jstr id)
+for i in $(seq 1 60); do
+  [ "$STATE" = up ] && break
+  [ "$STATE" = failed ] || [ "$STATE" = ended ] && die 3 "your private session $ID $STATE"
+  sleep 5; call GET "$FRONT/api/cli/where"; [ "$CODE" = 200 ] && STATE=$(jstr state)
+done
+[ "$STATE" = up ] || die 3 "your private session $ID is not up after 5 minutes"
+say lab "$ID (up)"
+
+# --- 2. save and deploy -----------------------------------------------------------
+{ printf '{"name":"%s","source":' "$NAME"; json_string "$FILE"
+  [ -n "$TITLE" ] && { printf ',"title":'; json_text "$TITLE"; }
+  [ -n "$BLURB" ] && { printf ',"blurb":'; json_text "$BLURB"; }
+  [ $ACCEPT = 1 ] && printf ',"accept_terms":true'
+  printf '}'; } > "$TMP/body"
+call_retrying POST "$LAB/api/cli/deploy" "$TMP/body"
+case $CODE in
+  000|502|503|504|52?) not_answering "your private session's lab" ;;
+  404) grep -q '"error"' "$TMP/out" && die 6 "$(jstr error)"
+       die 6 "this private session's lab has no command-line door (it is older than this tool): open a new private session and try again" ;;
+  401|403) die 2 "$(jstr error)" ;;
+esac
+if grep -q '"sha256"' "$TMP/out"; then
+  SAVED_SHA=$(jstr sha256)
+  say saved "$(jnum bytes) bytes  $(jnum lines) lines  sha256 $SAVED_SHA  $([ "$SAVED_SHA" = "$SHA" ] && echo MATCHES || echo DIFFERS)  as a $(jstr kind | sed 's/^app$/web app/')  session $(jstr session)"
+  say ""  "$(jstr text)"
+fi
+[ "$CODE" = 200 ] || die $([ -n "${SAVED_SHA:-}" ] && grep -q 'compile' "$TMP/out" && echo 5 || echo 6) "$(jstr error)"
+URL=$(jstr url); REPLACED=$(grep -o '"replaced":[a-z]*' "$TMP/out" | cut -d: -f2)
+say deploy "$NAME -> $URL  $([ "$REPLACED" = true ] && echo replaced || echo new)"
+
+# --- 3. live ------------------------------------------------------------------------
+[ $WAITLIVE = 1 ] || exit 0
+START=$(date +%s); SOURCE="${URL%/}/prompt-lab/d/$NAME/source?download=model"
+PUBLIC=1
+while :; do
+  call GET "$SOURCE"
+  if [ "$CODE" = 200 ]; then
+    # the download is two comment lines and a blank line, then the model file as kept
+    LIVE_SHA=$(tail -n +4 "$TMP/out" | sha256sum 2>/dev/null | cut -d' ' -f1 || tail -n +4 "$TMP/out" | shasum -a 256 | cut -d' ' -f1)
+    if [ "$LIVE_SHA" = "${SAVED_SHA:-$SHA}" ]; then
+      say live "the deployment serves sha256 $LIVE_SHA after $(( $(date +%s) - START )) s"; exit 0
+    fi
+  elif [ "$CODE" = 404 ] && grep -qi 'closed' "$TMP/out"; then
+    call GET "$URL"
+    case $CODE in 200|302) say live "closed source: $URL answers ($CODE) after $(( $(date +%s) - START )) s; its file is not served to compare"; exit 0 ;; esac
+  fi
+  [ $(( $(date +%s) - START )) -ge "$LIVE_WAIT" ] && die 7 "deployed, but $URL has not shown the new file after $LIVE_WAIT s"
+  sleep 3
+done

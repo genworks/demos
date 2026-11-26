@@ -238,6 +238,8 @@ holds that, never the session that made it)."
   (let ((row (alexandria:copy-hash-table record)))
     (remhash "gate_key" row)
     (setf (gethash "url" row) (private-deployment-url (gethash "name" record)))
+    ;; its command-line token, when one is kept: when made and last used
+    (setf (gethash "cli_token" row) (ignore-errors (cli-token-state (gethash "name" record) (gethash "author" record))))
     row))
 
 (defun private-feed-names ()
@@ -365,6 +367,8 @@ taken down; the books keep what it earned, and the hangar retires its disk."
                  (refuse req ent net.aserve:*response-not-found* "There is no such deployment of yours.")
                  (progn (monocle:delete-deployment! (lab-house) name)
                         (deregister-deployment! name)
+                        ;; its command-line tokens go with it
+                        (ignore-errors (drop-cli-tokens! name wallet))
                         (respond-json req ent (h "ok" t)))))))))))
 
 (defun private-vm-deployments-door (req ent)
@@ -410,6 +414,191 @@ and its status."
                            (403 net.aserve:*response-forbidden*)
                            (404 net.aserve:*response-not-found*)
                            (t net.aserve:*response-service-unavailable*)))))))))
+
+;;
+;; COMMAND-LINE TOKENS.  A token lets a program on the author's own machine
+;; (prompt-lab/cli/pl-deploy) save a model file and deploy it as ONE named
+;; deployment of the author's, through the author's live private session --
+;; and do nothing else: it does not unlock the session, read its work, deploy
+;; another name, take anything down or touch payouts.  The session's sheet
+;; makes one (vm/cli-token, under the session's own credentials), shows it
+;; once, and may revoke it; taking the deployment down drops it.  Only its
+;; SHA-256 is kept here, one line each, in the spool beside the requests
+;; (*private-spool*/cli-tokens.json), so this room adds no file or directory
+;; of its own to the host.
+;;
+;;   <prefix>/api/vm/cli-token    POST {id, token, name, action}: make | revoke
+;;   <prefix>/api/vm/cli-check    POST {id, token, cli_token, name}: may it?
+;;   <prefix>/api/cli/where       GET, Authorization: Bearer: the author's
+;;                                live session's address
+;;   <prefix>/api/cli/open        POST, Bearer: the same, opening one first
+;;
+
+(defparameter *cli-token-prefix* "pltok_"
+  "String.  What every command-line token begins with, so a person can tell
+one from the other keys at a glance.")
+
+(defvar *cli-tokens-lock* (bt:make-lock "prompt-lab cli tokens"))
+
+(defun cli-tokens-file ()
+  (and *private-spool* (format nil "~a/cli-tokens.json" (string-right-trim "/" *private-spool*))))
+
+(defun cli-tokens ()
+  "The kept tokens: hash tables {hash, name, author, made, used}."
+  (let* ((file (cli-tokens-file))
+         (json (and file (probe-file file)
+                    (ignore-errors (with-open-file (in file :external-format :utf-8) (yason:parse in))))))
+    ;; yason reads a JSON array as a list unless told otherwise
+    (remove-if-not #'hash-table-p (cond ((listp json) json) ((vectorp json) (coerce json 'list))))))
+
+(defun save-cli-tokens! (tokens)
+  "Write TOKENS whole, to a file beside and then in place of the old one."
+  (let* ((file (cli-tokens-file))
+         (tmp (format nil "~a.new" file)))
+    (with-open-file (out tmp :direction :output :if-exists :supersede :if-does-not-exist :create
+                             :external-format :utf-8)
+      (write-string (encode (coerce tokens 'vector)) out))
+    (uiop:rename-file-overwriting-target tmp file)
+    tokens))
+
+(defun cli-token-hash (token)
+  (and (stringp token) (watch-sha256-hex token)))
+
+(defun cli-token-entry (token)
+  "The kept entry of TOKEN, or nil."
+  (let ((hash (cli-token-hash token)))
+    (and hash (find hash (cli-tokens) :key #'(lambda (e) (gethash "hash" e)) :test #'equal))))
+
+(defun make-cli-token! (name author)
+  "A new token for deployment NAME of AUTHOR, in place of any it had.  Value:
+the token itself, which nothing keeps."
+  (let ((token (format nil "~a~a" *cli-token-prefix* (new-owner-key))))
+    (bt:with-lock-held (*cli-tokens-lock*)
+      (save-cli-tokens! (cons (h "hash" (cli-token-hash token) "name" name "author" author
+                                 "made" (get-universal-time) "used" nil)
+                              (remove-if #'(lambda (e) (and (equal (gethash "name" e) name)
+                                                            (equal (gethash "author" e) author)))
+                                         (cli-tokens)))))
+    token))
+
+(defun drop-cli-tokens! (name &optional author)
+  "Forget every token for deployment NAME (of AUTHOR, when given)."
+  (bt:with-lock-held (*cli-tokens-lock*)
+    (let ((tokens (cli-tokens)))
+      (when (find-if #'(lambda (e) (equal (gethash "name" e) name)) tokens)
+        (save-cli-tokens! (remove-if #'(lambda (e) (and (equal (gethash "name" e) name)
+                                                        (or (null author) (equal (gethash "author" e) author))))
+                                     tokens))))))
+
+(defun note-cli-token-used! (hash)
+  (bt:with-lock-held (*cli-tokens-lock*)
+    (let ((tokens (cli-tokens)))
+      (dolist (e tokens) (when (equal (gethash "hash" e) hash) (setf (gethash "used" e) (get-universal-time))))
+      (save-cli-tokens! tokens))))
+
+(defun cli-token-state (name author)
+  "What the sheet shows of deployment NAME's token: {made, used}, or nil."
+  (let ((e (find-if #'(lambda (e) (and (equal (gethash "name" e) name) (equal (gethash "author" e) author)))
+                    (cli-tokens))))
+    (and e (h "made" (gethash "made" e) "used" (gethash "used" e)))))
+
+(defun request-bearer (req)
+  "The token of an Authorization: Bearer header, never one in the address."
+  (let ((auth (net.aserve:header-slot-value req :authorization)))
+    (and (stringp auth) (> (length auth) 7) (string-equal "Bearer " auth :end2 7)
+         (let ((token (string-trim " " (subseq auth 7)))) (and (plusp (length token)) token)))))
+
+(defun cli-refusals-over? (req)
+  "True when this address has been refused tokens too often today."
+  (address-over-limit? (client-address req) :cli-refusals))
+
+(defun refuse-cli-token (req ent)
+  (count-address! (client-address req) :cli-refusals)
+  (refuse req ent net.aserve:*response-forbidden*
+          "That token is not valid here: it may have been revoked, or its deployment taken down.  Make a new one on the sheet."))
+
+(defun private-vm-cli-token-door (req ent)
+  "POST <prefix>/api/vm/cli-token {id, token, name, action}: the live
+session's author makes (action make) or revokes (action revoke) the
+command-line token of their deployment NAME."
+  (let* ((json (request-json req))
+         (request (private-session-request json))
+         (wallet (and request (gethash "wallet" request)))
+         (name (and json (gethash "name" json)))
+         (action (and json (gethash "action" json))))
+    (cond
+      ((not (private-deploys?)) (refuse req ent net.aserve:*response-not-found* "No private deployments here."))
+      ((null request) (refuse req ent net.aserve:*response-forbidden* "No such session."))
+      ((not (and (deployment-name? name)
+                 (with-private-house
+                   (let ((record (deployment-record name)))
+                     (and record (equal (gethash "author" record) wallet))))))
+       (refuse req ent net.aserve:*response-not-found* "There is no deployment of yours by that name."))
+      ((equal action "make")
+       (respond-json req ent (h "token" (make-cli-token! name wallet) "name" name)))
+      ((equal action "revoke")
+       (drop-cli-tokens! name wallet)
+       (respond-json req ent (h "ok" t "name" name)))
+      (t (refuse req ent "Say make or revoke.")))))
+
+(defun private-vm-cli-check-door (req ent)
+  "POST <prefix>/api/vm/cli-check {id, token, cli_token, name}: whether
+CLI_TOKEN may deploy NAME from this live session -- its author's token for
+that name, and the deployment still the author's."
+  (let* ((json (request-json req))
+         (request (private-session-request json))
+         (wallet (and request (gethash "wallet" request)))
+         (name (and json (gethash "name" json)))
+         (entry (and json (cli-token-entry (gethash "cli_token" json)))))
+    (cond
+      ((not (private-deploys?)) (refuse req ent net.aserve:*response-not-found* "No private deployments here."))
+      ((null request) (refuse req ent net.aserve:*response-forbidden* "No such session."))
+      ((not (and entry (equal (gethash "name" entry) name) (equal (gethash "author" entry) wallet)
+                 (with-private-house
+                   (let ((record (deployment-record name)))
+                     (and record (equal (gethash "author" record) wallet))))))
+       (refuse req ent net.aserve:*response-forbidden*
+               "That token is not valid for ~a: it may have been revoked, or the deployment taken down.  Make a new one on the sheet." name))
+      (t (note-cli-token-used! (gethash "hash" entry))
+         (respond-json req ent (h "ok" t "name" name))))))
+
+(defun cli-session-answer (request)
+  "What the command line is told of a private session REQUEST: its address
+and state, never its token."
+  (let* ((id (gethash "id" request))
+         (answer (private-answer id)))
+    (h "id" id
+       "url" (private-session-url id)
+       "state" (if answer (gethash "state" answer) "waiting"))))
+
+(defun private-cli-where-door (req ent &key open?)
+  "GET <prefix>/api/cli/where (Bearer): the live private session of the
+token's author.  POST <prefix>/api/cli/open: the same, a new one filed when
+there is none and the author may open one."
+  (let ((entry (and (not (cli-refusals-over? req)) (cli-token-entry (request-bearer req)))))
+    (cond
+      ((not (private-deploys?)) (refuse req ent net.aserve:*response-not-found* "No private deployments here."))
+      ((null entry) (refuse-cli-token req ent))
+      (t
+       (let* ((wallet (gethash "author" entry))
+              (live (private-live-request wallet)))
+         (cond
+           (live (respond-json req ent (cli-session-answer live)))
+           ((not open?)
+            (refuse req ent net.aserve:*response-not-found*
+                    "No private session of yours is open.  Open one on the lab's page, or ask again with --open."))
+           ((address-over-limit? (client-address req) :private-opens)
+            (refuse req ent net.aserve:*response-forbidden* "That is enough requests from this address for today."))
+           (t
+            (multiple-value-bind (ok? reason answer) (private-standing wallet)
+              (if (not ok?)
+                  (refuse req ent net.aserve:*response-forbidden* "~a" reason)
+                  (let ((id (format nil "pl-~a" (subseq (new-owner-key) 0 10))))
+                    (count-address! (client-address req) :private-opens)
+                    (write-private-request! id wallet (new-owner-key)
+                                            :monetize (if (eq (gethash "monetize" answer) t) t :free)
+                                            :standing (gethash "standing" answer))
+                    (respond-json req ent (h "id" id "url" (private-session-url id) "state" "waiting"))))))))))))
 
 (defvar *private-sweeper* nil "The thread that keeps the private root's books.")
 
@@ -513,6 +702,13 @@ given, for that host alone).  Needs *private-spool* and the gate (*messages-url*
     (net.aserve:publish :path (format nil "~a/api/vm/undeploy" *private-prefix*) :server server :function #'private-vm-undeploy-door)
     (net.aserve:publish :path (format nil "~a/api/vm/deployments" *private-prefix*) :server server :function #'private-vm-deployments-door)
     (net.aserve:publish :path (format nil "~a/api/vm/connect" *private-prefix*) :server server :function #'private-vm-connect-door)
+    ;; command-line tokens: made and checked by a session, used from the author's machine
+    (net.aserve:publish :path (format nil "~a/api/vm/cli-token" *private-prefix*) :server server :function #'private-vm-cli-token-door)
+    (net.aserve:publish :path (format nil "~a/api/vm/cli-check" *private-prefix*) :server server :function #'private-vm-cli-check-door)
+    (net.aserve:publish :path (format nil "~a/api/cli/where" *private-prefix*) :server server :host host
+                        :function #'(lambda (req ent) (private-cli-where-door req ent)))
+    (net.aserve:publish :path (format nil "~a/api/cli/open" *private-prefix*) :server server :host host
+                        :function #'(lambda (req ent) (private-cli-where-door req ent :open? t)))
     ;; the house's withdrawal of a private lab's free deployment (deploy.lisp),
     ;; behind the house's token (*house-token-file*)
     (net.aserve:publish :path (format nil "~a/api/house/withdraw" *private-prefix*) :server server :host host

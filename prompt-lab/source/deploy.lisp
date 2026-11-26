@@ -1210,6 +1210,131 @@ the deployment down."
               (respond-json req ent (h "ok" t))
               (refuse req ent "~a" reason))))))
 
+;;
+;; THE COMMAND LINE (prompt-lab/cli/pl-deploy).  In a private session's lab,
+;; which deploys through the private front (*deploy-front*), a model file
+;; from the author's own machine is saved and deployed exactly as the
+;; sheet's Save and Deploy do it -- write-model, then deploy-session! --
+;; under a command-line token the sheet made (private.lisp, COMMAND-LINE
+;; TOKENS), which the front checks for this lab's author and the one
+;; deployment it names.  The door stands outside the lab's own lock: the
+;; token is its key, and it opens nothing but this.
+;;
+;;   <prefix>/api/cli/deploy   POST, Authorization: Bearer <token>,
+;;                             {name, source, title?, blurb?, accept_terms?}
+;;
+
+(defvar *cli-sessions* (make-hash-table :test #'equal)
+  "Deployment name -> the id of the session the command line saves it in,
+for as long as this lab runs.")
+
+(defun defines-app? (source)
+  "Whether SOURCE has a (define-object app ...) in it."
+  (let ((text (string-downcase source))
+        (opener "(define-object"))
+    (loop for start = (search opener text) then (search opener text :start2 (1+ start))
+          while start
+          thereis (let ((i (position-if-not #'(lambda (c) (member c '(#\Space #\Tab #\Newline #\Return)))
+                                            text :start (+ start (length opener)))))
+                    (and i (<= (+ i 3) (length text))
+                         (string= "app" text :start2 i :end2 (+ i 3))
+                         (or (= (+ i 3) (length text))
+                             (member (char text (+ i 3)) '(#\Space #\Tab #\Newline #\Return #\()))
+                         t)))))
+
+(defun text-figures (text)
+  "Values: TEXT's size in UTF-8 bytes, its lines, its SHA-256 (hex)."
+  (values (length (babel:string-to-octets text :encoding :utf-8))
+          (+ (count #\Newline text)
+             (if (and (plusp (length text)) (char/= (char text (1- (length text))) #\Newline)) 1 0))
+          (watch-sha256-hex text)))
+
+(defun cli-session (name address closed?)
+  "The session the command line saves deployment NAME in: the one it had,
+or a new one that builds a web app (closed source when CLOSED?).  Values:
+the session, or nil, the reason and the response."
+  (let* ((id (bt:with-lock-held (*sessions-lock*) (gethash name *cli-sessions*)))
+         (session (and id (find-session id))))
+    (if (and session (eq (session-kind session) :app))
+        session
+        (multiple-value-bind (session reason response) (open-session! address nil :closed? closed?)
+          (when session
+            (set-session-kind! session :app)
+            (log-event session :note "Opened for the command line, to deploy ~a." name)
+            (bt:with-lock-held (*sessions-lock*) (setf (gethash name *cli-sessions*) (session-id session))))
+          (values session reason response)))))
+
+(defun cli-deploy-door (req ent)
+  "POST <prefix>/api/cli/deploy (see THE COMMAND LINE above): the model file
+SOURCE saved and deployed as NAME.  Answers {saved, deployment, replaced} --
+saved being what the lab holds: bytes, lines, sha256, kind and the
+compiler's words -- or {error, saved?}."
+  (let* ((json (request-json req))
+         (token (request-bearer req))
+         (name (and json (gethash "name" json)))
+         (source (and json (gethash "source" json))))
+    (flet ((field (key) (let ((value (and json (gethash key json)))) (and (stringp value) (plusp (length value)) value))))
+      (cond
+        ((null *deploy-front*)
+         (refuse req ent net.aserve:*response-not-found* "This lab takes no deployments from the command line; a private session's lab does."))
+        ((null token)
+         (refuse req ent net.aserve:*response-unauthorized* "Send the command-line token as an Authorization: Bearer header."))
+        ((not (deployment-name? name))
+         (refuse req ent "Name the deployment: 3 to 40 lower-case letters, digits and hyphens, a letter first."))
+        ((not (and (stringp source) (< 0 (length source) 3000000)))
+         (refuse req ent "Send the model file's text, at most 3 MB."))
+        ((not (defines-app? source))
+         (refuse req ent "This file is not a web app: it has no (define-object app ...)."))
+        (t
+         (multiple-value-bind (answer status) (ignore-errors (front-post "cli-check" (h "cli_token" token "name" name)))
+           (if (not (eql status 200))
+               (refuse req ent net.aserve:*response-forbidden* "~a"
+                       (or (and answer (gethash "error" answer)) "The private front did not answer; try again in a moment."))
+               (let* ((existing (deployment-record name))
+                      (closed? (and existing (truthy? (gethash "closed" existing)))))
+                 (multiple-value-bind (session reason response) (cli-session name (client-address req) closed?)
+                   (cond
+                     ((null session) (refuse req ent response "~a" reason))
+                     ;; claimed, as the model door does: an edit in the same session at the same moment waits
+                     ((not (claim! session))
+                      (refuse req ent *response-too-many-requests* "The session this deployment is saved in is busy; try again in a moment."))
+                     (t
+                      (multiple-value-bind (blocks error?)
+                          (unwind-protect (let ((*model-writer* :author)) (write-model (touch session) source))
+                            (setf (session-busy? session) nil))
+                        (let ((text (or (cdr (assoc "text" (first blocks) :test #'string=)) "")))
+                          (log-event session :reload "From the command line: ~a" text)
+                          (save-session! session)
+                          (multiple-value-bind (bytes lines sha) (text-figures (model-body session))
+                            (let ((saved (h "bytes" bytes "lines" lines "sha256" sha
+                                            "kind" (kind-name (session-kind session)) "text" text
+                                            "session" (session-id session))))
+                              (if error?
+                                  (respond-json req ent (h "error" "It did not compile and load as a web app; nothing was deployed." "saved" saved)
+                                                net.aserve:*response-bad-request*)
+                                  (multiple-value-bind (record reason)
+                                      (deploy-session! session :name name
+                                                               :title (or (field "title") (and existing (gethash "title" existing)))
+                                                               :blurb (or (field "blurb") (and existing (gethash "blurb" existing)))
+                                                               :payee (and existing (gethash "payee" existing))
+                                                               :pot-percent (and existing (gethash "pot_percent" existing))
+                                                               :balance? (and existing (truthy? (gethash "balance" existing)))
+                                                               :accepted (eq (gethash "accept_terms" json) t))
+                                    (cond
+                                      (record
+                                       (accept-terms! :deploy :session session :address (client-address req) :via "command line")
+                                       (log-event session :note "Deployed as ~a from the command line." name)
+                                       (respond-json req ent (h "saved" saved "deployment" (deployment-state record :owner? t)
+                                                                "replaced" (if existing t 'yason:false))))
+                                      (t (respond-json req ent (h "error" reason "saved" saved) net.aserve:*response-bad-request*))))))))))))))))))))
+
+(defun cli-token-ask! (action name)
+  "Ask the private front to make (ACTION \"make\") or revoke (\"revoke\") the
+command-line token of deployment NAME.  Values: the answer and the status."
+  (if *deploy-front*
+      (ignore-errors (front-post "cli-token" (h "action" action "name" name)))
+      (values nil nil)))
+
 (defun deployments-door (req ent)
   "GET <prefix>/api/deployments: what is deployed on this engine, the
 newest first."
