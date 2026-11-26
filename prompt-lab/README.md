@@ -209,6 +209,57 @@ one stands); `POST <prefix>/api/undeploy` with `{"name": ...}`; `GET
 <prefix>/api/deployments` lists them.  `*deployments?*` nil shuts all
 of it.
 
+## Deploying from the command line
+
+An author with a private lab can update a deployed web app from their
+own machine, with no clicks: `cli/pl-deploy` saves a model file in an
+open private session of theirs and deploys it, exactly as the sheet's
+Save and Deploy do.
+
+    pl-deploy app.lisp --name my-app          # through the private session that is open
+    pl-deploy app.lisp --name my-app --open   # open one first when none is
+
+It works under a **command-line token**, made on the sheet: Monetize,
+then "Make a command-line token" beside the deployment.  The token is
+shown once; keep it in a file only you can read (`chmod 600`).  It may
+save and deploy that one deployment, find your open private session,
+and (with `--open`) open one for you.  It cannot read your sessions,
+deploy another name, take anything down or touch payouts.  Making
+another replaces it; "Revoke" ends it; taking the deployment down ends
+it too.  The private front keeps only its SHA-256.
+
+The settings, in `~/.config/prompt-lab/cli.conf`:
+
+    front      = https://<your private front>/own-lab
+    token-file = ~/.config/prompt-lab/my-app.token
+
+`pl-deploy --help` lists the rest.  It needs bash and curl, nothing
+else.  The token goes to curl on its standard input, never on a command
+line or in an address.  What it prints can be checked against your
+file:
+
+    file     app.lisp  84135 bytes  1712 lines  sha256 81d4...
+    lab      pl-0123456789 (up)
+    saved    84136 bytes  1713 lines  sha256 5e0c...  MATCHES the file (and the newline the lab ends it with)
+             as a web app, session brave-chamfer-63: Compiled and loaded.
+    deploy   my-app -> https://my-app.example/  replaced
+    live     the deployment serves sha256 5e0c... after 9 s
+
+`saved` is what the lab holds, counted by the lab; `live` is the
+deployment's own source download, asked until it serves that text.  A
+closed-source deployment serves no source, so for one `live` reports
+the app answering instead.  It refuses, with one line and its own exit
+code, a token file others may read, a file that is not a web app, no
+open private session (without `--open`), a lab or front that is not
+answering, a file that does not compile, a token not valid for the
+name, and a private session older than the command (open a new one).
+
+The doors behind it: the private front's `<prefix>/api/cli/where` and
+`<prefix>/api/cli/open` (the token as an `Authorization: Bearer`
+header), and the session's `<prefix>/api/cli/deploy`, which asks the
+front whether the token may deploy that name for that session's author
+before it saves anything.  `test/cli-checks.lisp` checks them.
+
 ## Building from a drawing: uploaded files
 
 A visitor may hand the agent files to build from: a 2D drawing as a

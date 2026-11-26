@@ -80,7 +80,10 @@ LC_ALL=C grep -q "$(printf '[\001-\010\013\014\016-\037]')" "$FILE" && die 5 "$F
 grep -Eqi '\(define-object[[:space:]]+app([[:space:]]|\(|$)' "$FILE" || die 5 "not a web app: no (define-object app ...) in $FILE"
 grep -Eqi '^[[:space:]]*\(in-package' "$FILE" && die 5 "$FILE has an in-package form: the lab writes its own; take it out"
 LINES=$(wc -l < "$FILE" | tr -d ' '); [ "$(tail -c1 "$FILE" | od -An -c | tr -d ' ')" = '\n' ] || LINES=$((LINES + 1))
-SHA=$(sha256sum "$FILE" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$FILE" | cut -d' ' -f1)
+sha() { sha256sum 2>/dev/null | cut -d' ' -f1 || shasum -a 256 | cut -d' ' -f1; }
+SHA=$(sha < "$FILE")
+# the lab writes the file with one newline after it, as its own Save does
+SHA_NL=$({ cat "$FILE"; printf '\n'; } | sha)
 say file "$(basename "$FILE")  $BYTES bytes  $LINES lines  sha256 $SHA"
 
 # --- talking to the front and the lab -----------------------------------------
@@ -152,8 +155,13 @@ case $CODE in
 esac
 if grep -q '"sha256"' "$TMP/out"; then
   SAVED_SHA=$(jstr sha256)
-  say saved "$(jnum bytes) bytes  $(jnum lines) lines  sha256 $SAVED_SHA  $([ "$SAVED_SHA" = "$SHA" ] && echo MATCHES || echo DIFFERS)  as a $(jstr kind | sed 's/^app$/web app/')  session $(jstr session)"
-  say ""  "$(jstr text)"
+  case $SAVED_SHA in
+    "$SHA") SAME="MATCHES the file" ;;
+    "$SHA_NL") SAME="MATCHES the file (and the newline the lab ends it with)" ;;
+    *) SAME="DIFFERS from the file" ;;
+  esac
+  say saved "$(jnum bytes) bytes  $(jnum lines) lines  sha256 $SAVED_SHA  $SAME"
+  say ""  "as a $(jstr kind | sed 's/^app$/web app/'), session $(jstr session): $(jstr text)"
 fi
 [ "$CODE" = 200 ] || die $([ -n "${SAVED_SHA:-}" ] && grep -q 'compile' "$TMP/out" && echo 5 || echo 6) "$(jstr error)"
 URL=$(jstr url); REPLACED=$(grep -o '"replaced":[a-z]*' "$TMP/out" | cut -d: -f2)
