@@ -407,6 +407,34 @@ cannot interrupt that wait) the tool is withheld and the agent works
 from check_model's numbers -- the visitor has the live viewer anyway.")
 
 ;;
+;; look_at_page (look.lisp): a web app's page as a visitor's browser shows
+;; it, looked at by weblook-server in a room of its own.
+;;
+
+(defparameter *glass-url* nil
+  "String or nil.  Where weblook-server takes a look, e.g.
+\"http://glass-room:7090/look\".  Nil: no browser, and the agent is not
+offered look_at_page.")
+
+(defparameter *glass-lab-base* nil
+  "String or nil.  This lab as the browser reaches it -- the scheme and host
+in front of *url-prefix*, e.g. \"http://proxy\" -- which must be an origin
+the server is allowed to look at.  Where *app-origin* is set, the apps'
+origin, mapped by the server to the proxy.")
+
+(defparameter *glass-endpoint-function* nil
+  "Function or nil.  Called with a session, it returns the glass URL and
+the lab base for that session's looks (two values), or nil for none: a
+session with a browser of its own.  Nil: *glass-url* and *glass-lab-base*
+for every session.")
+
+(defparameter *look-seconds* 60
+  "Integer. How long the lab waits for one look, queueing included.")
+
+(defparameter *max-looks-per-hour* 20
+  "Integer. The most looks one session may take in an hour.")
+
+;;
 ;; Monetize: what a session built, deployed for others to use (deploy.lisp).
 ;;
 

@@ -905,6 +905,9 @@ SESSION.  Values: content blocks, and true on failure."
            (check-model session :expected-size (when size (coerce size 'list)))))
         ;; the web app's page (kinds.lisp)
         ((string= name "check_app") (check-app session))
+        ;; ... and as a browser shows it (look.lisp)
+        ((string= name "look_at_page")
+         (look-at-page session :width (input "width" input) :click (input "click" input)))
         ((and (string= name "render") (not (render-offered?)))
          (values (list (text-result "There is no render on this host; judge the model by check_model's numbers.")) t))
         ((string= name "render")
@@ -983,6 +986,9 @@ and check_app only for a SESSION that builds a web app (kinds.lisp)."
                                 :test #'string=)))
       (unless (and session (eq (session-kind session) :app))
         (setq tools (without "check_app" tools)))
+      ;; a web app's session with a browser to look through (look.lisp)
+      (when (look-offered? session)
+        (setq tools (concatenate 'vector tools (list (look-page-tool-definition)))))
       ;; a project session works on its files and builds nothing here;
       ;; any other has no project (project.lisp)
       (if (and session (eq (session-kind session) :project))
@@ -2344,45 +2350,53 @@ that has one."
                                       (reverse (coerce content 'list)))))
                    (when text (return (gethash "text" text))))))))))
 
+(defun viewer-words (session blocks question)
+  "Have *house-viewer-model* look at BLOCKS (image content blocks) and
+answer QUESTION.  The call is the session's: it names the session's wallet
+as the builder's calls do, its tokens join the session's usage and what
+the gate says of money is kept (it was outside all three: a hosted
+viewer's tokens read as nothing, and its calls fell to whoever pays for a
+session with no wallet).  Values: the viewer's words, or why there are
+none and true."
+  (handler-case
+      (let ((body (encode (h "model" *house-viewer-model* "max_tokens" 1024
+                             "messages" (list (h "role" "user"
+                                                 "content" (append (mapcar #'->json blocks)
+                                                                   (list (h "type" "text" "text" question)))))))))
+        (multiple-value-bind (status text headers)
+            ;; read at run time: *messages-url* is agent.lisp's, which loads after this file
+            (post-json (symbol-value '*messages-url*) body
+                       :headers (append (list (cons "anthropic-version" "2023-06-01")
+                                              (cons *session-header* (session-id session)))
+                                        (when (session-wallet session)
+                                          (list (cons *wallet-header* (session-wallet session)))))
+                       :seconds 180)
+          (let ((json (ignore-errors (yason:parse text))))
+            ;; the session's accounts, as for a builder's call (agent.lisp)
+            (note-gate-answer session headers)
+            (when (hash-table-p json)
+              (let ((usage (gethash "usage" json)))
+                (when (hash-table-p usage) (add-usage session usage))))
+            (if (and (eql status 200) (hash-table-p json))
+                (format nil "~{~a~}"
+                        (loop for block in (coerce (gethash "content" json) 'list)
+                              when (and (hash-table-p block) (equal (gethash "type" block) "text"))
+                                collect (gethash "text" block)))
+                (values (format nil "the viewer did not answer (~a)" status) t)))))
+    (serious-condition (condition)
+      (values (format nil "the viewer could not be asked: ~a" condition) t))))
+
 (defun look-at-model (session)
   "Render SESSION's model and have *house-viewer-model* describe the
-drawing against the request; answer its words.  The call is the session's:
-it names the session's wallet as the builder's calls do, its tokens join
-the session's usage and what the gate says of money is kept (it was outside
-all three: a hosted viewer's tokens read as nothing, and its calls fell to
-whoever pays for a session with no wallet)."
+drawing against the request; answer its words."
   (multiple-value-bind (blocks error?) (render session :layout "isometric-plus-ortho")
     (if error?
         (values blocks t)
-        (handler-case
-            (let ((body (encode (h "model" *house-viewer-model* "max_tokens" 1024
-                                   "messages" (list (h "role" "user"
-                                                       "content" (list (->json (first blocks))
-                                                                       (h "type" "text"
-                                                                          "text" (format nil *look-question* (latest-request session))))))))))
-              (multiple-value-bind (status text headers)
-                  ;; read at run time: *messages-url* is agent.lisp's, which loads after this file
-                  (post-json (symbol-value '*messages-url*) body
-                             :headers (append (list (cons "anthropic-version" "2023-06-01")
-                                                    (cons *session-header* (session-id session)))
-                                              (when (session-wallet session)
-                                                (list (cons *wallet-header* (session-wallet session)))))
-                             :seconds 180)
-                (let ((json (ignore-errors (yason:parse text))))
-                  ;; the session's accounts, as for a builder's call (agent.lisp)
-                  (note-gate-answer session headers)
-                  (when (hash-table-p json)
-                    (let ((usage (gethash "usage" json)))
-                      (when (hash-table-p usage) (add-usage session usage))))
-                  (if (and (eql status 200) (hash-table-p json))
-                      (values (list (text-result "What a viewer sees in a drawing of your model:~%~{~a~}"
-                                                 (loop for block in (coerce (gethash "content" json) 'list)
-                                                       when (and (hash-table-p block) (equal (gethash "type" block) "text"))
-                                                         collect (gethash "text" block))))
-                              nil)
-                      (values (list (text-result "The viewer did not answer (~a); judge by check_model and view_model." status)) t)))))
-          (serious-condition (condition)
-            (values (list (text-result "The viewer could not be asked: ~a" condition)) t))))))
+        (multiple-value-bind (said failed?)
+            (viewer-words session (list (first blocks)) (format nil *look-question* (latest-request session)))
+          (if failed?
+              (values (list (text-result "~@(~a~); judge by check_model and view_model." said)) t)
+              (values (list (text-result "What a viewer sees in a drawing of your model:~%~a" said)) nil))))))
 
 (defun look-tool-definition ()
   `(("name" . "look_at_model")

@@ -1294,7 +1294,9 @@ may see the session may open its app; a private session's wants owner=."
           ((not (admitted? req))
            (refuse req ent net.aserve:*response-forbidden*
                    "This lab is private; unlock it at ~a." *url-prefix*))
-          ((or (null session) (not (visible-to? session (query-value req "owner"))))
+          ;; a look's browser carries a look token in place of the key (look.lisp)
+          ((or (null session) (not (visible-to? session (or (query-value req "owner")
+                                                            (look-token-key session (query-value req "look"))))))
            (no-such-session req ent))
           ((not (app-defined? session))
            (refuse req ent "No web app has been built in this session yet."))

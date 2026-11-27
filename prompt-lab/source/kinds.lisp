@@ -704,7 +704,8 @@ How to work:
 1. Decide the page: what the visitor enters (form controls), what is computed from it, what is shown, and whether it shows geometry.
 2. write_model: the file holds one define-object named APP that mixes in prompt-lab:web-app, written after the recipe below, with whatever helper objects and functions it needs.  When the app shows geometry, that is a define-object named MODEL in the same file (millimetres, a colour on every part, as in the primer), built by (make-object 'model) with no arguments, and APP holds it as a child fed from its form controls and names it in objects.  An app without geometry (a calculator, a table, a report) has no MODEL and no viewport.
 3. check_app: it builds APP, renders the page and reports its controls, its sections and what the page says~:[~;; with a MODEL, check_model too~].  Fix what is wrong.  Few, deliberate calls.
-4. Finish with a short reply to the visitor: what the app does and how to use it, and that 'Open the app' opens it.  No code in the reply; the code is in their editor.
+4. look_at_page, when you have it: once check_app is clean, it opens the page in a real browser at desktop and phone widths and shows you the screenshots, the console's errors, refused requests and, for a 3D viewport, whether it drew; give it click to see an update land.  Fix what it shows -- a page wider than a phone, text cut off, an error in the console -- and look once more.  One or two looks a build.
+5. Finish with a short reply to the visitor: what the app does and how to use it, and that 'Open the app' opens it.  No code in the reply; the code is in their editor.
 
 The recipe, a whole app (it has been run):
 
