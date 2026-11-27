@@ -490,10 +490,25 @@ viewer's does."
     "define-format" "define-lens" "define-condition" "define-compiler-macro" "defsetf")
   "List of strings. The operators whose second element names what is defined.")
 
+(defun own-symbol? (symbol package)
+  "True when SYMBOL is a non-keyword symbol of PACKAGE's own."
+  (and symbol (symbolp symbol) (not (keywordp symbol)) (eq (symbol-package symbol) package)))
+
+(defun method-on-own-class? (form package)
+  "True when the defmethod FORM specializes a required parameter on a class
+whose name is PACKAGE's own: the method then runs only for that source's own
+objects, whatever generic function it joins."
+  (let ((lambda-list (find-if #'listp (cddr form))))   ; qualifiers are atoms
+    (loop for param in lambda-list
+          until (member param lambda-list-keywords)
+          thereis (and (consp param) (own-symbol? (second param) package)))))
+
 (defun foreign-definitions (session source)
   "The names SOURCE would define that are not the session package's own: a
 list of strings, nil when there are none or SOURCE cannot be read (the
-compiler says why)."
+compiler says why).  A lens counts by its type, not its format; a method on
+a generic function that already exists is the source's own when it is
+specialized on a class of the source's own."
   (let ((*package* (session-package session))
         (*read-eval* nil)
         (found nil))
@@ -503,14 +518,26 @@ compiler says why)."
              until (eq form in)
              do (when (and (consp form) (symbolp (first form)) (consp (rest form))
                            (member (symbol-name (first form)) *defining-forms* :test #'string-equal))
-                  (let* ((name (second form))
-                         (symbol (cond ((symbolp name) name)
+                  (let* ((op (symbol-name (first form)))
+                         (name (second form))
+                         (symbol (cond ;; (define-lens (FORMAT TYPE) ...) defines TYPE's view
+                                       ;; in FORMAT: the type must be the source's own
+                                       ((and (string-equal op "define-lens") (consp name) (consp (rest name)))
+                                        (second name))
+                                       ((symbolp name) name)
                                        ;; (setf name), and defstruct's (name options...)
                                        ((and (consp name) (eq (first name) 'setf) (symbolp (second name)))
                                         (second name))
                                        ((and (consp name) (symbolp (first name))) (first name)))))
                     (when (and symbol (not (keywordp symbol))
-                               (not (eq (symbol-package symbol) *package*)))
+                               (not (eq (symbol-package symbol) *package*))
+                               ;; a method for the source's own class on a generic that
+                               ;; exists: it joins the generic and never replaces a function
+                               (not (and (string-equal op "defmethod")
+                                         (let ((fname (if (consp name) name symbol)))
+                                           (and (fboundp fname)
+                                                (typep (fdefinition fname) 'generic-function)))
+                                         (method-on-own-class? form *package*))))
                       (pushnew (format nil "~(~a~)" symbol) found :test #'string=)))))))
     (nreverse found)))
 
