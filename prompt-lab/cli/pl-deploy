@@ -3,12 +3,20 @@
 # from the command line: what the sheet's Save and Deploy do, with no clicks.
 #
 #   pl-deploy FILE --name NAME [--open] [--title TEXT] [--blurb TEXT]
+#             [--file PATH]... [--files DIR] [--no-files]
 #             [--accept-terms] [--no-wait] [--conf FILE]
 #
 # FILE is a web app's model file (a (define-object app ...) in it).  NAME
 # is one of your deployments, and the token must be the one made for it on
 # the sheet (Monetize, "Make a command-line token").  It works through a
 # private session of yours that is open; --open opens one first when none is.
+#
+# Files the app uses (an image its page shows, read with own-file): --file
+# PATH, as often as wanted, and --files DIR (every file in it) send them
+# first, one a request, and the deployment then holds exactly those;
+# --no-files leaves it none.  With none of the three, the deployment keeps
+# the files it has.  A file the page shows must be named in the app's
+# public-files; each is checked live after the deploy.
 #
 # Settings, one "key = value" a line, in ~/.config/prompt-lab/cli.conf (or
 # --conf FILE, or $PL_DEPLOY_CONF):
@@ -33,16 +41,21 @@ say() { printf '%-8s %s\n' "$1" "$2"; }
 die() { printf 'pl-deploy: %s\n' "$2" >&2; exit "$1"; }
 
 FILE=""; NAME=""; OPEN=0; TITLE=""; BLURB=""; ACCEPT=0; WAITLIVE=1; CONF=${PL_DEPLOY_CONF:-$HOME/.config/prompt-lab/cli.conf}
+ASSETS=(); FILES_MODE=keep
 while [ $# -gt 0 ]; do
   case $1 in
     --name) NAME=${2:-}; shift 2 ;;
     --open) OPEN=1; shift ;;
     --title) TITLE=${2:-}; shift 2 ;;
     --blurb) BLURB=${2:-}; shift 2 ;;
+    --file) [ -n "${2:-}" ] || die 1 "--file wants a path"; ASSETS+=("$2"); FILES_MODE=set; shift 2 ;;
+    --files) [ -d "${2:-}" ] || die 1 "--files wants a directory"
+             for f in "$2"/*; do [ -f "$f" ] && ASSETS+=("$f"); done; FILES_MODE=set; shift 2 ;;
+    --no-files) FILES_MODE=set; shift ;;
     --accept-terms) ACCEPT=1; shift ;;
     --no-wait) WAITLIVE=0; shift ;;
     --conf) CONF=${2:-}; shift 2 ;;
-    -h|--help) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) die 1 "unknown option $1 (see --help)" ;;
     *) [ -z "$FILE" ] && FILE=$1 || die 1 "one file at a time"; shift ;;
   esac
@@ -85,6 +98,14 @@ SHA=$(sha < "$FILE")
 # the lab writes the file with one newline after it, as its own Save does
 SHA_NL=$({ cat "$FILE"; printf '\n'; } | sha)
 say file "$(basename "$FILE")  $BYTES bytes  $LINES lines  sha256 $SHA"
+ASSET_NAMES=()
+for a in ${ASSETS[@]+"${ASSETS[@]}"}; do
+  [ -r "$a" ] || die 1 "cannot read $a"
+  n=$(basename "$a")
+  [[ $n =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$ ]] || die 1 "$n: a file's name is letters, digits, dot, hyphen and underscore, 80 at most"
+  [ "$(wc -c < "$a" | tr -d ' ')" -le 5000000 ] || die 1 "$n is over 5 MB"
+  ASSET_NAMES+=("$n")
+done
 
 # --- talking to the front and the lab -----------------------------------------
 TMP=$(mktemp -d); chmod 700 "$TMP"; trap 'rm -rf "$TMP"' EXIT
@@ -140,8 +161,23 @@ done
 [ "$STATE" = up ] || die 3 "your private session $ID is not up after 5 minutes"
 say lab "$ID (up)"
 
-# --- 2. save and deploy -----------------------------------------------------------
+# --- 2. the files, one a request, then save and deploy -------------------------------
+for a in ${ASSETS[@]+"${ASSETS[@]}"}; do
+  n=$(basename "$a")
+  { printf '{"name":"%s","file":"%s","data":"' "$NAME" "$n"; base64 < "$a" | tr -d '\n'; printf '"}'; } > "$TMP/fbody"
+  call_retrying POST "$LAB/api/cli/file" "$TMP/fbody"
+  case $CODE in
+    200) say asset "$n  $(jnum bytes) bytes  sha256 $(jstr sha256)" ;;
+    000|502|503|504|52?) not_answering "your private session's lab" ;;
+    404) grep -q '"error"' "$TMP/out" && die 6 "$(jstr error)"
+         die 6 "this private session's lab takes no files from the command line (it is older than this tool): open a new private session and try again" ;;
+    401|403) die 2 "$(jstr error)" ;;
+    *) die 6 "$n: $(jstr error)" ;;
+  esac
+done
 { printf '{"name":"%s","source":' "$NAME"; json_string "$FILE"
+  if [ $FILES_MODE = keep ]; then printf ',"keep_files":true'
+  else printf ',"files":['; s=""; for n in ${ASSET_NAMES[@]+"${ASSET_NAMES[@]}"}; do printf '%s"%s"' "$s" "$n"; s=,; done; printf ']'; fi
   [ -n "$TITLE" ] && { printf ',"title":'; json_text "$TITLE"; }
   [ -n "$BLURB" ] && { printf ',"blurb":'; json_text "$BLURB"; }
   [ $ACCEPT = 1 ] && printf ',"accept_terms":true'
@@ -166,23 +202,55 @@ fi
 [ "$CODE" = 200 ] || die $([ -n "${SAVED_SHA:-}" ] && grep -q 'compile' "$TMP/out" && echo 5 || echo 6) "$(jstr error)"
 URL=$(jstr url); REPLACED=$(grep -o '"replaced":[a-z]*' "$TMP/out" | cut -d: -f2)
 say deploy "$NAME -> $URL  $([ "$REPLACED" = true ] && echo replaced || echo new)"
+[ $FILES_MODE = keep ] && say files "kept as they were" || say files "now ${#ASSET_NAMES[@]}: ${ASSET_NAMES[*]:-none}"
 
 # --- 3. live ------------------------------------------------------------------------
+check_files() { # each file sent, as the deployment serves it to a browser
+  local a n want got
+  for a in ${ASSETS[@]+"${ASSETS[@]}"}; do
+    n=$(basename "$a"); want=$(sha < "$a")
+    call GET "${URL%/}/prompt-lab/d/$NAME/files/$n"
+    if [ "$CODE" = 200 ]; then
+      got=$(sha < "$TMP/out")
+      [ "$got" = "$want" ] && say served "$n  sha256 $got  MATCHES" || say served "$n  sha256 $got  DIFFERS from the file"
+    else
+      say served "$n  not served ($CODE): the app reads it, but its page shows it only if public-files names it"
+    fi
+  done
+}
+files_pending() { # true while a file sent is not yet served as sent: an old copy,
+  # or (for its first FILES_GRACE s) not served at all, while the new VM comes up
+  local a n
+  for a in ${ASSETS[@]+"${ASSETS[@]}"}; do
+    n=$(basename "$a"); call GET "${URL%/}/prompt-lab/d/$NAME/files/$n"
+    if [ "$CODE" = 200 ]; then [ "$(sha < "$TMP/out")" = "$(sha < "$a")" ] || return 0
+    elif [ $(( $(date +%s) - MATCHED )) -lt $FILES_GRACE ]; then return 0; fi
+  done
+  return 1
+}
 [ $WAITLIVE = 1 ] || exit 0
 START=$(date +%s); SOURCE="${URL%/}/prompt-lab/d/$NAME/source?download=model"
-PUBLIC=1
+PUBLIC=1; MATCHED=""; FILES_GRACE=30
 while :; do
   call GET "$SOURCE"
   if [ "$CODE" = 200 ]; then
     # the download is two comment lines and a blank line, then the model file as kept
     LIVE_SHA=$(tail -n +4 "$TMP/out" | sha256sum 2>/dev/null | cut -d' ' -f1 || tail -n +4 "$TMP/out" | shasum -a 256 | cut -d' ' -f1)
     if [ "$LIVE_SHA" = "${SAVED_SHA:-$SHA}" ]; then
-      say live "the deployment serves sha256 $LIVE_SHA after $(( $(date +%s) - START )) s"; exit 0
+      # the model alone may be unchanged: when files were sent, wait for them too
+      [ -n "$MATCHED" ] || MATCHED=$(date +%s)
+      if ! files_pending; then
+        say live "the deployment serves sha256 $LIVE_SHA after $(( $(date +%s) - START )) s"
+        check_files; exit 0
+      fi
     fi
   elif [ "$CODE" = 404 ] && grep -qi 'closed' "$TMP/out"; then
     call GET "$URL"
     case $CODE in 200|302) say live "closed source: $URL answers ($CODE) after $(( $(date +%s) - START )) s; its file is not served to compare"; exit 0 ;; esac
   fi
-  [ $(( $(date +%s) - START )) -ge "$LIVE_WAIT" ] && die 7 "deployed, but $URL has not shown the new file after $LIVE_WAIT s"
+  if [ $(( $(date +%s) - START )) -ge "$LIVE_WAIT" ]; then
+    [ -n "$MATCHED" ] && { check_files; die 7 "deployed, but $URL has not shown the new files after $LIVE_WAIT s"; }
+    die 7 "deployed, but $URL has not shown the new file after $LIVE_WAIT s"
+  fi
   sleep 3
 done

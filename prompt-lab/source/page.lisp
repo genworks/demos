@@ -1442,6 +1442,7 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
     ;; the command line's one door (deploy.lisp): its own token is its key,
     ;; checked at the private front, so it stands outside the lab's lock
     (net.aserve:publish :path (door-path "cli/deploy") :server server :host host :function #'cli-deploy-door)
+    (net.aserve:publish :path (door-path "cli/file") :server server :host host :function #'cli-file-door)
     (net.aserve:publish :path (door-path "earnings") :server server :host host :function (gated #'earnings-door))
     ;; the author's Stripe account, through the gate's Connect door (deploy.lisp)
     (net.aserve:publish :path (door-path "connect") :server server :host host :function (gated #'connect-door))
@@ -1483,6 +1484,9 @@ is behind it -- gated -- and <prefix>/api/unlock is the way in."
     ;; a session's web app and the stylesheet it wears (kinds.lisp)
     (net.aserve:publish :path (format nil "~a/app" *url-prefix*)
                         :server server :host (app-doors-host host) :function #'app-door)
+    ;; and the files it shows a browser while previewed (deploy.lisp, PUBLIC FILES)
+    (net.aserve:publish :path (format nil "~a/app-files" *url-prefix*)
+                        :server server :host (app-doors-host host) :function #'app-files-door)
     (net.aserve:publish-directory :prefix (format nil "~a/app-static/demo/css/" *url-prefix*)
                                   :server server :host (app-doors-host host)
                                   :destination (namestring *demos-css-directory*)))

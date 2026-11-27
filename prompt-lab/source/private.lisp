@@ -337,7 +337,9 @@ private session, into the private deployed root.  Answers {deployment} or
                                                    "balance" (if (eq (gethash "balance" json) t) t 'yason:false)))))
                         (ensure-directories-exist (deployment-directory name))
                         (write-text-file model (merge-pathnames "model.lisp" (deployment-directory name)))
-                        (write-deploy-files! (first files) (merge-pathnames "files/" (deployment-directory name)))
+                        ;; the files, unless the deploy asks the deployment to keep its own
+                        (unless (eq (gethash "keep_files" json) t)
+                          (write-deploy-files! (first files) (merge-pathnames "files/" (deployment-directory name))))
                         (monocle:save-record! (lab-house) record)
                         ;; the terms just written, at the gate: the VM that will serve it cannot steer them
                         (register-deployment! name)

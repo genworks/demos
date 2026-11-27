@@ -191,7 +191,11 @@ again when they buy a pack."
     purse-id nil :settable)
    ("String. The page's icon: the house's (*deployed-favicon*) unless the
 app names its own here."
-    favicon-path *deployed-favicon*))
+    favicon-path *deployed-favicon*)
+   ("List of strings. The uploaded files this page shows a visitor's browser,
+by name: images (PNG, JPEG, GIF, WebP) or plain text, each at the address
+(own-file-url name) gives.  A file not named here is never served."
+    public-files nil))
 
   :computed-slots
   (;; the page takes no classic form posts (gwl's respond-to-forms?; an
@@ -713,6 +717,7 @@ The recipe, a whole app (it has been run):
 
 Rules for the page:
 - A change must show at once: every form control carries :ajax-submit-on-change? t, and there is no submit button.  Read a control with (the <control> value).
+- An uploaded image the page shows (a photo, a texture, a skybox's faces): name the file in APP's public-files input, (public-files (list \"sky-px.jpg\")), and link it as (prompt-lab:own-file-url \"sky-px.jpg\"), which gives its address with ?v= its hash.  Nothing else is served, and nothing from another site.
 - What changes with the inputs lives in a section: a child of type 'base-html-div whose :inner-html is the html, put on the page with (str (the <section> div)).  Html written straight into body is rendered once and never again.
 - The control types: number-form-control (:domain :number, :min :max :step), text-form-control, menu-form-control (:choice-plist or :choice-list, :size 1 for a drop-down), checkbox-form-control, radio-form-control.  describe_object names their inputs.
 - A form never posts by itself here: its fields go by gdlAjax as they change, and Enter in a field submits nothing, so give the page no submit button and do the work when a field's value changes.

@@ -101,14 +101,16 @@ the front does not answer."
                 records)
               (cdr kept))))))
 
-(defun deploy-through-front! (session &key name title blurb payee closed? pot-percent balance? free? accepted)
+(defun deploy-through-front! (session &key name title blurb payee closed? pot-percent balance? free? accepted keep-files?)
   "Hand what SESSION built to the private front as deployment NAME.  The
 front writes the terms itself; this sends the author's choices, the model
 file and ACCEPTED, the texts the author ticked (terms-state), which the
-front logs.  Values: the record the front kept, or nil and the reason."
+front logs.  KEEP-FILES? asks the front to keep the deployment's files as
+they are (keep_files) instead of the session's.  Values: the record the
+front kept, or nil and the reason."
   (multiple-value-bind (answer status)
       (ignore-errors
-       (front-post "deploy" (h "name" name "title" (or title "") "blurb" (or blurb "") "payee" payee
+       (front-post "deploy" (apply #'h "name" name "title" (or title "") "blurb" (or blurb "") "payee" payee
                                "closed" (if closed? t 'yason:false)
                                "pot_percent" (if (realp pot-percent) pot-percent 0)
                                "balance" (if balance? t 'yason:false)
@@ -119,8 +121,11 @@ front logs.  Values: the record the front kept, or nil and the reason."
                                "owner" (session-owner session)
                                "accepted_terms" (or accepted (vector))
                                "model" (model-body session)
-                               ;; the session's uploaded files, which an app reads (own-file)
-                               "files" (deploy-files-payload session))))
+                               ;; the session's uploaded files, which an app reads
+                               ;; (own-file) -- or none sent, the front keeping its own
+                               (if keep-files?
+                                   (list "keep_files" t)
+                                   (list "files" (deploy-files-payload session))))))
     (cond ((and (eql status 200) answer (hash-table-p (gethash "deployment" answer)))
            (front-deployments :fresh? t)
            (gethash "deployment" answer))
@@ -285,7 +290,7 @@ with a price, and for a model a download that toll stands on."
 nil when that one is free."
   (monocle:record-file-price record format))
 
-(defun deploy-session! (session &key name title blurb payee pot-percent balance? accepted)
+(defun deploy-session! (session &key name title blurb payee pot-percent balance? accepted (files :auto))
   "Deploy what SESSION built as NAME.  Values: the record, or nil and the
 reason.  It must have a monetization story (monetizable?).  Its source is
 closed when the session was opened closed-source, else open.  POT-PERCENT
@@ -297,7 +302,12 @@ its id is kept in the record as connect_account.  Deploying again from
 the same session under the same name replaces the copy and the terms.
 Where the lab asks its texts to be accepted at a deployment (guards.lisp,
 THE CLICKWRAP), every deployment waits for ACCEPTED; the caller logs it,
-and a private session's front is sent the texts accepted, to log."
+and a private session's front is sent the texts accepted, to log.
+FILES says what becomes of the deployment's files (the session's uploads,
+which the app reads): :session, exactly the session's files, none
+included; :keep, the deployment's files as they are; :auto (the sheet's
+Deploy), the session's files when it has any, else :keep -- a deploy that
+names no files keeps what the deployment has."
   (bt:with-lock-held (*deploy-lock*)
     (let* ((closed? (session-closed? session))
            (name (and (stringp name) (string-downcase (string-trim " " name))))
@@ -315,6 +325,10 @@ and a private session's front is sent the texts accepted, to log."
            ;; discretion within the hosting allowance (the user's rulings 44
            ;; and 50, 2026-11-12); a closed deployment always charges
            (free? (and (not closed?) (not (ignore-errors (monetizable? session)))))
+           (keep-files? (case files
+                          (:keep t)
+                          (:session nil)
+                          (t (null (session-files session)))))
            (account nil) (account-problem nil))
       ;; the author's account, where the gate takes the money
       (when (and (not free?) (eq *toll-provider* :stripe) (find #\@ payee))
@@ -362,7 +376,8 @@ and a private session's front is sent the texts accepted, to log."
          (multiple-value-bind (saved reason)
              (deploy-through-front! session :name name :title title :blurb blurb :payee payee
                                             :closed? closed? :pot-percent pot-percent :balance? balance?
-                                            :free? free? :accepted (and accepted (terms-state :deploy)))
+                                            :free? free? :keep-files? keep-files?
+                                            :accepted (and accepted (terms-state :deploy)))
            (if (null saved)
                (values nil reason)
                (progn
@@ -393,8 +408,10 @@ and a private session's front is sent the texts accepted, to log."
                                                              (list "balance" (if balance? t 'yason:false))))))
            (ensure-directories-exist directory)
            (write-text-file (model-body session) (merge-pathnames "model.lisp" directory))
-           ;; and a copy of the session's uploaded files, which an app reads (own-file)
-           (copy-files-into! (session-files session) (merge-pathnames "files/" directory))
+           ;; and a copy of the session's uploaded files, which an app reads
+           ;; (own-file), unless the deployment keeps the ones it has
+           (unless keep-files?
+             (copy-files-into! (session-files session) (merge-pathnames "files/" directory)))
            (monocle:save-record! (lab-house) record)
            (register-deployment! name)
            (drop-deployed! name)
@@ -1048,6 +1065,139 @@ session, deployment or replay this code is compiled in."
   `(let ((folder (own-files-folder ,(package-name *package*))))
      (and folder (namestring folder))))
 
+;;
+;; PUBLIC FILES.  An app's page may show some of its uploaded files to the
+;; visitor's browser -- a texture, a skybox, a photo -- by naming them in
+;; its public-files input (kinds.lisp).  Each is served at
+;; <deployment>/files/<name>, and in the session's preview at
+;; <prefix>/app-files?session=<id>&name=<name>; own-file-url gives the
+;; address with ?v= the file's hash, so a changed file is a new address and
+;; any address may be kept for good.  Closed unless opened: a name the app
+;; does not list, a kind outside images and plain text (an SVG can carry
+;; script), or an app that lists nothing, answers 404.
+;;
+
+(defparameter *public-file-text-types* '("txt" "csv" "md" "json")
+  "List of strings. The text files an app may show a browser, by the name's
+ending, served as plain text; any other text file is not served.")
+
+(defvar *public-file-shas* (make-hash-table :test #'equal)
+  "File path -> (write date . sha256 hex): a file's hash while it is unchanged.")
+
+(defvar *public-file-lock* (bt:make-lock "prompt-lab public files"))
+
+(defun public-file-sha (path)
+  "The sha256, in hex, of the file at PATH, kept until the file changes; nil
+when there is no such file."
+  (let ((date (ignore-errors (file-write-date path)))
+        (key (namestring path)))
+    (when date
+      (let ((kept (bt:with-lock-held (*public-file-lock*) (gethash key *public-file-shas*))))
+        (if (and kept (eql (car kept) date))
+            (cdr kept)
+            (let ((sha (ironclad:byte-array-to-hex-string
+                        (ironclad:digest-sequence :sha256 (alexandria:read-file-into-byte-vector path)))))
+              (bt:with-lock-held (*public-file-lock*) (setf (gethash key *public-file-shas*) (cons date sha)))
+              sha))))))
+
+(defun public-file-type (name octets)
+  "The media type file NAME (its bytes OCTETS) is served as, or nil when it is
+not served: an image (PNG, JPEG, GIF, WebP), or plain text of
+*public-file-text-types*."
+  (multiple-value-bind (kind type) (sniff-kind name octets)
+    (case kind
+      (:image type)
+      (:text (and (member (file-name-type name) *public-file-text-types* :test #'equal)
+                  "text/plain; charset=utf-8")))))
+
+(defun app-public-files (session)
+  "The file names SESSION's web app lists in public-files, or nil."
+  (when (and session (eq (session-kind session) :app) (app-defined? session))
+    (let ((names (ignore-errors (the-object (make-object (app-symbol session)) public-files))))
+      (and (listp names) (remove-if-not #'stringp names)))))
+
+(defun serve-public-file (req ent session folder name)
+  "Answer REQ with the file NAME under FOLDER when SESSION's app lists it in
+public-files and it is a kind the lab serves; else 404.  Kept for good by
+whoever asks (the address carries the hash), named by its hash (ETag), and
+never sniffed into another kind."
+  (let* ((safe (safe-file-name name))
+         (path (and safe (equal safe name) folder (probe-file (merge-pathnames safe folder))))
+         (octets (and path (member name (app-public-files session) :test #'string=)
+                      (ignore-errors (alexandria:read-file-into-byte-vector path))))
+         (type (and octets (public-file-type name octets))))
+    (if (null type)
+        (refuse req ent net.aserve:*response-not-found* "No such file here.")
+        (let ((etag (format nil "\"~a\"" (public-file-sha path))))
+          (if (equal (net.aserve:header-slot-value req :if-none-match) etag)
+              (net.aserve:with-http-response (req ent :response net.aserve:*response-not-modified*)
+                (setf (net.aserve:reply-header-slot-value req :etag) etag)
+                (net.aserve:with-http-body (req ent)))
+              (net.aserve:with-http-response (req ent :content-type type :format :binary)
+                (setf (net.aserve:reply-header-slot-value req :etag) etag
+                      (net.aserve:reply-header-slot-value req :cache-control) "public, max-age=31536000, immutable"
+                      (net.aserve:reply-header-slot-value req :x-content-type-options) "nosniff")
+                (net.aserve:with-http-body (req ent)
+                  (write-sequence octets (net.aserve:request-reply-stream req)))))))))
+
+(defun app-files-door (req ent)
+  "GET <prefix>/app-files?session=<id>&name=<file>: a file the session's web
+app shows, while it is previewed (serve-public-file).  Whoever may open the
+session's app may have it, as at the app door."
+  (let* ((id (query-value req "session"))
+         (session (and (stringp id) (find-session id))))
+    (cond ((not (on-app-origin? req)) (refuse req ent net.aserve:*response-not-found* "No such file here."))
+          ((not (admitted? req)) (refuse req ent net.aserve:*response-forbidden* "This lab is private."))
+          ((or (null session) (not (visible-to? session (or (query-value req "owner")
+                                                            (look-token-key session (query-value req "look"))))))
+           (refuse req ent net.aserve:*response-not-found* "No such file here."))
+          (t (serve-public-file req ent session (the-object (session-shelf session) files-folder)
+                                (query-value req "name"))))))
+
+(defun own-file-url-for (package-name name)
+  "The address a browser has the uploaded file NAME at, of whatever compiles
+into PACKAGE-NAME, with ?v= the start of its hash: a deployment's
+<deployment>/files/<name>, a session's <prefix>/app-files?session=..&name=..
+while previewed.  Nil when there is no such file.  The page must also list
+NAME in its public-files, or the address answers 404."
+  (let* ((path (own-file-path package-name name))
+         (sha (and path (probe-file path) (public-file-sha path)))
+         (session (and sha (own-files-session package-name))))
+    (flet ((prefix? (prefix) (and (>= (length package-name) (length prefix))
+                                  (string-equal prefix package-name :end2 (length prefix)))))
+      (when session
+        (cond ((prefix? "pl-deployed-")
+               (format nil "~a/files/~a?v=~a" (deployment-path (session-id session)) name (subseq sha 0 8)))
+              ((prefix? "pl-replay-") nil)
+              (t (format nil "~a/app-files?session=~a&name=~a&v=~a" *url-prefix* (session-id session) name (subseq sha 0 8))))))))
+
+(defmacro own-file-url (name)
+  "The address a visitor's browser fetches the uploaded file NAME at, of the
+session, deployment or preview this code is compiled in (own-file-url-for):
+for an image or text file the page lists in its public-files input."
+  `(own-file-url-for ,(package-name *package*) ,name))
+
+;;
+;; Assets: files sent for the page (pl-deploy --file), not for the agent.
+;; Their names are kept in the session's directory, and pending-attachments
+;; (uploads.lisp) leaves them out of the conversation.
+;;
+
+(defun assets-file (session)
+  (merge-pathnames "assets" (session-directory session)))
+
+(defun asset-names (session)
+  "The names of SESSION's files that are assets."
+  (let ((file (assets-file session)))
+    (and (probe-file file)
+         (remove "" (uiop:split-string (uiop:read-file-string file) :separator '(#\Newline)) :test #'string=))))
+
+(defun note-asset! (session name)
+  "Count SESSION's file NAME among its assets."
+  (unless (member name (asset-names session) :test #'string=)
+    (with-open-file (out (assets-file session) :direction :output :if-exists :append :if-does-not-exist :create)
+      (write-line name out))))
+
 (defun copy-files-into! (files folder)
   "Make FOLDER hold exactly FILES (uploaded-file objects): a deployment's
 copy of its session's files, replaced whole at every deployment."
@@ -1268,65 +1418,164 @@ the session, or nil, the reason and the response."
   "POST <prefix>/api/cli/deploy (see THE COMMAND LINE above): the model file
 SOURCE saved and deployed as NAME.  Answers {saved, deployment, replaced} --
 saved being what the lab holds: bytes, lines, sha256, kind and the
-compiler's words -- or {error, saved?}."
+compiler's words -- or {error, saved?}.  FILES, when sent, are the names of
+the files the deployment is to hold, each sent first by cli/file (an empty
+list: none); KEEP_FILES, or no FILES at all, keeps the deployment's own."
   (let* ((json (request-json req))
          (token (request-bearer req))
          (name (and json (gethash "name" json)))
-         (source (and json (gethash "source" json))))
-    (flet ((field (key) (let ((value (and json (gethash key json)))) (and (stringp value) (plusp (length value)) value))))
-      (cond
-        ((null *deploy-front*)
-         (refuse req ent net.aserve:*response-not-found* "This lab takes no deployments from the command line; a private session's lab does."))
-        ((null token)
-         (refuse req ent net.aserve:*response-unauthorized* "Send the command-line token as an Authorization: Bearer header."))
-        ((not (deployment-name? name))
-         (refuse req ent "Name the deployment: 3 to 40 lower-case letters, digits and hyphens, a letter first."))
-        ((not (and (stringp source) (< 0 (length source) 3000000)))
-         (refuse req ent "Send the model file's text, at most 3 MB."))
-        ((not (defines-app? source))
-         (refuse req ent "This file is not a web app: it has no (define-object app ...)."))
-        (t
-         (multiple-value-bind (answer status) (ignore-errors (front-post "cli-check" (h "cli_token" token "name" name)))
-           (if (not (eql status 200))
-               (refuse req ent net.aserve:*response-forbidden* "~a"
-                       (or (and answer (gethash "error" answer)) "The private front did not answer; try again in a moment."))
-               (let* ((existing (deployment-record name))
-                      (closed? (and existing (truthy? (gethash "closed" existing)))))
-                 (multiple-value-bind (session reason response) (cli-session name (client-address req) closed?)
+         (source (and json (gethash "source" json)))
+         (files (if (or (null json) (eq (gethash "keep_files" json) t) (not (nth-value 1 (gethash "files" json))))
+                    :keep
+                    (remove-if-not #'stringp (coerce (or (gethash "files" json) #()) 'list)))))
+    (cond
+      ((null *deploy-front*)
+       (refuse req ent net.aserve:*response-not-found* "This lab takes no deployments from the command line; a private session's lab does."))
+      ((null token)
+       (refuse req ent net.aserve:*response-unauthorized* "Send the command-line token as an Authorization: Bearer header."))
+      ((not (deployment-name? name))
+       (refuse req ent "Name the deployment: 3 to 40 lower-case letters, digits and hyphens, a letter first."))
+      ((not (and (stringp source) (< 0 (length source) 3000000)))
+       (refuse req ent "Send the model file's text, at most 3 MB."))
+      ((not (defines-app? source))
+       (refuse req ent "This file is not a web app: it has no (define-object app ...)."))
+      (t
+       (multiple-value-bind (answer status) (ignore-errors (front-post "cli-check" (h "cli_token" token "name" name)))
+         (if (not (eql status 200))
+             (refuse req ent net.aserve:*response-forbidden* "~a"
+                     (or (and answer (gethash "error" answer)) "The private front did not answer; try again in a moment."))
+             (cli-save-and-deploy! req ent json name source files)))))))
+
+(defun cli-save-and-deploy! (req ent json name source files)
+  "cli-deploy-door's work once the front has checked the token: save SOURCE
+in the command line's session for deployment NAME, then deploy it with
+FILES (:keep, or the names the deployment is to hold)."
+  (flet ((field (key) (let ((value (gethash key json))) (and (stringp value) (plusp (length value)) value))))
+    (let* ((existing (deployment-record name))
+           (closed? (and existing (truthy? (gethash "closed" existing)))))
+      (multiple-value-bind (session reason response) (cli-session name (client-address req) closed?)
+        (cond
+          ((null session) (refuse req ent response "~a" reason))
+          ;; claimed, as the model door does: an edit in the same session at the same moment waits
+          ((not (claim! session))
+           (refuse req ent *response-too-many-requests* "The session this deployment is saved in is busy; try again in a moment."))
+          (t
+           (multiple-value-bind (blocks error?)
+               (unwind-protect (let ((*model-writer* :author)) (write-model (touch session) source))
+                 (setf (session-busy? session) nil))
+             (let ((text (or (cdr (assoc "text" (first blocks) :test #'string=)) "")))
+               (log-event session :reload "From the command line: ~a" text)
+               (save-session! session)
+               (multiple-value-bind (bytes lines sha) (text-figures (model-body session))
+                 (let ((saved (h "bytes" bytes "lines" lines "sha256" sha
+                                 "kind" (kind-name (session-kind session)) "text" text
+                                 "session" (session-id session)))
+                       (missing (and (listp files) (cli-missing-files session files))))
                    (cond
-                     ((null session) (refuse req ent response "~a" reason))
-                     ;; claimed, as the model door does: an edit in the same session at the same moment waits
-                     ((not (claim! session))
-                      (refuse req ent *response-too-many-requests* "The session this deployment is saved in is busy; try again in a moment."))
+                     (error?
+                      (respond-json req ent (h "error" "It did not compile and load as a web app; nothing was deployed." "saved" saved)
+                                    net.aserve:*response-bad-request*))
+                     ;; the files named for this deploy are sent first, by cli/file
+                     (missing
+                      (respond-json req ent (h "error" (format nil "Not sent before the deploy: ~{~a~^, ~}." missing) "saved" saved)
+                                    net.aserve:*response-bad-request*))
                      (t
-                      (multiple-value-bind (blocks error?)
-                          (unwind-protect (let ((*model-writer* :author)) (write-model (touch session) source))
-                            (setf (session-busy? session) nil))
-                        (let ((text (or (cdr (assoc "text" (first blocks) :test #'string=)) "")))
-                          (log-event session :reload "From the command line: ~a" text)
-                          (save-session! session)
-                          (multiple-value-bind (bytes lines sha) (text-figures (model-body session))
-                            (let ((saved (h "bytes" bytes "lines" lines "sha256" sha
-                                            "kind" (kind-name (session-kind session)) "text" text
-                                            "session" (session-id session))))
-                              (if error?
-                                  (respond-json req ent (h "error" "It did not compile and load as a web app; nothing was deployed." "saved" saved)
-                                                net.aserve:*response-bad-request*)
-                                  (multiple-value-bind (record reason)
-                                      (deploy-session! session :name name
-                                                               :title (or (field "title") (and existing (gethash "title" existing)))
-                                                               :blurb (or (field "blurb") (and existing (gethash "blurb" existing)))
-                                                               :payee (and existing (gethash "payee" existing))
-                                                               :pot-percent (and existing (gethash "pot_percent" existing))
-                                                               :balance? (and existing (truthy? (gethash "balance" existing)))
-                                                               :accepted (eq (gethash "accept_terms" json) t))
-                                    (cond
-                                      (record
-                                       (accept-terms! :deploy :session session :address (client-address req) :via "command line")
-                                       (log-event session :note "Deployed as ~a from the command line." name)
-                                       (respond-json req ent (h "saved" saved "deployment" (deployment-state record :owner? t)
-                                                                "replaced" (if existing t 'yason:false))))
-                                      (t (respond-json req ent (h "error" reason "saved" saved) net.aserve:*response-bad-request*))))))))))))))))))))
+                      (when (listp files) (cli-keep-only-files! session files))
+                      (multiple-value-bind (record reason)
+                          (deploy-session! session :name name
+                                                   :files (if (eq files :keep) :keep :session)
+                                                   :title (or (field "title") (and existing (gethash "title" existing)))
+                                                   :blurb (or (field "blurb") (and existing (gethash "blurb" existing)))
+                                                   :payee (and existing (gethash "payee" existing))
+                                                   :pot-percent (and existing (gethash "pot_percent" existing))
+                                                   :balance? (and existing (truthy? (gethash "balance" existing)))
+                                                   :accepted (eq (gethash "accept_terms" json) t))
+                        (cond
+                          (record
+                           (accept-terms! :deploy :session session :address (client-address req) :via "command line")
+                           (log-event session :note "Deployed as ~a from the command line." name)
+                           (respond-json req ent (h "saved" saved "deployment" (deployment-state record :owner? t)
+                                                    "replaced" (if existing t 'yason:false)
+                                                    "files" (if (eq files :keep) "kept" (coerce files 'vector)))))
+                          (t (respond-json req ent (h "error" reason "saved" saved) net.aserve:*response-bad-request*))))))))))))))))
+
+;;
+;; Files from the command line (pl-deploy --file): one a request, into the
+;; command line's session for the deployment, ahead of the deploy that
+;; names them.  An asset the page shows, so never handed to the agent.
+;;
+
+(defun cli-files-folder (session)
+  (the-object (session-shelf session) files-folder))
+
+(defun cli-missing-files (session names)
+  "Of NAMES, those SESSION does not hold."
+  (remove-if #'(lambda (name) (find-file session name)) names))
+
+(defun cli-keep-only-files! (session names)
+  "Leave SESSION holding only its files named in NAMES."
+  (dolist (file (session-files session))
+    (unless (member (the-object file file-name) names :test #'string=)
+      (ignore-errors (delete-file (the-object file file-path))))))
+
+(defun cli-file-door (req ent)
+  "POST <prefix>/api/cli/file {name, file, data}: the file FILE (DATA, base64)
+for deployment NAME, kept in the command line's session ahead of the deploy
+that names it, in place of any file of that name.  The command-line token
+as for cli/deploy.  Answers {file, bytes, sha256, type} or {error}."
+  (let* ((json (request-json req))
+         (token (request-bearer req))
+         (name (and json (gethash "name" json)))
+         (file (and json (gethash "file" json)))
+         (data (and json (gethash "data" json)))
+         (caps (getf *upload-caps* :paid))
+         (octets (and (stringp data) (<= (length data) (* 3/2 (getf caps :bytes)))
+                      (ignore-errors (uiop:symbol-call :cl-base64 :base64-string-to-usb8-array data)))))
+    (cond
+      ((null *deploy-front*)
+       (refuse req ent net.aserve:*response-not-found* "This lab takes no deployments from the command line; a private session's lab does."))
+      ((null token)
+       (refuse req ent net.aserve:*response-unauthorized* "Send the command-line token as an Authorization: Bearer header."))
+      ((not (deployment-name? name))
+       (refuse req ent "Name the deployment: 3 to 40 lower-case letters, digits and hyphens, a letter first."))
+      ((not (and (stringp file) (equal (safe-file-name file) file)))
+       (refuse req ent "A file's name is letters, digits, dot, hyphen and underscore, 80 at most."))
+      ((null octets)
+       (refuse req ent "Send the file whole, base64, at most ~a." (size-label (getf caps :bytes))))
+      ((> (length octets) (getf caps :bytes))
+       (refuse req ent "~a has ~a; a file may have ~a." file (size-label (length octets)) (size-label (getf caps :bytes))))
+      ((null (sniff-kind file octets))
+       (refuse req ent "~a is not a kind of file the lab keeps: an image (PNG, JPEG, GIF, WebP), a PDF or a text file (~{~a~^, ~})."
+               file *upload-text-types*))
+      (t
+       (multiple-value-bind (answer status) (ignore-errors (front-post "cli-check" (h "cli_token" token "name" name)))
+         (if (not (eql status 200))
+             (refuse req ent net.aserve:*response-forbidden* "~a"
+                     (or (and answer (gethash "error" answer)) "The private front did not answer; try again in a moment."))
+             (let* ((existing (deployment-record name))
+                    (closed? (and existing (truthy? (gethash "closed" existing)))))
+               (multiple-value-bind (session reason response) (cli-session name (client-address req) closed?)
+                 (if (null session)
+                     (refuse req ent response "~a" reason)
+                     (let* ((others (remove file (session-files session) :key #'(lambda (f) (the-object f file-name)) :test #'string=))
+                            (total (+ (length octets) (reduce #'+ (mapcar #'(lambda (f) (the-object f bytes)) others)))))
+                       (cond
+                         ((>= (length others) (getf *deploy-files-caps* :files))
+                          (refuse req ent "A deployment carries at most ~a files." (getf *deploy-files-caps* :files)))
+                         ((> total (getf *deploy-files-caps* :total))
+                          (refuse req ent "A deployment's files may have ~a in all." (size-label (getf *deploy-files-caps* :total))))
+                         (t
+                          (let* ((path (merge-pathnames file (cli-files-folder session)))
+                                 (tmp (make-pathname :type "tmp" :defaults path)))
+                            (ensure-directories-exist path)
+                            (with-open-file (out tmp :direction :output :if-exists :supersede :element-type '(unsigned-byte 8))
+                              (write-sequence octets out))
+                            (uiop:rename-file-overwriting-target tmp path)
+                            (note-asset! session file)
+                            (log-event session :note "From the command line: the file ~a (~a)." file (size-label (length octets)))
+                            (respond-json req ent (h "file" file "bytes" (length octets)
+                                                     "sha256" (public-file-sha path)
+                                                     "type" (or (public-file-type file octets) ""))))))))))))))))
 
 (defun cli-token-ask! (action name)
   "Ask the private front to make (ACTION \"make\") or revoke (\"revoke\") the
@@ -1688,6 +1937,13 @@ the same functions as <prefix>/<door>, under the deployment's address
           ;; the deployment as an installable app (app.lisp)
           ((equal what "manifest.webmanifest")
            (deployment-manifest-door req ent name record))
+          ;; a file the app shows a browser (PUBLIC FILES)
+          ((and what (> (length what) 6) (string= "files/" what :end2 6))
+           (let ((deployed (and (equal (gethash "kind" record) "app") (on-app-origin? req name)
+                                (not (deployment-stopped? name)) (ensure-deployed name))))
+             (if deployed
+                 (serve-public-file req ent deployed (merge-pathnames "files/" (deployment-directory name)) (subseq what 6))
+                 (respond-deployment req ent "Not found." :response net.aserve:*response-not-found*))))
           ;; the deployment's side doors under its own address
           ((and what (assoc what *deployment-doors* :test #'string=))
            (funcall (cdr (assoc what *deployment-doors* :test #'string=)) req ent))

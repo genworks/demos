@@ -441,7 +441,8 @@ is the caller's."
   "References to SESSION's files that no turn of the conversation carries
 yet: what the visitor's next prompt brings along."
   (unless (session-replay? session)
-    (let ((attached (attached-names session)))
+    ;; an asset (pl-deploy --file) is the page's, never the agent's
+    (let ((attached (append (attached-names session) (asset-names session))))
       (loop for file in (session-files session)
             unless (member (the-object file file-name) attached :test #'string=)
               collect (the-object file reference)))))

@@ -28,6 +28,7 @@
              #:viewer
              #:web-app
              #:own-file
+             #:own-file-url
              #:own-files-directory
              #:*kinds*
              #:*brand*

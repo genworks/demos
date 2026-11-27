@@ -139,6 +139,10 @@ server's default -- a desktop and a phone."
                 (format out "- The page is ~d px wider than the screen~@[ (the browser zoomed out to ~a px)~]~@[; reaching past it: ~{~a~^, ~}~].~%"
                         over (g layout "zoomed_out_to") (g layout "too_wide"))
                 (format out "- It fits the screen's width; the page is ~a px tall.~%" (g layout "page_height"))))
+          (let ((broken (g vp "images" "broken")))
+            (when broken
+              (format out "- Images that did not load (~d of ~d): ~{~a~^, ~}~%"
+                      (length broken) (g vp "images" "count") broken)))
           (let ((console (g vp "console")))
             (if console
                 (dolist (entry console)
