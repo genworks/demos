@@ -312,6 +312,13 @@ SESSION's balance -- or nil."
 .pl-head a,.pl-engine{color:var(--pl-label-ink,#fff);opacity:.85}
 .pl-head nav{margin-left:auto;display:flex;gap:.8rem;align-items:center;font-size:.9em}
 .pl-card{background:var(--pl-panel,#fff);color:var(--pl-ink,#111);border:var(--pl-rule,1px) solid var(--pl-line,#ccc);border-radius:var(--pl-radius,4px);padding:.6rem}
+.pl-token-dialog{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)}
+.pl-token-box{background:var(--pl-panel,#fff);color:var(--pl-ink,#111);border:var(--pl-rule,1px) solid var(--pl-line,#ccc);border-radius:var(--pl-radius,4px);padding:1rem 1.1rem;max-width:min(34rem,92vw);box-shadow:0 8px 30px rgba(0,0,0,.3)}
+.pl-token-title{font-weight:600;margin:0 0 .6rem}
+.pl-token-field{width:100%;box-sizing:border-box;font-family:var(--pl-mono,ui-monospace,monospace);font-size:.9rem;padding:.4rem;border:1px solid var(--pl-line,#ccc);background:var(--pl-canvas,#fafafa);color:inherit}
+.pl-token-help{font-size:.85rem;margin:.6rem 0 0}
+.pl-token-said{font-size:.85rem;margin:.4rem 0 0;min-height:1em}
+.pl-token-buttons{display:flex;gap:.6rem;justify-content:flex-end;margin-top:.8rem}
 .pl-card h2{font-size:.85rem;margin:0 0 .4rem;font-family:var(--pl-font-label);font-weight:var(--pl-label-weight,700);text-transform:var(--pl-label-case);letter-spacing:var(--pl-label-tracking)}
 .sluice-tile .pl-card{border:0;border-radius:0}
 .pl-app-host{display:contents}
@@ -460,6 +467,28 @@ var timer=null;
 window.plToast=function(text,kind){if(!text)return;var t=document.getElementById('pl-toast');if(!t)return;
  t.textContent=text;t.className='pl-toast pl-toast-'+(kind||'note');t.style.display='block';
  if(timer)clearTimeout(timer);timer=setTimeout(function(){t.style.display='none'},Math.max(kind==='error'?7000:4500,text.length*70))};
+// a command-line token, shown once (the cli-token action): a dialog of
+// its own on the body, outside every section the stream redraws, so a
+// redraw cannot take it away; the token rides in no signal and no log.
+// Copy puts it on the clipboard on the visitor's own click, and 'I have
+// saved it' takes the dialog and the token away
+window.plShowToken=function(name,token){var old=document.getElementById('pl-token-dialog');if(old)old.remove();
+ function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e}
+ var d=el('div','pl-token-dialog'),box=el('div','pl-token-box'),f=el('input','pl-token-field'),said=el('p','pl-token-said'),
+  copy=el('button','pl-token-copy','Copy to clipboard'),done=el('button','pl-token-done','I have saved it'),row=el('div','pl-token-buttons');
+ d.id='pl-token-dialog';d.setAttribute('role','dialog');d.setAttribute('aria-modal','true');d.setAttribute('aria-label','Command-line token');
+ f.readOnly=true;f.spellcheck=false;f.setAttribute('autocomplete','off');f.value=token;token=null;copy.type=done.type='button';
+ // the clipboard API wants a secure page; on a plain one the older copy
+ // command still works from the visitor's own click
+ function oldCopy(){f.select();try{return document.execCommand('copy')}catch(e){return false}}
+ copy.onclick=function(){f.select();(navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(f.value):Promise.reject())
+  .then(function(){return true},function(){return oldCopy()})
+  .then(function(ok){f.select();said.textContent=ok?'Copied.':'This browser would not copy it; it is selected, so copy it with the keyboard.'})};
+ done.onclick=function(){f.value='';d.remove()};
+ box.appendChild(el('p','pl-token-title','A command-line token for '+name));box.appendChild(f);
+ box.appendChild(el('p','pl-token-help','Shown once: copy it now into a file only you can read (chmod 600), and name that file in the settings of pl-deploy.  Making another replaces it.'));
+ box.appendChild(said);row.appendChild(copy);row.appendChild(done);box.appendChild(row);d.appendChild(box);
+ document.body.appendChild(d);f.focus();f.select()};
 // the documentation line: what the thing under the pointer is or does,
 // from its data-doc or its title (the sluice's controls carry titles)
 document.addEventListener('mouseover',function(e){var d=document.getElementById('pl-doc');if(!d||!e.target.closest)return;
@@ -872,7 +901,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (page-upload-caps (getf *upload-caps* (if (the page-paid?) :paid :free)))
 
    (initial-signals
-    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', cliname: '', clitoken: '', clinote: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, modelnow: ~a, agentmode: ~a, ownagent: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', tagree: false, termsneed: ~a, dagree: false, private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a, capbytes: ~d, capfiles: ~d, cappages: ~d}"
+    (format nil "{gitproject: '', pushurl: ~a, hosturl: ~a, story: ~a, paidUp: ~a, built: ~a, deployed: ~a, opened: ~a, closed: ~a, closedPick: false, monetize: false, dname: '', dtitle: '', dblurb: '', dpayee: '', payouts: '', cliname: '', clinote: '', dpot: 0, dbalance: false, kind: ~a, model: ~a, modelnow: ~a, agentmode: ~a, ownagent: ~a, archived: ~a, live: '', skinPref: '', aname: '', asave: false, cact: '', cemail: '', tagree: false, termsneed: ~a, dagree: false, private: false, prompt: '', turnstile: '', source: '', amount: 0, error: '', notice: ~a, sending: false, saving: false, paying: false, busy: ~a, editable: ~a, owner: ~a, checkout: ~a, wallet: ~a, capbytes: ~d, capfiles: ~d, cappages: ~d}"
             ;; the gate's page for the session's last staged push (project.lisp)
             (js-string-literal (or (and (the session) (session-push-url (the session))) ""))
             ;; and of its last staged hosting (hosting.lisp)
@@ -1447,19 +1476,20 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                                                              (day-key (gethash "made" state)) (and (integerp used) (day-key used)))
                                                                                      (format nil "~a: no token" name))))
                                                                      (:button :type "button" :class "pl-download"
-                                                                              :|data-on:click| (format nil "$cliname = ~a, ~a" (js-string-literal name)
-                                                                                                       (the (datastar-action :cli-token :options "{filterSignals: {include: /^(cliname|owner)$/}}")))
+                                                                              ;; cl-who writes attribute values raw: the
+                                                                              ;; name's literal has double quotes
+                                                                              :|data-on:click| (escape-string-minimal-plus-quotes
+                                                                                                (format nil "$cliname = ~a, ~a" (js-string-literal name)
+                                                                                                        (the (datastar-action :cli-token :options "{filterSignals: {include: /^(cliname|owner)$/}}"))))
                                                                               "Make a command-line token")
                                                                      (when (hash-table-p state)
                                                                        (htm (:button :type "button" :class "pl-download"
-                                                                                     :|data-on:click| (format nil "confirm('Revoke the command-line token of ~a?') && ($cliname = ~a, ~a)"
-                                                                                                              name (js-string-literal name)
-                                                                                                              (the (datastar-action :cli-revoke :options "{filterSignals: {include: /^(cliname|owner)$/}}")))
+                                                                                     :|data-on:click| (escape-string-minimal-plus-quotes
+                                                                                                       (format nil "confirm(~a) && ($cliname = ~a, ~a)"
+                                                                                                               (js-string-literal (format nil "Revoke the command-line token of ~a?" name))
+                                                                                                               (js-string-literal name)
+                                                                                                               (the (datastar-action :cli-revoke :options "{filterSignals: {include: /^(cliname|owner)$/}}"))))
                                                                                      "Revoke")))))))
-                                                      (:pre :class "pl-cli-token" :style "display:none;white-space:pre-wrap;word-break:break-all"
-                                                            :|data-show| "$clitoken" :|data-text| "$clitoken")
-                                                      (:p :class "pl-line" :style "display:none" :|data-show| "$clitoken"
-                                                          "Shown once: copy it now into a file only you can read (chmod 600), and name that file in pl-deploy's settings.  Making another replaces it.")
                                                       (:p :class "pl-line pl-notice" :style "display:none" :|data-show| "$clinote" :|data-text| "$clinote"))))))))))))
 
    ;; The model file's editor, under the panes.  Its card is never
@@ -2703,11 +2733,18 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
           (the (tell-error! "Only the session's owner may make a command-line token."))
           (multiple-value-bind (answer status) (cli-token-ask! "make" name)
             (if (and (eql status 200) answer (stringp (gethash "token" answer)))
-                (sheet-send! self (datastar-signals-event
-                                   (with-output-to-string (s)
-                                     (yason:encode (h "error" "" "clitoken" (gethash "token" answer)
-                                                      "clinote" (format nil "A command-line token for ~a is made; it replaces any it had." name))
-                                                   s))))
+                ;; the token in a dialog of the page's own, never a signal:
+                ;; a redraw resets the signals, and the token was lost so
+                ;; (*sheet-ui-script*, plShowToken)
+                (progn
+                  (sheet-send! self (datastar-script-event
+                                     (format nil "plShowToken(~a,~a)" (js-string-literal name)
+                                             (js-string-literal (gethash "token" answer)))))
+                  (sheet-send! self (datastar-signals-event
+                                     (with-output-to-string (s)
+                                       (yason:encode (h "error" ""
+                                                        "clinote" (format nil "A command-line token for ~a is made; it replaces any it had." name))
+                                                     s)))))
                 (the (tell-error! (or (and answer (gethash "error" answer))
                                       "The private front did not answer; try again in a moment."))))))))
 
@@ -2720,7 +2757,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
             (if (eql status 200)
                 (sheet-send! self (datastar-signals-event
                                    (with-output-to-string (s)
-                                     (yason:encode (h "error" "" "clitoken" ""
+                                     (yason:encode (h "error" ""
                                                       "clinote" (format nil "The command-line token of ~a is revoked." name))
                                                    s))))
                 (the (tell-error! (or (and answer (gethash "error" answer))
