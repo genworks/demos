@@ -2378,12 +2378,14 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     (signals)
     ;; the owner's exit for the closed work shown (closed.lisp)
     (let ((session (the session))
-          (action (gethash "cact" signals)))
+          (action (gethash "cact" signals))
+          ;; the key this request carries, as every owner-only action asks
+          (key (let ((key (gethash "owner" signals))) (and (stringp key) (plusp (length key)) key))))
       ;; decide-closed-work! checks the key against the work's owner
-      (if (not (and session (the owner-key)))
+      (if (not (and session key))
           (the (tell-error! "This is no closed work of yours."))
           (multiple-value-bind (notice reason)
-              (decide-closed-work! (session-id session) (the owner-key) action
+              (decide-closed-work! (session-id session) key action
                                    :email (let ((e (gethash "cemail" signals))) (and (stringp e) (string-trim " " e))))
             (cond ((null notice) (the (tell-error! reason)))
                   ((equal action "delete")
