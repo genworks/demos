@@ -68,6 +68,12 @@ look with."
             (list (session-id session) uses (+ now *look-token-seconds*))))
     token))
 
+(defun app-ticket-url (session)
+  "Where SESSION's web app opens for its owner's browser with no key in the
+address: the app's address with a look token good for one load, spent by
+the time anyone could copy it."
+  (format nil "~a&look=~a" (app-url session) (mint-look-token! session 1)))
+
 (defun look-token-key (session token)
   "SESSION's owner key when TOKEN is a live look token for it (using one
 of its loads up), else nil.  The app door's stand-in for owner=."

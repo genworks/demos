@@ -185,6 +185,20 @@ if(l.session!==~a){l={session:~a,log:[]}}try{localStorage.setItem('prompt-lab-la
   (format nil "(function(){try{return (JSON.parse(localStorage.getItem('prompt-lab-owners')||'{}')||{})[~a]||''}catch(e){return ''}})()"
           (js-string-literal session-id)))
 
+(defun reply! (sheet &rest events)
+  "EVENTS to the browser whose action is being answered, alone (gwl's
+sheet-reply!, where the image has it); on an older gwl, to the page's
+streams, as before."
+  (let ((reply (find-symbol "SHEET-REPLY!" :gwl)))
+    (if (and reply (fboundp reply))
+        (apply reply sheet events)
+        (apply #'sheet-send! sheet events))))
+
+(defun unfilled (id &optional (html ""))
+  "A part of the page its owner's browser fills (owner-view): HTML as a
+watcher sees it, in an element of id ID marked to be filled."
+  (format nil "<div id=\"~a\" data-pl-unfilled=\"1\">~a</div>" id html))
+
 (defparameter *log-shown* 200
   "Integer. The most log entries the sheet shows, the newest.")
 
@@ -610,9 +624,34 @@ function $(id){return document.getElementById(id)}
 function show(id,on){var e=$(id);if(e)e.style.display=on?'':'none'}
 function loadStripe(){if(window.Stripe)return Promise.resolve();return new Promise(function(ok,no){var s=document.createElement('script');s.src='https://js.stripe.com/v3/';s.async=true;s.onload=ok;s.onerror=function(){no(new Error('Stripe.js did not load'))};document.head.appendChild(s)})}
 function tokenHex(name,fallback){try{var v=getComputedStyle(document.documentElement).getPropertyValue(name).trim();var c=document.createElement('canvas');c.width=c.height=1;var g=c.getContext('2d');g.fillStyle='#010203';g.fillStyle=v;if(!v||g.fillStyle==='#010203')return fallback;g.fillRect(0,0,1,1);var p=g.getImageData(0,0,1,1).data;return '#'+[p[0],p[1],p[2]].map(function(n){return('0'+n.toString(16)).slice(-2)}).join('')}catch(e){return fallback}}
+window.plOwnerKeyNow=function(){try{var q=new URLSearchParams(location.search),id=q.get('session')||q.get('archive'),o=JSON.parse(localStorage.getItem('prompt-lab-owners')||'{}')||{};return (id&&o[id])||''}catch(e){return ''}};
+window.plSetOwner=function(k){var el=document.getElementById('pl-owner-in');if(!el||!k)return;el.value=k;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))};
+// what an action said to this browser alone comes in its answer: its scripts
+// run here, and a new owner key goes into the owner signal
+window.plRunAnswer=function(t){var nl=String.fromCharCode(10);t.split(nl+nl).forEach(function(ev){var lines=ev.split(nl),kind='',html=[],sig='';
+  lines.forEach(function(l){if(l.indexOf('event: ')===0)kind=l.slice(7);else if(l.indexOf('data: elements ')===0)html.push(l.slice(15));else if(l.indexOf('data: signals ')===0)sig=l.slice(14)});
+  if(kind==='datastar-patch-elements'&&html.length){var tp=document.createElement('template');tp.innerHTML=html.join(nl);
+   tp.content.querySelectorAll('script').forEach(function(sc){try{(0,eval)(sc.textContent)}catch(e){console.error(e)}})}
+  if(kind==='datastar-patch-signals'&&sig){try{var j=JSON.parse(sig);if(j&&j.owner)plSetOwner(j.owner)}catch(e){}}})};
 window.plAction=function(fn,signals){var s={},k;for(k in (signals||{}))s[k]=signals[k];
- if(!('owner' in s)){try{var id=new URLSearchParams(location.search).get('session'),o=JSON.parse(localStorage.getItem('prompt-lab-owners')||'{}')||{};if(id&&o[id])s.owner=o[id]}catch(e){}}
- return fetch('/gdlAction?iid='+encodeURIComponent(window.plIid)+'&fn='+fn,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(s)})};
+ if(!('owner' in s)){var o=plOwnerKeyNow();if(o)s.owner=o}
+ return fetch('/gdlAction?iid='+encodeURIComponent(window.plIid)+'&fn='+fn,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(s)})
+  .then(function(r){if((r.headers.get('Content-Type')||'').indexOf('text/event-stream')<0)return r;return r.text().then(function(t){plRunAnswer(t);return r})})};
+// the parts of the page that are its owner's come from owner-view, asked by
+// the owner's browser whenever a part shows unfilled (at load, and after a
+// redraw put a watcher's version back); a browser without the key asks nothing
+(function(){var timer=null,lastN=-1,lastAt=0;
+ window.plOwnerViewSoon=function(){if(timer)return;timer=setTimeout(function(){timer=null;
+   var n=document.querySelectorAll('[data-pl-unfilled]').length;if(!n||!plOwnerKeyNow())return;
+   if(n===lastN&&Date.now()-lastAt<5000)return;lastN=n;lastAt=Date.now();plAction('owner-view',{})},250)};
+ window.plOwnerFill=function(m){lastN=-1;Object.keys(m).forEach(function(id){var el=document.getElementById(id);if(!el)return;
+   if(el.tagName==='IFRAME'){if(m[id])el.src=m[id]}else el.innerHTML=m[id];el.removeAttribute('data-pl-unfilled')})};
+ try{new MutationObserver(function(){if(document.querySelector('[data-pl-unfilled]'))plOwnerViewSoon()}).observe(document.documentElement,{childList:true,subtree:true})}catch(e){}
+ window.addEventListener('load',function(){plOwnerViewSoon()})})();
+// Open the app (a private session's): the tab opened at the click, its
+// address set when the ticket comes back (plAppGo)
+window.plOpenApp=function(){window.plAppTab=window.open('about:blank','_blank');plAction('app-open',{});return false};
+window.plAppGo=function(url){var w=window.plAppTab;window.plAppTab=null;if(w&&!w.closed){try{w.opener=null}catch(e){}w.location=url}else window.open(url,'_blank','noopener')};
 window.plClosePayment=function(){if(embedded){try{embedded.destroy()}catch(e){}embedded=null}if(card){try{card.destroy()}catch(e){}card=null}show('pl-pay',false);show('pl-card-pay',false);$('pl-card-error').textContent='';$('pl-checkout').innerHTML='';$('pl-card-line').innerHTML=''};
 window.plMoreOptions=function(){if(last)plAction('topup-full',{amount:last.amount})};
 window.plOpenPayment=function(r){last=r;plClosePayment();
@@ -744,7 +783,8 @@ not hold."
 
    ;; the lab's own Datastar actions (gwl's allowlist for /gdlAction)
    (datastar-actions (list :build :review :claim :save :continue :topup :topup-full :confirm :privacy :author :author-name :closed-decide :connect-agent :agent-mode :mcp-token-new :wear-skin :shade-desk :upload :adopt
-                           :deploy :undeploy :cli-token :cli-revoke :connect :open-project :push-project :deploy-project))
+                           :deploy :undeploy :cli-token :cli-revoke :connect :open-project :push-project :deploy-project
+                           :owner-view :app-open))
 
    ;; ?adopt=<id>&from=<prefix>: the session of the lab at <prefix> (the
    ;; sibling, on this site) whose files this lab is offered (routing.lisp)
@@ -864,6 +904,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
             ;; the skin this browser chose (localStorage prompt-lab-skin): worn when it is not the one
             ;; showing, and kept when Page > Skin picks another
             (:script (str (format nil "window.plIid=~a;" (js-string-literal (the instance-id)))))
+            ;; the owner signal, set from the page's script when an action's
+            ;; answer brings a new key (plSetOwner)
+            (:input :type "hidden" :id "pl-owner-in" :|data-bind:owner| "")
             (:script "window.sluiceSkinChosen=function(n){try{localStorage.setItem('prompt-lab-skin',n)}catch(e){}};")
             (:span :|data-init|
                    ;; cl-who writes attribute values raw, between quotes
@@ -1283,12 +1326,16 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                         (htm (:div :class "pl-card pl-app"
                                    (:h2 "Web app")
                                    (:p :class "pl-line"
-                                       (:a :class "pl-open-app" :target "_blank" :rel "noopener"
-                                           :href (app-url session
-                                                          :owner-key (and (session-private? session) (the owner?)
-                                                                          (the owner-key)))
-                                           :data-doc "Open the web app this session built, a page of its own, in a new tab"
-                                           "Open the app")
+                                       ;; a private session's app opens on a ticket its
+                                       ;; owner's browser asks for (app-open), never on a key
+                                       (if (session-private? session)
+                                           (htm (:a :class "pl-open-app" :href "#" :onclick "return plOpenApp()"
+                                                    :data-doc "Open the web app this session built, a page of its own, in a new tab"
+                                                    "Open the app"))
+                                           (htm (:a :class "pl-open-app" :target "_blank" :rel "noopener"
+                                                    :href (app-url session)
+                                                    :data-doc "Open the web app this session built, a page of its own, in a new tab"
+                                                    "Open the app")))
                                        (str (if (the owner?)
                                                 "  -- the page your prompts built.  It opens afresh from the model file each time."
                                                 (format nil "  -- a page built by this session's visitor, not by ~a." *brand*)))))))))))
@@ -1341,12 +1388,13 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                          (:p "It shows here, live, once the agent has built it.  Describe it on the left and press Build.")))))
                       (when (app-staged? session)
                         (htm (:div :id "pl-app-stage"
-                                   (:iframe :title "The web app this session built"
-                                            :src (format nil "~a&v=~a"
-                                                         (app-url session
-                                                                  :owner-key (and (session-private? session) (the owner?)
-                                                                                  (the owner-key)))
-                                                         (or (the model-stamp) 0))))))))))
+                                   ;; a private session's frame gets a ticket from its
+                                   ;; owner's browser (owner-view), never the key
+                                   (if (session-private? session)
+                                       (htm (:iframe :id "pl-stage-frame" :title "The web app this session built"
+                                                     :data-pl-unfilled "1"))
+                                       (htm (:iframe :title "The web app this session built"
+                                                     :src (format nil "~a&v=~a" (app-url session) (or (the model-stamp) 0))))))))))))
 
    ;; Monetize (deploy.lisp): the owner deploys what the session built
    ;; at an address of its own, on terms of their choosing.  Like the
@@ -1748,7 +1796,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     :inner-html (progn
                   (the revision)
                   (let* ((session (the session))
-                         (spend (and session (the owner?) (spend-state session))))
+                         (spend nil))
                     (with-lhtml-string ()
                       (:div :class "pl-card pl-credits"
                             (:h2 "AI allowance")
@@ -1756,11 +1804,11 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                 ;; its own agent's tokens are its author's: nothing here is drawn
                                 (htm (:p :class "pl-line"
                                          "Your own agent builds this session, on your own sign-in: the lab's AI allowance and the community pot are not drawn.  They apply when the lab's agent builds."))
-                                (progn
-                                  (str (credits-html self (pot) spend))
-                                  ;; the author's AI allowance this month (the gate's word on the key)
-                                  (let ((ai (and session (the owner?) (ignore-errors (author-ai (session-wallet session))))))
-                                    (when ai (str (ai-allowance-html ai))))))
+                                ;; what this session drew and the author's month are its
+                                ;; owner's: the owner's browser fills them (owner-view)
+                                (str (if session
+                                         (unfilled "pl-own-credits" (credits-html self (pot) spend))
+                                         (credits-html self (pot) spend))))
                             ;; the AUTHOR KEY (*author-keys?*): one public record across
                             ;; sessions, what the trust ladder's review reads
                             (when *author-keys?*
@@ -1826,52 +1874,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     :type 'base-html-div
     :inner-html (progn
                   (the revision)
+                  ;; its owner's alone: filled by the owner's browser (owner-view, agent-html)
                   (let ((session (the session)))
-                    (if (not (and session (own-agent? session) (the owner?)))
-                        ""
-                        (let* ((token (or (mcp-token session) (mint-mcp-token! session)))
-                               (address (format nil "window.location.origin + ~a"
-                                                (js-string-literal (format nil "~a/mcp?session=~a" *url-prefix* (session-id session)))))
-                               (bearer (js-string-literal (format nil "Bearer ~a" token)))
-                               (shown (lambda (expression) (escape-string-minimal-plus-quotes expression))))
-                          (with-lhtml-string ()
-                            (:div :class "pl-card pl-own-agent"
-                                  (:h2 "Your own agent")
-                                  (:p :class "pl-line"
-                                      "This session is built by your own agent over MCP, the Model Context Protocol.  The lab calls no AI model for it: your agent's tokens are your own business.  What still runs here: the tools your agent calls -- writing, compiling and checking the model, drawing it -- the archive, and the hosting when you deploy.")
-                                  (:p :class "pl-line"
-                                      "Your agent signs in with this session's MCP token, sent as an Authorization header.  The token opens this session's tools and nothing else -- not your other sessions, not Deploy -- and a new one can be made below, which stops the old.  Keep it out of shared files.")
-                                  (:p :class "pl-line" "The address:")
-                                  (:pre :class "pl-code" (:code :|data-text| (funcall shown address)))
-                                  (:p :class "pl-line" "The token:")
-                                  (:pre :class "pl-code" (esc token))
-                                  (:p :class "pl-line" (:b "Claude Code") ", in a terminal:")
-                                  (:pre :class "pl-code"
-                                        (:code :|data-text| (funcall shown (format nil "'claude mcp add --transport http prompt-lab \"' + ~a + '\" --header \"Authorization: ' + ~a + '\"'" address bearer))))
-                                  (:p :class "pl-line" (:b "Cursor") ", in .cursor/mcp.json:")
-                                  (:pre :class "pl-code"
-                                        (:code :|data-text| (funcall shown (format nil "'{\"mcpServers\": {\"prompt-lab\": {\"url\": \"' + ~a + '\", \"headers\": {\"Authorization\": \"' + ~a + '\"}}}}'" address bearer))))
-                                  (:p :class "pl-line" (:b "Claude Desktop") ", in claude_desktop_config.json, through the mcp-remote bridge (needs Node; the header written without a space after the colon, as its README advises):")
-                                  (:pre :class "pl-code"
-                                        (:code :|data-text| (funcall shown (format nil "'{\"mcpServers\": {\"prompt-lab\": {\"command\": \"npx\", \"args\": [\"-y\", \"mcp-remote\", \"' + ~a + '\", \"--header\", \"Authorization:${AUTH_HEADER}\"], \"env\": {\"AUTH_HEADER\": \"' + ~a + '\"}}}}'" address bearer))))
-                                  (:p :class "pl-line" (:b "Any other MCP client")
-                                      ": the Streamable HTTP transport -- POST one JSON-RPC message at a time to the address, answered in plain JSON; no stream is offered -- with the Authorization header as above.  A client that can send no header may put "
-                                      (:code "&token=") " and the token at the end of the address instead; an address is written to servers' logs, so make a new token once you are done with such a client.")
-                                  (:div :class "pl-row"
-                                        (:button :type "button" :class "pl-download"
-                                                 :|data-on:click| (the (datastar-action :mcp-token-new :options "{filterSignals: {include: /^(owner)$/}}"))
-                                                 "Make a new token (the old one stops working)"))
-                                  (:details
-                                   (:summary "The instructions the lab's own agent works by")
-                                   (:p :class "pl-line" "Your agent receives these as the MCP server's instructions when it connects.  If it does not use them, paste them into its first prompt.")
-                                   (:pre :class "pl-code" (esc (system-text session))))
-                                  (:p :class "pl-line"
-                                      (fmt "Limits: ~:[no daily limit on tool calls~;~:*~a tool calls a day for each author key~], and one tool at a time in a session."
-                                           (and (eq *external-agent?* :authors) *external-calls-per-key*)))
-                                  (:div :class "pl-row"
-                                        (:button :type "button" :class "pl-download"
-                                                 :|data-on:click| (the (datastar-action :agent-mode :options "{filterSignals: {include: /^(owner)$/}}"))
-                                                 "Use the lab's agent for this session instead")))))))))
+                    (if (and session (own-agent? session)) (unfilled "pl-own-agent") ""))))
 
    ;; A CLOSED WORK's panel, for its owner alone (closed.lisp): the date it
    ;; must be decided by and the exits -- host (Monetize, where this lab
@@ -1882,54 +1887,8 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     :type 'base-html-div
     :inner-html (progn
                   (the revision)
-                  (let* ((session (the session))
-                         ;; closed-state checks the key against the work's owner, so an
-                         ;; archived work's replay (which is nobody's) shows it too
-                         (state (and session (the owner-key)
-                                     (ignore-errors (closed-state (session-id session) (the owner-key))))))
-                    (if (null state)
-                        ""
-                        (let ((day (let ((until (gethash "until" state))) (and until (utc-day until))))
-                              (left (gethash "days_left" state))
-                              (act (lambda (what confirm)
-                                     (escape-string-minimal-plus-quotes
-                                      (format nil "~@[confirm(~a) && ~](($cact = '~a'), ~a)"
-                                              (and confirm (js-string-literal confirm)) what
-                                              (the (datastar-action :closed-decide :options "{filterSignals: {include: /^(cact|cemail|owner)$/}}")))))))
-                          (with-lhtml-string ()
-                            (:div :class "pl-card pl-closed-work"
-                                  (:h2 "Closed work")
-                                  (cond
-                                    ((gethash "declared" state)
-                                     (htm (:p :class "pl-line"
-                                              (fmt "You said on ~a that you will host this work yourself or distribute it: it stays closed.  Its source is yours to take from Download."
-                                                   (utc-day (gethash "declared" state))))
-                                          (:p :class "pl-line" (esc *closed-reminder-text*))))
-                                    ((eq (gethash "hosted" state) t)
-                                     (htm (:p :class "pl-line" "Hosted with us, closed: it stays closed.")))
-                                    (t
-                                     (htm (:p :class "pl-line"
-                                              (fmt "Only you see this work.  Decide by ~a (~d day~:p left): ~:[~;host it with Monetize, ~]say you will host it yourself or distribute it, make it public, or delete it.  Undecided, it becomes public then, under the GNU Affero General Public License."
-                                                   day left (eq (gethash "deploys" state) t)))
-                                          ;; the license, said plainly where it matters (Dave's ruling 53)
-                                          (:p :class "pl-line"
-                                              "Gendl, which your code runs on, is under the GNU Affero General Public License, which asks you to share your code with its users.  Hosting or shipping it closed, you sidestep that with the quarterly royalty report at "
-                                              (:a :href "https://genworks.com/royalties/" :target "_blank" :rel "noopener" "genworks.com/royalties/")
-                                              " -- a $0 quarter is fine -- or a Genworks GDL commercial license.  Nothing else to sign.")
-                                          (:div :class "pl-declare" :|data-ignore-morph| ""
-                                                (:div :class "pl-row"
-                                                      (:input :type "email" :maxlength "200" :|data-bind:cemail| ""
-                                                              :placeholder "Your address (optional)")
-                                                      (:button :type "button" :class "pl-download"
-                                                               :|data-on:click| (funcall act "declare" nil)
-                                                               "I will host or distribute it myself")))
-                                          (:div :class "pl-row"
-                                                (:button :type "button" :class "pl-download"
-                                                         :|data-on:click| (funcall act "public" "Make this work public now, under the GNU Affero General Public License?  This cannot be undone.")
-                                                         "Make it public now")
-                                                (:button :type "button" :class "pl-download"
-                                                         :|data-on:click| (funcall act "delete" "Delete this work and everything the lab keeps of it?  This cannot be undone.")
-                                                         "Delete it"))))))))))))
+                  ;; its owner's alone: filled by the owner's browser (owner-view, closed-html)
+                  (if (the session) (unfilled "pl-own-closed") "")))
 
    ;; The model's files, from the download door (export.lisp): fetched, so
    ;; a refusal is a line on the page and not a saved file, and with the
@@ -1981,7 +1940,117 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                               (session-id session)))))
                                             "Authorship record")))
                             ;; the model file in the host's terminal, for its owner
-                            (let ((console (and session (the owner?) (not (session-replay? session))
+                            (when (and session (not (session-replay? session)) *console-base*)
+                              (str (unfilled "pl-own-console")))
+                            (:p :id "pl-download-note" :class "pl-line")))))))
+
+  :functions
+  (("String. The own-agent panel of SESSION for its owner (owner-view): the
+MCP address and token, the set-ups, the way back to the lab's agent."
+    agent-html
+    (session)
+    (let* ((token (or (mcp-token session) (mint-mcp-token! session)))
+                               (address (format nil "window.location.origin + ~a"
+                                                (js-string-literal (format nil "~a/mcp?session=~a" *url-prefix* (session-id session)))))
+                               (bearer (js-string-literal (format nil "Bearer ~a" token)))
+                               (shown (lambda (expression) (escape-string-minimal-plus-quotes expression))))
+                          (with-lhtml-string ()
+                            (:div :class "pl-card pl-own-agent"
+                                  (:h2 "Your own agent")
+                                  (:p :class "pl-line"
+                                      "This session is built by your own agent over MCP, the Model Context Protocol.  The lab calls no AI model for it: your agent's tokens are your own business.  What still runs here: the tools your agent calls -- writing, compiling and checking the model, drawing it -- the archive, and the hosting when you deploy.")
+                                  (:p :class "pl-line"
+                                      "Your agent signs in with this session's MCP token, sent as an Authorization header.  The token opens this session's tools and nothing else -- not your other sessions, not Deploy -- and a new one can be made below, which stops the old.  Keep it out of shared files.")
+                                  (:p :class "pl-line" "The address:")
+                                  (:pre :class "pl-code" (:code :|data-text| (funcall shown address)))
+                                  (:p :class "pl-line" "The token:")
+                                  (:pre :class "pl-code" (esc token))
+                                  (:p :class "pl-line" (:b "Claude Code") ", in a terminal:")
+                                  (:pre :class "pl-code"
+                                        (:code :|data-text| (funcall shown (format nil "'claude mcp add --transport http prompt-lab \"' + ~a + '\" --header \"Authorization: ' + ~a + '\"'" address bearer))))
+                                  (:p :class "pl-line" (:b "Cursor") ", in .cursor/mcp.json:")
+                                  (:pre :class "pl-code"
+                                        (:code :|data-text| (funcall shown (format nil "'{\"mcpServers\": {\"prompt-lab\": {\"url\": \"' + ~a + '\", \"headers\": {\"Authorization\": \"' + ~a + '\"}}}}'" address bearer))))
+                                  (:p :class "pl-line" (:b "Claude Desktop") ", in claude_desktop_config.json, through the mcp-remote bridge (needs Node; the header written without a space after the colon, as its README advises):")
+                                  (:pre :class "pl-code"
+                                        (:code :|data-text| (funcall shown (format nil "'{\"mcpServers\": {\"prompt-lab\": {\"command\": \"npx\", \"args\": [\"-y\", \"mcp-remote\", \"' + ~a + '\", \"--header\", \"Authorization:${AUTH_HEADER}\"], \"env\": {\"AUTH_HEADER\": \"' + ~a + '\"}}}}'" address bearer))))
+                                  (:p :class "pl-line" (:b "Any other MCP client")
+                                      ": the Streamable HTTP transport -- POST one JSON-RPC message at a time to the address, answered in plain JSON; no stream is offered -- with the Authorization header as above.  A client that can send no header may put "
+                                      (:code "&token=") " and the token at the end of the address instead; an address is written to servers' logs, so make a new token once you are done with such a client.")
+                                  (:div :class "pl-row"
+                                        (:button :type "button" :class "pl-download"
+                                                 :|data-on:click| (the (datastar-action :mcp-token-new :options "{filterSignals: {include: /^(owner)$/}}"))
+                                                 "Make a new token (the old one stops working)"))
+                                  (:details
+                                   (:summary "The instructions the lab's own agent works by")
+                                   (:p :class "pl-line" "Your agent receives these as the MCP server's instructions when it connects.  If it does not use them, paste them into its first prompt.")
+                                   (:pre :class "pl-code" (esc (system-text session))))
+                                  (:p :class "pl-line"
+                                      (fmt "Limits: ~:[no daily limit on tool calls~;~:*~a tool calls a day for each author key~], and one tool at a time in a session."
+                                           (and (eq *external-agent?* :authors) *external-calls-per-key*)))
+                                  (:div :class "pl-row"
+                                        (:button :type "button" :class "pl-download"
+                                                 :|data-on:click| (the (datastar-action :agent-mode :options "{filterSignals: {include: /^(owner)$/}}"))
+                                                 "Use the lab's agent for this session instead"))))))
+
+   ("String. A closed work's panel for KEY, its owner's key (owner-view), or
+\"\" when KEY owns no closed work shown here."
+    closed-html
+    (key)
+    (let* ((session (the session))
+                         ;; closed-state checks the key against the work's owner, so an
+                         ;; archived work's replay (which is nobody's) shows it too
+                         (state (and session key (ignore-errors (closed-state (session-id session) key)))))
+                    (if (null state)
+                        ""
+                        (let ((day (let ((until (gethash "until" state))) (and until (utc-day until))))
+                              (left (gethash "days_left" state))
+                              (act (lambda (what confirm)
+                                     (escape-string-minimal-plus-quotes
+                                      (format nil "~@[confirm(~a) && ~](($cact = '~a'), ~a)"
+                                              (and confirm (js-string-literal confirm)) what
+                                              (the (datastar-action :closed-decide :options "{filterSignals: {include: /^(cact|cemail|owner)$/}}")))))))
+                          (with-lhtml-string ()
+                            (:div :class "pl-card pl-closed-work"
+                                  (:h2 "Closed work")
+                                  (cond
+                                    ((gethash "declared" state)
+                                     (htm (:p :class "pl-line"
+                                              (fmt "You said on ~a that you will host this work yourself or distribute it: it stays closed.  Its source is yours to take from Download."
+                                                   (utc-day (gethash "declared" state))))
+                                          (:p :class "pl-line" (esc *closed-reminder-text*))))
+                                    ((eq (gethash "hosted" state) t)
+                                     (htm (:p :class "pl-line" "Hosted with us, closed: it stays closed.")))
+                                    (t
+                                     (htm (:p :class "pl-line"
+                                              (fmt "Only you see this work.  Decide by ~a (~d day~:p left): ~:[~;host it with Monetize, ~]say you will host it yourself or distribute it, make it public, or delete it.  Undecided, it becomes public then, under the GNU Affero General Public License."
+                                                   day left (eq (gethash "deploys" state) t)))
+                                          ;; the license, said plainly where it matters (Dave's ruling 53)
+                                          (:p :class "pl-line"
+                                              "Gendl, which your code runs on, is under the GNU Affero General Public License, which asks you to share your code with its users.  Hosting or shipping it closed, you sidestep that with the quarterly royalty report at "
+                                              (:a :href "https://genworks.com/royalties/" :target "_blank" :rel "noopener" "genworks.com/royalties/")
+                                              " -- a $0 quarter is fine -- or a Genworks GDL commercial license.  Nothing else to sign.")
+                                          (:div :class "pl-declare" :|data-ignore-morph| ""
+                                                (:div :class "pl-row"
+                                                      (:input :type "email" :maxlength "200" :|data-bind:cemail| ""
+                                                              :placeholder "Your address (optional)")
+                                                      (:button :type "button" :class "pl-download"
+                                                               :|data-on:click| (funcall act "declare" nil)
+                                                               "I will host or distribute it myself")))
+                                          (:div :class "pl-row"
+                                                (:button :type "button" :class "pl-download"
+                                                         :|data-on:click| (funcall act "public" "Make this work public now, under the GNU Affero General Public License?  This cannot be undone.")
+                                                         "Make it public now")
+                                                (:button :type "button" :class "pl-download"
+                                                         :|data-on:click| (funcall act "delete" "Delete this work and everything the lab keeps of it?  This cannot be undone.")
+                                                         "Delete it")))))))))))
+
+   ("String. The console links for SESSION's model file, for its owner
+(owner-view)."
+    console-html
+    (session)
+    (with-lhtml-string ()
+      (let ((console (and session (not (session-replay? session))
                                                 (ignore-errors (console-url session)))))
                               (when console
                                 (htm (:p :class "pl-line"
@@ -1996,11 +2065,48 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                                 (:a :href (console-url session :plain? t) :target "_blank" :rel "noopener"
                                                     :class "pl-dim" :style "font-size:.85em"
                                                     :data-doc "The same file in Emacs as it comes, with its own keys and no menu bar"
-                                                    "(plain Emacs)")))))))
-                            (:p :id "pl-download-note" :class "pl-line")))))))
+                                                    "(plain Emacs)")))))))))
 
-  :functions
-  ((set-instantiation-time!
+   (owner-view
+    (signals)
+    ;; the parts of the page that are its owner's, to the request that
+    ;; carries the key alone (reply!): what the session drew and the
+    ;; author's month, the own agent's token, a closed work's exits, the
+    ;; console, and a private session's app frame on a ticket
+    (let* ((session (the session))
+           (key (let ((k (gethash "owner" signals))) (and (stringp k) (plusp (length k)) k)))
+           (fills (make-hash-table :test #'equal)))
+      (when (and session key)
+        (when (the (request-owner? signals))
+          (unless (own-agent? session)
+            (setf (gethash "pl-own-credits" fills)
+                  (with-output-to-string (s)
+                    (write-string (credits-html self (pot) (spend-state session)) s)
+                    (let ((ai (ignore-errors (author-ai (session-wallet session)))))
+                      (when ai (write-string (ai-allowance-html ai) s))))))
+          (when (own-agent? session)
+            (setf (gethash "pl-own-agent" fills) (the (agent-html session))))
+          (unless (session-replay? session)
+            (setf (gethash "pl-own-console" fills) (the (console-html session))))
+          (when (and (session-private? session) (app-staged? session))
+            (setf (gethash "pl-stage-frame" fills)
+                  (format nil "~a&v=~a" (app-ticket-url session) (or (the model-stamp) 0)))))
+        (setf (gethash "pl-own-closed" fills) (or (ignore-errors (the (closed-html key))) ""))
+        (reply! self (datastar-script-event
+                      (format nil "plOwnerFill(JSON.parse(~a))"
+                              (js-string-literal (with-output-to-string (s) (yason:encode fills s)))))))))
+
+   (app-open
+    (signals)
+    ;; "Open the app" of a private session: a ticket, to the browser that
+    ;; asked with the key
+    (let ((session (the session)))
+      (if (and session (the (request-owner? signals)) (app-defined? session))
+          (reply! self (datastar-script-event
+                        (format nil "plAppGo(~a)" (js-string-literal (app-ticket-url session)))))
+          (the (tell-error! "Only the session's owner may open its app from here.")))))
+
+   (set-instantiation-time!
     ()
     (call-next-method)
     ;; ?session=<id>: the sheet shows that session to whoever may see it
@@ -2218,7 +2324,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                       id files (length files))
                            (let ((*model-writer* :seed)) (ignore-errors (write-model session body)))
                            (save-session! session)
-                           (sheet-send! self (datastar-script-event
+                           (reply! self (datastar-script-event
                                               (format nil "~a;location.href=~a" (owners-script session)
                                                       (js-string-literal (format nil "~a?session=~a" *url-prefix* (session-id session)))))))))))))))
 
@@ -2286,7 +2392,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
             (cond (ok?
                    ;; a session older than owner keys has one now
                    (the (set-slot! :owner-key (session-owner session)))
-                   (sheet-send! self
+                   (reply! self
                                 (datastar-script-event (owners-script session))
                                 (datastar-signals-event
                                  (with-output-to-string (s)
@@ -2308,7 +2414,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                (when (and session (the (request-owner? signals)) (null (session-wallet session)))
                  (setf (session-wallet session) id)
                  (save-session! session))
-               (sheet-send! self
+               (reply! self
                             (datastar-script-event
                              (format nil "try{localStorage.setItem('prompt-lab-wallet',~a)}catch(e){}" (js-string-literal id)))
                             (datastar-signals-event
@@ -2453,7 +2559,7 @@ key minted for it."
                  (the (set-slot! :owner-key (session-owner session)))
                  (the (set-slot! :minted-for *datastar-request*))
                  (watch-session! self session)
-                 (sheet-send! self (datastar-script-event (owners-script session))
+                 (reply! self (datastar-script-event (owners-script session))
                               (datastar-signals-event
                                ;; the owner signal too: it was read from the
                                ;; browser's keys when the page opened, before
@@ -2757,7 +2863,7 @@ key minted for it."
                 ;; a redraw resets the signals, and the token was lost so
                 ;; (*sheet-ui-script*, plShowToken)
                 (progn
-                  (sheet-send! self (datastar-script-event
+                  (reply! self (datastar-script-event
                                      (format nil "plShowToken(~a,~a)" (js-string-literal name)
                                              (js-string-literal (gethash "token" answer)))))
                   (sheet-send! self (datastar-signals-event
@@ -2789,7 +2895,7 @@ key minted for it."
     ;; the upload door, one request a file: the bytes never come through a
     ;; sheet action, whose body the room caps well under a file's size
     (let ((session (the session)))
-      (sheet-send! self (datastar-script-event
+      (reply! self (datastar-script-event
                          (format nil "plSendFiles(~a,~a,~a)"
                                  (js-string-literal (door-path "upload"))
                                  (js-string-literal (session-id session))
@@ -2870,7 +2976,7 @@ key minted for it."
               (url (and answer (gethash "url" answer))))
           (cond
             ((and key (stringp secret))
-             (sheet-send! self (datastar-script-event
+             (reply! self (datastar-script-event
                                 (format nil "plOpenPayment(~a)"
                                         (with-output-to-string (s)
                                           (yason:encode (h "flow" (or (gethash "flow" answer) "checkout")
@@ -2883,7 +2989,7 @@ key minted for it."
                                                                            (credits-for-amount amount) (dollars amount) (pot)))
                                                         s))))))
             ((stringp url)
-             (sheet-send! self (datastar-script-event
+             (reply! self (datastar-script-event
                                 (format nil "try{localStorage.setItem('prompt-lab-wallet',~a)}catch(e){};location.href=~a"
                                         (js-string-literal (or (session-wallet session) ""))
                                         (js-string-literal url)))))
