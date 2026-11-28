@@ -238,6 +238,23 @@ here (*deploy-front* nil); with BASE its doors are asked over HTTP."
                             (eql 404 (nth-value 1 (%cli-test-ask :post (format nil "~a~a/api/cli/file" base *url-prefix*)
                                                                 :bearer "pltok_00000000000000000000000000000000"
                                                                 :json (h "name" name "file" "a.jpg" "data" "/9j/"))))))))
+               (flet ((payload (n bytes)
+                        (coerce (loop for i from 1 to n
+                                      collect (h "name" (format nil "f~2,'0d.txt" i)
+                                                 "data" (uiop:symbol-call :cl-base64 :usb8-array-to-base64-string
+                                                                          (make-array bytes :element-type '(unsigned-byte 8)
+                                                                                            :initial-element 65))))
+                                'vector)))
+                 (check "caps: a deployment carries 24 files"
+                        (= 24 (length (decode-deploy-files (payload 24 10)))))
+                 (check "caps: 25 files are refused"
+                        (multiple-value-bind (files why) (decode-deploy-files (payload 25 10))
+                          (and (null files) (search "at most 24" why))))
+                 (check "caps: 24 files of 10,000,000 bytes in all"
+                        (= 24 (length (decode-deploy-files (payload 24 416666)))))
+                 (check "caps: more than 10,000,000 bytes in all are refused"
+                        (multiple-value-bind (files why) (decode-deploy-files (payload 2 5000001))
+                          (and (null files) (search "in all" why)))))
                (check "an asset is never the agent's"
                       (progn (note-asset! session "sky.jpg")
                              (notany #'(lambda (block) (search "sky.jpg" (encode block))) (pending-attachments session)))))

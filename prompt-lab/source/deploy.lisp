@@ -1220,9 +1220,11 @@ front: a vector of {name, data}, the bytes in base64."
                   (session-files session))
           'vector))
 
-(defparameter *deploy-files-caps* '(:files 10 :total 8000000)
-  "Plist. The most uploaded files a deployment carries, and their bytes in
-all: a session's paid upload caps (*upload-caps*).")
+(defparameter *deploy-files-caps* '(:files 24 :total 10000000)
+  "Plist. The most files a deployment carries, and their bytes in all.  The
+command line's file door counts against these; a session's own uploads,
+which a deploy from the sheet carries, stay under its upload caps
+(*upload-caps*).  The bytes, base64, must fit the front's deploy door.")
 
 (defun decode-deploy-files (files)
   "FILES, as deploy-files-payload sends them.  Values: a list of (name .
