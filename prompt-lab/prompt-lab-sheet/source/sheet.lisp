@@ -610,7 +610,9 @@ function $(id){return document.getElementById(id)}
 function show(id,on){var e=$(id);if(e)e.style.display=on?'':'none'}
 function loadStripe(){if(window.Stripe)return Promise.resolve();return new Promise(function(ok,no){var s=document.createElement('script');s.src='https://js.stripe.com/v3/';s.async=true;s.onload=ok;s.onerror=function(){no(new Error('Stripe.js did not load'))};document.head.appendChild(s)})}
 function tokenHex(name,fallback){try{var v=getComputedStyle(document.documentElement).getPropertyValue(name).trim();var c=document.createElement('canvas');c.width=c.height=1;var g=c.getContext('2d');g.fillStyle='#010203';g.fillStyle=v;if(!v||g.fillStyle==='#010203')return fallback;g.fillRect(0,0,1,1);var p=g.getImageData(0,0,1,1).data;return '#'+[p[0],p[1],p[2]].map(function(n){return('0'+n.toString(16)).slice(-2)}).join('')}catch(e){return fallback}}
-window.plAction=function(fn,signals){return fetch('/gdlAction?iid='+encodeURIComponent(window.plIid)+'&fn='+fn,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(signals||{})})};
+window.plAction=function(fn,signals){var s={},k;for(k in (signals||{}))s[k]=signals[k];
+ if(!('owner' in s)){try{var id=new URLSearchParams(location.search).get('session'),o=JSON.parse(localStorage.getItem('prompt-lab-owners')||'{}')||{};if(id&&o[id])s.owner=o[id]}catch(e){}}
+ return fetch('/gdlAction?iid='+encodeURIComponent(window.plIid)+'&fn='+fn,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(s)})};
 window.plClosePayment=function(){if(embedded){try{embedded.destroy()}catch(e){}embedded=null}if(card){try{card.destroy()}catch(e){}card=null}show('pl-pay',false);show('pl-card-pay',false);$('pl-card-error').textContent='';$('pl-checkout').innerHTML='';$('pl-card-line').innerHTML=''};
 window.plMoreOptions=function(){if(last)plAction('topup-full',{amount:last.amount})};
 window.plOpenPayment=function(r){last=r;plClosePayment();
@@ -653,8 +655,12 @@ slots and children are its own.")
 first build opens one."
     session nil :settable)
    ("The key this browser proved it holds (the claim action), or the one a
-build minted here."
+build minted here.  It decides what the page shows; an action asks the key
+its own request carries (request-owner?)."
     owner-key nil :settable)
+   ("The request that opened the session shown, in its own action: the one
+request whose owner key was minted after it was sent (request-owner?)."
+    minted-for nil :settable)
    ("Integer. Bumped at every change to the session (sheets-hear): what the
 log, status, credits and downloads sections are recomputed from."
     revision 0 :settable)
@@ -2148,7 +2154,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                           (ignore-errors (set-session-kind! (the session) kind))))
                       (when (and (the session) (terms-required? :build))
                         (accept-terms! :build :session (the session) :address address :via "sheet, save")))))
-              ((not (the owner?)) (the (tell-error! "Only the session's owner may save the model file.")))
+              ((not (the (request-owner? signals))) (the (tell-error! "Only the session's owner may save the model file.")))
               ((not (claim! (the session))) (the (tell-error! "Wait for the agent to finish first.")))
               (t (let ((session (the session)))
                    (multiple-value-bind (blocks error?)
@@ -2274,7 +2280,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     ;; the owner closes the session to watchers, or opens it again
     (let ((session (the session))
           (private? (eq (gethash "private" signals) t)))
-      (if (not (the owner?))
+      (if (not (the (request-owner? signals)))
           (the (tell-error! "Only the session's owner may change that."))
           (multiple-value-bind (ok? reason) (set-privacy! session private?)
             (cond (ok?
@@ -2299,7 +2305,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
           (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
       (multiple-value-bind (id reason) (mint-author! token (client-address *datastar-request*))
         (cond (id
-               (when (and session (the owner?) (null (session-wallet session)))
+               (when (and session (the (request-owner? signals)) (null (session-wallet session)))
                  (setf (session-wallet session) id)
                  (save-session! session))
                (sheet-send! self
@@ -2322,7 +2328,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     (let* ((address (client-address *datastar-request*))
            (wallet (gethash "wallet" signals))
            (new? (null (the session))))
-      (cond ((and (the session) (not (the owner?)))
+      (cond ((and (the session) (not (the (request-owner? signals))))
              (the (tell-error! "This session is someone else's; start your own.")))
             ((not (own-agent-offered? (if (the session) (session-wallet (the session)) wallet)))
              (the (tell-error! "Your own agent can build here under an author key: get one on this page first.")))
@@ -2347,10 +2353,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
 
    (mcp-token-new
     (signals)
-    (declare (ignore signals))
     ;; a new MCP token for the session's own agent; the old one stops working
     (let ((session (the session)))
-      (cond ((not (and session (the owner?) (own-agent? session)))
+      (cond ((not (and session (the (request-owner? signals)) (own-agent? session)))
              (the (tell-error! "This is no session of yours run by your own agent.")))
             (t (mint-mcp-token! session)
                (log-event session :note "A new MCP token was made for this session; the old one no longer works.")
@@ -2359,10 +2364,9 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
 
    (agent-mode
     (signals)
-    (declare (ignore signals))
     ;; back to the lab's own agent for this session
     (let ((session (the session)))
-      (cond ((not (and session (the owner?)))
+      (cond ((not (and session (the (request-owner? signals))))
              (the (tell-error! "This is no session of yours.")))
             (t (set-own-agent! session nil)
                (log-event session :note "This session is built by the lab's agent again.")
@@ -2421,6 +2425,19 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
                                (with-output-to-string (s)
                                  (yason:encode (h "aname" (or (author-name wallet) "")) s))))))))
 
+   ("Boolean. Whether the action in hand comes from the session's owner: the
+owner key its own SIGNALS carry, or -- for the request that opened the
+session (own-session!), which could not carry a key not yet minted -- the
+key minted for it."
+    request-owner?
+    (signals)
+    (let ((session (the session)))
+      (and session
+           (or (owner? session (and (hash-table-p signals) (gethash "owner" signals)))
+               (and (the minted-for) (eq (the minted-for) *datastar-request*)
+                    (owner? session (the owner-key))))
+           t)))
+
    (own-session!
     (address wallet &optional closed?)
     ;; the session of a visitor who has none yet, opened for this sheet
@@ -2432,6 +2449,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
           (cond (session
                  (the (set-slot! :session session))
                  (the (set-slot! :owner-key (session-owner session)))
+                 (the (set-slot! :minted-for *datastar-request*))
                  (watch-session! self session)
                  (sheet-send! self (datastar-script-event (owners-script session))
                               (datastar-signals-event
@@ -2498,7 +2516,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     (let ((address (client-address *datastar-request*))
           (prompt (gethash "prompt" signals))
           (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
-      (cond ((and (the session) (not (the owner?)))
+      (cond ((and (the session) (not (the (request-owner? signals))))
              (the (tell-error! "This session is someone else's; start your own to build.")))
             ;; the clickwrap (guards.lisp), before a session is opened for nothing
             ((and (terms-required? :build) (not (eq (gethash "tagree" signals) t))
@@ -2551,7 +2569,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
           (address (client-address *datastar-request*))
           (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
       (cond ((not *visitor-edits?*) (the (tell-error! *visitor-edits-text*)))
-            ((or (null session) (not (the owner?)))
+            ((or (null session) (not (the (request-owner? signals))))
              (the (tell-error! "Only the session's owner may ask for a review of its edits.")))
             ((session-busy? session)
              (the (tell-error! "Wait for the agent to finish first.")))
@@ -2580,7 +2598,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     (let ((session (the session))
           (address (client-address *datastar-request*))
           (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
-      (if (not (the owner?))
+      (if (not (the (request-owner? signals)))
           (the (tell-error! "Only the session's owner may deploy it."))
           (multiple-value-bind (ok? reason) (topup-check! session token address)
             (if (not ok?)
@@ -2617,7 +2635,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
           (email (gethash "dpayee" signals))
           (address (client-address *datastar-request*))
           (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
-      (cond ((not (the owner?)) (the (tell-error! "Only the session's owner may set up payouts.")))
+      (cond ((not (the (request-owner? signals))) (the (tell-error! "Only the session's owner may set up payouts.")))
             ((not (eq *toll-provider* :stripe)) (the (tell-error! "This lab takes no card payments yet.")))
             ((not (and (stringp email) (find #\@ email) (> (length email) 5)))
              (the (tell-error! "Type your email address first.")))
@@ -2652,7 +2670,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
           (session (the session)))
       (cond ((not (projects-offered?)) (the (tell-error! "This lab opens no projects.")))
             ((the archive-id) (the (tell-error! "An archived session opens no project.")))
-            ((and session (not (the owner?)))
+            ((and session (not (the (request-owner? signals))))
              (the (tell-error! "This session is someone else's; start your own to open a project.")))
             ((and session (not (project-session? session))
                   (or (model-defined? session) (app-defined? session)))
@@ -2678,7 +2696,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     ;; the project's changes staged at the git gate; the visitor approves
     ;; the push on the gate's page ($pushurl), signed in with GitLab there
     (let ((session (and signals (the session))))
-      (cond ((not (and session (the owner?)))
+      (cond ((not (and session (the (request-owner? signals))))
              (the (tell-error! "Only the session's owner may push its changes.")))
             ((session-busy? session)
              (the (tell-error! "The agent is at work; push when it is done.")))
@@ -2697,7 +2715,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     ;; hosting the project's default branch (hosting.lisp): staged at the
     ;; git gate, approved there by a Maintainer of the project ($hosturl)
     (let ((session (and signals (the session))))
-      (cond ((not (and session (the owner?)))
+      (cond ((not (and session (the (request-owner? signals))))
              (the (tell-error! "Only the session's owner may ask to host its project.")))
             ((session-busy? session)
              (the (tell-error! "The agent is at work; ask when it is done.")))
@@ -2714,7 +2732,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (undeploy
     (signals)
     (let* ((session (and signals (the session)))
-           (record (and session (the owner?) (session-deployment session))))
+           (record (and session (the (request-owner? signals)) (session-deployment session))))
       (if (null record)
           (the (tell-error! "This session has no deployment of yours to take down."))
           (multiple-value-bind (ok? reason) (undeploy! (gethash "name" record) (session-owner session))
@@ -2729,7 +2747,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cli-token
     (signals)
     (let ((name (gethash "cliname" signals)))
-      (if (not (and (the session) (the owner?)))
+      (if (not (and (the session) (the (request-owner? signals))))
           (the (tell-error! "Only the session's owner may make a command-line token."))
           (multiple-value-bind (answer status) (cli-token-ask! "make" name)
             (if (and (eql status 200) answer (stringp (gethash "token" answer)))
@@ -2751,7 +2769,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
    (cli-revoke
     (signals)
     (let ((name (gethash "cliname" signals)))
-      (if (not (and (the session) (the owner?)))
+      (if (not (and (the session) (the (request-owner? signals))))
           (the (tell-error! "Only the session's owner may revoke a command-line token."))
           (multiple-value-bind (answer status) (cli-token-ask! "revoke" name)
             (if (eql status 200)
@@ -2791,7 +2809,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     (let ((address (client-address *datastar-request*))
           (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
       (cond ((the archive-id) (the (no-files! "An archived session takes no uploads.")))
-            ((and (the session) (not (the owner?)))
+            ((and (the session) (not (the (request-owner? signals))))
              (the (no-files! "This session is someone else's; start your own to upload.")))
             ;; a file is public with its session, and that is acknowledged
             ;; first -- unless the session is closed-source or its author trusted
@@ -2816,7 +2834,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     (let ((address (client-address *datastar-request*))
           (token (let ((token (gethash "turnstile" signals))) (and (stringp token) (plusp (length token)) token))))
       (cond ((the archive-id) (the (no-files! "An archived session takes no uploads.")))
-            ((and (the session) (not (the owner?)))
+            ((and (the session) (not (the (request-owner? signals))))
              (the (no-files! "This session is someone else's; start your own to upload.")))
             ((not (eq (gethash "rights" signals) t))
              (the (no-files! "Tick the box first: you declare the right to use and share the files.")))
@@ -2875,7 +2893,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     ;; line was opened for; the human check that opened it covers this
     (let ((session (the session))
           (amount (gethash "amount" signals)))
-      (cond ((not (the owner?)) (the (tell-error! (unit-text "Only the session's owner may add {units} here."))))
+      (cond ((not (the (request-owner? signals))) (the (tell-error! (unit-text "Only the session's owner may add {units} here."))))
             ((not (integerp amount)) (the (tell-error! "Say how much.")))
             (t (multiple-value-bind (ok? reason)
                    (topup-check! session nil (client-address *datastar-request*))
@@ -2889,7 +2907,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     (let ((session (the session))
           (checkout (gethash "checkout" signals))
           (wallet (gethash "wallet" signals)))
-      (cond ((not (the owner?)) (the (tell-error! "Only the session's owner may confirm a payment.")))
+      (cond ((not (the (request-owner? signals))) (the (tell-error! "Only the session's owner may confirm a payment.")))
             ((not (and (stringp checkout) (plusp (length checkout)) (wallet-id? wallet)))
              (the (tell-error! "The payment could not be confirmed: no checkout named.")))
             (t (multiple-value-bind (outcome text) (confirm-topup! session wallet checkout)
@@ -2912,7 +2930,7 @@ if(l&&l.session&&o[l.session])location.replace(~a+encodeURIComponent(l.session))
     (let ((address (client-address *datastar-request*))
           (amount (gethash "amount" signals))
           (token (gethash "turnstile" signals)))
-      (cond ((and (the session) (not (the owner?)))
+      (cond ((and (the session) (not (the (request-owner? signals))))
              (the (tell-error! (unit-text "This session is someone else's; start your own to add {units}."))))
             ((not (integerp amount)) (the (tell-error! "Say how much.")))
             ;; what the pot can hold is said only here, to someone whose
